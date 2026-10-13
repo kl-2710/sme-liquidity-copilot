@@ -1,0 +1,5 @@
+openai>=1.40.0
+python-dotenv>=1.0.1
+pydantic>=2.0.0
+openpyxl>=3.1.5
+pytest>=8.0.0
