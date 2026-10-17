@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lilact · SME Liquidity Copilot</title>
+  <meta name="description" content="Lilact — SME Liquidity Copilot: chẩn đoán vốn lưu động, dự báo thiếu dư tiền, so khớp giải pháp và thử phương án có duyệt. Bản demo frontend với dữ liệu minh họa.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="assets/brand/lilact-favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/brand/lilact-favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="assets/brand/lilact-app-icon-180.png">
+  <link rel="stylesheet" href="css/lilact-tokens.css">
+  <link rel="stylesheet" href="css/lilact.css">
+  <link rel="stylesheet" href="css/app.css">
+  <!-- theme.js must run before first paint (no defer) -->
+  <script src="js/theme.js"></script>
+</head>
+<body>
+<a class="la-skip" href="#workspace">Bỏ qua điều hướng</a>
+<div class="lc-app la-app">
+  <aside class="lc-sidebar la-sidebar" id="sidebar" aria-label="Điều hướng chính">
+    <a class="la-logo" href="#/uc00" aria-label="Lilact · SME Liquidity Copilot, về trang dữ liệu">
+      <img class="la-logo--light" src="assets/brand/lilact-logo-horizontal-light.svg" alt="" width="111" height="40">
+      <img class="la-logo--dark" src="assets/brand/lilact-logo-horizontal-dark.svg" alt="" width="111" height="40">
+      <span class="la-descriptor">SME Liquidity Copilot</span>
+    </a>
+    <div class="lc-field">
+      <label class="lc-label" for="firm">Doanh nghiệp</label>
+      <select class="lc-input la-select" id="firm"></select>
+    </div>
+    <nav class="lc-sidebar__section" aria-label="Các bước">
+      <div class="lc-overline la-overline">Luồng phân tích</div>
+      <div id="nav"></div>
+    </nav>
+    <div class="lc-sidebar__bottom">
+      <div class="lc-card la-ctx" id="ctxcard" aria-live="polite"></div>
+      <div class="lc-theme-switch" role="group" aria-label="Giao diện">
+        <button type="button" data-theme-set="light" aria-pressed="false">Sáng</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">Tối</button>
+        <button type="button" data-theme-set="system" aria-pressed="true">Hệ thống</button>
+      </div>
+    </div>
+  </aside>
+  <div class="la-scrim" data-action="menu" aria-hidden="true"></div>
+  <main class="lc-main">
+    <header class="lc-header la-header">
+      <button type="button" class="lc-btn lc-btn--tertiary la-menu" data-action="menu" aria-controls="sidebar" aria-expanded="false" aria-label="Mở điều hướng">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="la-header__titles">
+        <h1 id="page-title" tabindex="-1">Lilact</h1>
+        <div class="la-header__meta" id="page-meta"></div>
+      </div>
+      <span class="lc-badge lc-badge--neutral la-demo-badge" title="Số liệu là dữ liệu thử nghiệm hư cấu, xuất từ engine UC01/UC02; phần định tuyến, Task 3, Task 4 là quy tắc demo">Dữ liệu minh họa</span>
+    </header>
+    <div class="la-content" id="workspace" tabindex="-1">
+      <noscript><p>Lilact cần JavaScript để chạy bản demo này.</p></noscript>
+    </div>
+    <footer class="la-footer">
+      Lilact không tự thực hiện giao dịch. Mọi bản nháp phải được người có quyền duyệt; trong bản demo, thực thi chỉ là giả lập. Số liệu là dữ liệu thử nghiệm hư cấu.
+    </footer>
+  </main>
+</div>
+<aside class="la-drawer" id="drawer" hidden role="dialog" aria-modal="false" aria-labelledby="drawer-title">
+  <header class="la-drawer__head">
+    <h2 id="drawer-title" tabindex="-1">Bằng chứng</h2>
+    <button type="button" class="lc-btn lc-btn--tertiary" data-close aria-label="Đóng bảng bằng chứng">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </header>
+  <div class="la-drawer__body"></div>
+</aside>
+<div class="la-toasts" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Data: real engine exports (generated, see docs/FRONTEND.md) and clearly labelled demo inputs -->
+<script src="data/engine/F01.js"></script>
+<script src="data/engine/F02.js"></script>
+<script src="data/engine/F03.js"></script>
+<script src="data/demo/catalogue.js"></script>
+<script src="data/demo/policy.js"></script>
+<script src="data/demo/intake.js"></script>
+<!-- Rules (pure, unit-tested with node --test) -->
+<script src="js/rules/ledger.js"></script>
+<script src="js/rules/router.js"></script>
+<script src="js/rules/classify.js"></script>
+<script src="js/rules/explain.js"></script>
+<script src="js/rules/scenario.js"></script>
+<script src="js/rules/uc03_match.js"></script>
+<script src="js/rules/uc04_simulate.js"></script>
+<script src="js/rules/intake_check.js"></script>
+<!-- Presentation -->
+<script src="js/format.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/state.js"></script>
+<script src="js/views/uc00.js"></script>
+<script src="js/views/uc01.js"></script>
+<script src="js/views/uc02.js"></script>
+<script src="js/views/uc03.js"></script>
+<script src="js/views/uc04.js"></script>
+<script src="js/views/log.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
