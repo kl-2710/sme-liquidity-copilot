@@ -16,8 +16,41 @@
   <script src="js/theme.js"></script>
 </head>
 <body>
-<a class="la-skip" href="#workspace">Bỏ qua điều hướng</a>
-<div class="lc-app la-app">
+<a class="la-skip" href="#auth-title">Bỏ qua điều hướng</a>
+<main class="la-auth" id="auth-screen">
+  <section class="la-auth__card" aria-labelledby="auth-title">
+    <a class="la-auth__brand" href="#auth-screen" aria-label="Lilact">
+      <img class="la-logo--light" src="assets/brand/lilact-logo-horizontal-light.svg" alt="Lilact" width="111" height="40">
+      <img class="la-logo--dark" src="assets/brand/lilact-logo-horizontal-dark.svg" alt="Lilact" width="111" height="40">
+      <span>SME Liquidity Copilot</span>
+    </a>
+    <p class="la-auth__eyebrow">QUẢN LÝ THANH KHOẢN DOANH NGHIỆP</p>
+    <h1 id="auth-title">Chào mừng trở lại</h1>
+    <p class="la-auth__intro">Đăng nhập để tiếp tục với không gian làm việc Lilact.</p>
+    <div class="la-auth__switch" role="group" aria-label="Chọn màn hình">
+      <button type="button" data-auth-view="login" aria-pressed="true">Đăng nhập</button>
+      <button type="button" data-auth-view="register" aria-pressed="false">Tạo tài khoản</button>
+    </div>
+    <form class="la-auth__form" id="login-form" novalidate>
+      <div class="la-auth__field"><label for="login-email">Email</label><input class="lc-input" id="login-email" name="email" type="email" autocomplete="email" required placeholder="ten@congty.vn"><small class="la-auth__field-error" data-error-for="login-email"></small></div>
+      <div class="la-auth__field"><label for="login-password">Mật khẩu</label><div class="la-auth__password"><input class="lc-input" id="login-password" name="password" type="password" autocomplete="current-password" required><button type="button" class="la-auth__reveal" data-toggle-password="login-password" aria-label="Hiện mật khẩu">Hiện</button></div><small class="la-auth__field-error" data-error-for="login-password"></small></div>
+      <button class="lc-btn lc-btn--primary la-auth__submit" type="submit">Đăng nhập</button>
+      <p class="la-auth__message" id="login-message" role="status" aria-live="polite"></p>
+    </form>
+    <form class="la-auth__form" id="register-form" hidden novalidate>
+      <div class="la-auth__field"><label for="register-email">Email</label><input class="lc-input" id="register-email" name="email" type="email" autocomplete="email" required placeholder="ten@congty.vn"><small class="la-auth__field-error" data-error-for="register-email"></small></div>
+      <div class="la-auth__field"><label for="register-password">Mật khẩu</label><div class="la-auth__password"><input class="lc-input" id="register-password" name="password" type="password" autocomplete="new-password" required><button type="button" class="la-auth__reveal" data-toggle-password="register-password" aria-label="Hiện mật khẩu">Hiện</button></div><small class="la-auth__field-error" data-error-for="register-password"></small></div>
+      <div class="la-auth__field"><label for="register-confirm">Nhập lại mật khẩu</label><input class="lc-input" id="register-confirm" name="confirm" type="password" autocomplete="new-password" required><small class="la-auth__field-error" data-error-for="register-confirm"></small></div>
+      <button class="lc-btn lc-btn--primary la-auth__submit" type="submit">Tạo tài khoản</button>
+      <p class="la-auth__message" id="register-message" role="status" aria-live="polite"></p>
+    </form>
+    <div class="la-auth__notice"><strong>Lưu ý:</strong> Xác thực thật và đặt lại mật khẩu hiện chưa được hỗ trợ. Biểu mẫu này không tạo tài khoản và không lưu mật khẩu.</div>
+    <div class="la-auth__divider"><span>hoặc</span></div>
+    <button type="button" class="lc-btn lc-btn--secondary la-auth__demo" data-enter-demo>Tiếp tục vào bản demo</button>
+    <p class="la-auth__demo-note">Dùng dữ liệu minh họa để khám phá luồng UC00–UC04.</p>
+  </section>
+</main>
+<div class="lc-app la-app" id="demo-app" hidden>
   <aside class="lc-sidebar la-sidebar" id="sidebar" aria-label="Điều hướng chính">
     <a class="la-logo" href="#/uc00" aria-label="Lilact · SME Liquidity Copilot, về trang dữ liệu">
       <img class="la-logo--light" src="assets/brand/lilact-logo-horizontal-light.svg" alt="" width="111" height="40">
@@ -99,6 +132,7 @@
 <script src="js/views/uc03.js"></script>
 <script src="js/views/uc04.js"></script>
 <script src="js/views/log.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

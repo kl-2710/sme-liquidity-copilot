@@ -31,11 +31,50 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 const text = async () => page.locator("#workspace").innerText();
-const go = async (v) => { await page.goto(URL0 + "#/" + v); await page.waitForSelector("#workspace > *"); };
+const go = async (v) => {
+  await page.goto(URL0 + "#/" + v);
+  if (await page.locator("#auth-screen").isVisible()) await page.locator("[data-enter-demo]").click();
+  await page.waitForSelector("#workspace > *");
+};
 
+await page.goto(URL0);
+await step("auth screens switch, validate and expose the demo without authentication", async () => {
+  assert.equal(await page.locator("#login-form").isVisible(), true);
+  assert.equal(await page.locator("#demo-app").isVisible(), false);
+  await page.locator("#login-form button[type=submit]").click();
+  assert.match(await page.locator('[data-error-for="login-email"]').innerText(), /email/i);
+  await page.locator('[data-auth-view="register"]').click();
+  assert.equal(await page.locator("#register-form").isVisible(), true);
+  await page.fill("#register-email", "bad-email");
+  await page.fill("#register-password", "short");
+  await page.fill("#register-confirm", "different");
+  await page.locator("#register-form button[type=submit]").click();
+  assert.match(await page.locator('[data-error-for="register-email"]').innerText(), /định dạng/i);
+  assert.match(await page.locator('[data-error-for="register-password"]').innerText(), /8 ký tự/i);
+  assert.match(await page.locator('[data-error-for="register-confirm"]').innerText(), /khớp/i);
+  await page.fill("#register-email", "demo@example.com");
+  await page.fill("#register-password", "password123");
+  await page.fill("#register-confirm", "password123");
+  await page.locator("#register-form button[type=submit]").click();
+  assert.match(await page.locator("#register-message").innerText(), /chưa được hỗ trợ/i);
+  assert.equal(await page.locator("#demo-app").isVisible(), false);
+  await page.locator('[data-toggle-password="register-password"]').click();
+  assert.equal(await page.locator("#register-password").getAttribute("type"), "text");
+  await page.locator('[data-auth-view="login"]').click();
+  await page.fill("#login-email", "demo@example.com");
+  await page.fill("#login-password", "password123");
+  await page.locator("#login-form button[type=submit]").click();
+  assert.match(await page.locator("#login-message").innerText(), /Bạn chưa đăng nhập/i);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth <= 1));
+  await page.locator("[data-enter-demo]").click();
+  assert.equal(await page.locator("#demo-app").isVisible(), true);
+  assert.equal(await page.locator("#auth-screen").isVisible(), false);
+});
 await go("uc00");
 await page.evaluate(() => localStorage.clear());
 await page.reload();
+await page.locator("[data-enter-demo]").click();
 
 await step("tasks are locked with a reason before UC00 confirmation", async () => {
   await go("uc02");
@@ -155,7 +194,8 @@ await step("changing thresholds after confirmation marks the old bundle stale", 
 });
 await step("keyboard: skip link and visible focus ring", async () => {
   await go("uc01");
-  await page.reload(); await page.waitForSelector("#workspace > *");
+  await page.reload(); await page.locator("[data-enter-demo]").click(); await page.waitForSelector("#workspace > *");
+  await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press("Tab");
   assert.equal(await page.evaluate(() => document.activeElement.className), "la-skip", await page.evaluate(() => document.activeElement.outerHTML.slice(0, 80)));
   await page.keyboard.press("Tab");
