@@ -222,9 +222,8 @@ code { font: var(--lc-type-code); font-size: 12.5px; color: var(--lc-color-text-
 .la-auth__eyebrow { margin: 0 0 8px; color: var(--lc-color-text-link); font: var(--lc-type-overline); letter-spacing: .06em; }
 .la-auth__card h1 { margin: 0; font: var(--lc-type-h2); color: var(--lc-color-text-primary); }
 .la-auth__intro { margin: 8px 0 22px; color: var(--lc-color-text-secondary); }
-.la-auth__switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 20px; border-radius: var(--lc-radius-md); background: var(--lc-color-bg-subtle); }
-.la-auth__switch button { border: 0; border-radius: var(--lc-radius-sm); background: transparent; color: var(--lc-color-text-secondary); font: var(--lc-type-label); padding: 9px; cursor: pointer; }
-.la-auth__switch button[aria-pressed="true"] { color: var(--lc-color-text-primary); background: var(--lc-color-bg-surface); box-shadow: var(--lc-shadow-sm); }
+.la-auth__switch { margin: 16px 0 0; text-align: center; color: var(--lc-color-text-secondary); font: var(--lc-type-body-sm); }
+.la-auth__switch a { color: var(--lc-color-text-link); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .la-auth__form { display: flex; flex-direction: column; gap: 16px; }
 .la-auth__field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .la-auth__field label { font: var(--lc-type-label); color: var(--lc-color-text-primary); }
@@ -234,7 +233,7 @@ code { font: var(--lc-type-code); font-size: 12.5px; color: var(--lc-color-text-
 .la-auth__reveal { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: var(--lc-color-text-link); font: var(--lc-type-label); padding: 6px; cursor: pointer; }
 .la-auth__field-error { min-height: 0; color: var(--lc-color-status-error); font: var(--lc-type-caption); }
 .la-auth__field-error:not(:empty) { min-height: 16px; }
-.la-auth__submit, .la-auth__demo { width: 100%; justify-content: center; min-height: 44px; }
+.la-auth__submit, .la-auth__demo { width: 100%; justify-content: center; min-height: 44px; text-align: center; }
 .la-auth__message { margin: 0; color: var(--lc-color-status-error); font: var(--lc-type-body-sm); }
 .la-auth__notice { margin-top: 18px; padding: 11px 12px; border: 1px solid var(--lc-color-border-default); border-radius: var(--lc-radius-md); background: var(--lc-color-bg-subtle); color: var(--lc-color-text-secondary); font: var(--lc-type-caption); }
 .la-auth__notice strong { color: var(--lc-color-text-primary); }

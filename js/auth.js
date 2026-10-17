@@ -6,9 +6,8 @@
     if (!login || !register) return;
     var isRegister = name === "register";
     login.hidden = isRegister; register.hidden = !isRegister;
-    document.querySelectorAll("[data-auth-view]").forEach(function (button) {
-      button.setAttribute("aria-pressed", String(button.getAttribute("data-auth-view") === name));
-    });
+    document.getElementById("login-register-link").hidden = isRegister;
+    document.getElementById("register-login-link").hidden = !isRegister;
     document.getElementById("auth-title").textContent = isRegister ? "Tạo tài khoản Lilact" : "Chào mừng trở lại";
     document.querySelector(".la-auth__intro").textContent = isRegister ? "Tạo tài khoản để bắt đầu quản lý thanh khoản doanh nghiệp." : "Đăng nhập để tiếp tục với không gian làm việc Lilact.";
     document.getElementById(isRegister ? "register-email" : "login-email").focus();
@@ -30,7 +29,12 @@
   }
   document.addEventListener("click", function (event) {
     var view = event.target.closest("[data-auth-view]");
-    if (view) setView(view.getAttribute("data-auth-view"));
+    if (view) {
+      event.preventDefault();
+      var nextView = view.getAttribute("data-auth-view");
+      setView(nextView);
+      history.pushState(null, "", nextView === "register" ? "#register" : "#login");
+    }
     var reveal = event.target.closest("[data-toggle-password]");
     if (reveal) {
       var input = document.getElementById(reveal.getAttribute("data-toggle-password")), show = input.type === "password";
@@ -44,6 +48,13 @@
       if (!location.hash || !/^#\/(uc00|uc01|uc02|uc03|uc04|log)$/.test(location.hash)) location.hash = "#/uc00";
       var title = document.getElementById("page-title"); if (title) title.focus({ preventScroll: true });
     }
+  });
+  window.addEventListener("popstate", function () {
+    if (location.hash !== "" && location.hash !== "#login" && location.hash !== "#register") return;
+    document.getElementById("auth-screen").hidden = false;
+    document.getElementById("demo-app").hidden = true;
+    document.querySelector(".la-skip").setAttribute("href", "#auth-title");
+    setView(location.hash === "#register" ? "register" : "login");
   });
   document.addEventListener("submit", function (event) {
     var form = event.target;

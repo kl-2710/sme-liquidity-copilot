@@ -41,10 +41,13 @@ await page.goto(URL0);
 await step("auth screens switch, validate and expose the demo without authentication", async () => {
   assert.equal(await page.locator("#login-form").isVisible(), true);
   assert.equal(await page.locator("#demo-app").isVisible(), false);
+  assert.equal(await page.locator("#login-register-link").innerText(), "Chưa có tài khoản? Đăng ký");
   await page.locator("#login-form button[type=submit]").click();
   assert.match(await page.locator('[data-error-for="login-email"]').innerText(), /email/i);
   await page.locator('[data-auth-view="register"]').click();
   assert.equal(await page.locator("#register-form").isVisible(), true);
+  assert.equal(await page.locator("#register-login-link").innerText(), "Đã có tài khoản? Đăng nhập");
+  assert.equal(await page.locator("#login-register-link").isVisible(), false);
   await page.fill("#register-email", "bad-email");
   await page.fill("#register-password", "short");
   await page.fill("#register-confirm", "different");
@@ -67,6 +70,7 @@ await step("auth screens switch, validate and expose the demo without authentica
   assert.match(await page.locator("#login-message").innerText(), /Bạn chưa đăng nhập/i);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth <= 1));
+  assert.equal(await page.locator("[data-enter-demo]").innerText(), "Trải nghiệm bản demo không cần tài khoản");
   await page.locator("[data-enter-demo]").click();
   assert.equal(await page.locator("#demo-app").isVisible(), true);
   assert.equal(await page.locator("#auth-screen").isVisible(), false);
