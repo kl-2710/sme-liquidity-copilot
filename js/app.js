@@ -5,12 +5,12 @@
   var view = { tab01: null, scenario02: "base", draftPolicy: null, policyErrors: null, lastSim: null };
 
   var NAV = [
-    { id: "uc00", code: "UC00", title: "Dữ liệu", long: "Tiếp nhận và xác nhận dữ liệu", icon: "upload" },
-    { id: "uc01", code: "Task 1", title: "Chẩn đoán", long: "Chẩn đoán vốn lưu động", icon: "grid" },
-    { id: "uc02", code: "Task 2", title: "Dự báo", long: "Dự báo thiếu dư và định tuyến", icon: "chart" },
-    { id: "uc03", code: "Task 3", title: "Giải pháp", long: "So khớp giải pháp", icon: "steps" },
-    { id: "uc04", code: "Task 4", title: "Thử & duyệt", long: "Thử phương án và duyệt nháp", icon: "flask" },
-    { id: "log", code: "", title: "Nhật ký", long: "Bundle, kịch bản và nhật ký", icon: "clock" }
+    { id: "uc00", code: "UC00", title: "Data", long: "Data intake & confirmation", icon: "upload" },
+    { id: "uc01", code: "Task 1", title: "Diagnosis", long: "Working capital diagnosis", icon: "grid" },
+    { id: "uc02", code: "Task 2", title: "Forecast", long: "Cash forecast & routing", icon: "chart" },
+    { id: "uc03", code: "Task 3", title: "Solutions", long: "Solution matching", icon: "steps" },
+    { id: "uc04", code: "Task 4", title: "Test & approve", long: "Scenario testing & draft approval", icon: "flask" },
+    { id: "log", code: "", title: "Activity", long: "Bundles, scenarios & audit log", icon: "clock" }
   ];
 
   /** Lock rules mirror the workflow prerequisites; every lock carries the reason and the step that unlocks it. */
@@ -44,14 +44,9 @@
       var badge = locked ? '<span class="la-nav__state" title="' + esc(locked.reason) + '">' + ui.icon("lock", 14) + '<span class="lc-visually-hidden">Đang khóa: ' + esc(locked.reason) + "</span></span>" :
         done ? '<span class="la-nav__state la-nav__state--done">' + ui.icon("check", 14) + '<span class="lc-visually-hidden">Đã xong</span></span>' : "";
       if (n.id === "uc04") { var p = F.drafts.filter(function (d) { return d.status === "pending"; }).length; if (p) badge = '<span class="lc-chip la-count" title="Nháp chờ duyệt">' + p + "</span>" + badge; }
-      return '<a class="lc-nav-item' + (locked ? " is-locked" : "") + '" href="#/' + n.id + '"' + (cur === n.id ? ' aria-current="page"' : "") + ">" + ui.icon(n.icon) +
+      return '<a class="lc-nav-item' + (locked ? " is-locked" : "") + '" href="#/' + n.id + '" title="' + esc(n.long) + '"' + (cur === n.id ? ' aria-current="page"' : "") + ">" + ui.icon(n.icon) +
         '<span class="la-nav__text">' + (n.code ? '<small>' + n.code + "</small>" : "") + esc(n.title) + "</span>" + badge + "</a>";
     }).join("");
-    var b = ctx.bundle;
-    document.getElementById("ctxcard").innerHTML = '<div class="lc-metric__label">Dữ liệu đang dùng</div>' +
-      (b ? '<div class="la-ctx__id">' + esc(b.snapshot_id) + '</div><div class="lc-metric__source">Bundle <code>' + esc(b.id) + "</code> · " + esc(b.policy_version) + "<br>Ngày chốt " + f.date(ctx.engine.uc01.meta.as_of) + "</div>"
-        : '<div class="la-ctx__id">Chưa xác nhận</div><div class="lc-metric__source">Ngày chốt ' + f.date(ctx.engine.uc01.meta.as_of) + "</div>") +
-      '<div class="lc-metric__source">Dữ liệu minh họa · engine ' + esc(ctx.engine.provenance.engine_commit) + "</div>";
   }
 
   function render() {
@@ -63,7 +58,8 @@
     var firmInfo = ctx.engine.firm || {};
     document.getElementById("page-meta").innerHTML = '<span class="la-muted">' + esc(firmInfo.firm_name || st.firm) + "</span>" +
       (ctx.res && ctx.res.route.cell ? ui.chip(ctx.res.route.cell + " · " + ctx.res.route.def.title, "brand") : "") +
-      (ctx.bundle ? ui.chip(ctx.bundle.id, "", ' title="analysis_bundle_id hiện hành"') : ui.badge("neutral", "Chưa xác nhận"));
+      (ctx.bundle ? ui.chip(ctx.bundle.id, "", ' title="Current analysis bundle"') : ui.badge("neutral", "Not confirmed")) +
+      '<span class="la-context-meta">Snapshot: ' + esc(ctx.bundle ? ctx.bundle.snapshot_id : "Pending") + ' · As of ' + esc(f.date(ctx.engine.uc01.meta.as_of)) + ' · Demo engine ' + esc(ctx.engine.provenance.engine_commit) + '</span>';
     var main = document.getElementById("workspace"), html;
     try {
       if (lk[cur]) {
@@ -181,7 +177,23 @@
     }
     if (a === "reject") { var why = (document.getElementById("reason-" + id) || {}).value; var rr = A.reject(id, why); toast(rr.ok ? "Đã từ chối " + id + ". Không có hành động nào được thực hiện." : rr.msg, rr.ok ? "info" : "error"); return; }
     if (a === "reset") { if (root.confirm("Xóa toàn bộ trạng thái demo của doanh nghiệp này?")) { A.resetFirm(); location.hash = "#/uc00"; } return; }
-    if (a === "menu") { document.body.classList.toggle("la-nav-open"); t.setAttribute("aria-expanded", document.body.classList.contains("la-nav-open")); }
+    if (a === "sidebar-toggle") {
+      if (window.matchMedia("(max-width: 900px)").matches) {
+        document.body.classList.toggle("la-nav-open");
+        var open = document.body.classList.contains("la-nav-open");
+        t.setAttribute("aria-expanded", String(open));
+        t.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+        t.title = open ? "Close navigation" : "Open navigation";
+      } else {
+        document.body.classList.toggle("la-sidebar-collapsed");
+        var expanded = !document.body.classList.contains("la-sidebar-collapsed");
+        t.setAttribute("aria-expanded", String(expanded));
+        t.setAttribute("aria-label", expanded ? "Collapse sidebar" : "Expand sidebar");
+        t.title = expanded ? "Collapse sidebar" : "Expand sidebar";
+      }
+      return;
+    }
+    if (a === "menu") { document.body.classList.remove("la-nav-open"); return; }
   }
   function onChange(e) {
     var t = e.target;
