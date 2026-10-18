@@ -1781,7 +1781,10 @@ function setWide(on){
 $('#panelWide').addEventListener('click',()=>setWide(!$('#work').classList.contains('wide')));
 function setSide(open,persist=true){
   $('#app').classList.toggle('side-collapsed',!open);if(persist){PREF.side=open?'open':'closed';try{localStorage.setItem(PK,JSON.stringify(PREF))}catch(e){}}
-  $('#sideToggle').setAttribute('aria-pressed',!open);setTimeout(placeInk,400);
+  $('#sideToggle').setAttribute('aria-pressed',!open);
+  $('#sideToggle').setAttribute('aria-label',open?'Hide sidebar':'Show sidebar');
+  $('#sideToggle').setAttribute('title',(open?'Hide':'Show')+' sidebar (Ctrl+B)');
+  setTimeout(placeInk,400);
 }
 const toggleSideDesk=()=>setSide($('#app').classList.contains('side-collapsed'));
 $('#sideToggle').addEventListener('click',toggleSideDesk);$('#sideFold').addEventListener('click',toggleSideDesk);

@@ -653,7 +653,9 @@ html[data-density=compact] .ft th,html[data-density=compact] .ft td{padding:4px 
 .shell{--pw:clamp(500px,calc(100vw - var(--sbw) - 430px),880px)}
 .side-toggle,.side-fold{display:none}
 @media(min-width:861px){
-  .side-toggle,.side-fold{display:inline-grid}
+  .side-fold{display:inline-grid}
+  .side-toggle{display:none}
+  .shell.side-collapsed .side-toggle,.shell.fs-mode .side-toggle{display:inline-grid}
   .side{transition:width .34s var(--ease),padding .34s var(--ease),opacity .22s,border-color .3s;overflow:hidden}
   .side>*{min-width:250px}
   .shell.side-collapsed,.shell.fs-mode{--sbw:0px}

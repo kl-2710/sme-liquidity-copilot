@@ -50,6 +50,18 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator(".tnav.locked").count(), 3);
     assert.equal(await page.locator(`.side .lilact-logo--${theme}`).isVisible(), true);
   });
+  await step(`[${theme}] one sidebar toggle moves between sidebar and chat header`, async () => {
+    assert.equal(await page.locator("#sideFold").isVisible(), true);
+    assert.equal(await page.locator("#sideToggle").isVisible(), false);
+    await page.locator("#sideFold").click();
+    assert.equal(await page.locator("#app").evaluate((el) => el.classList.contains("side-collapsed")), true);
+    assert.equal(await page.locator("#sideFold").isVisible(), false);
+    assert.equal(await page.locator("#sideToggle").isVisible(), true);
+    assert.equal(await page.locator("#sideToggle").getAttribute("aria-label"), "Show sidebar");
+    await page.locator("#sideToggle").click();
+    assert.equal(await page.locator("#sideFold").isVisible(), true);
+    assert.equal(await page.locator("#sideToggle").isVisible(), false);
+  });
   await step(`[${theme}] Task 1 diagnosis shows DSO/DIO/DPO/CCC`, async () => {
     await ask("Where is my working capital stuck?");
     const t = await last().innerText();
