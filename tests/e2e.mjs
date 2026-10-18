@@ -255,7 +255,7 @@ for (const theme of ["light", "dark"]) {
     await page.click("#dataAddSources");
     await page.locator("#dataFileInput").setInputFiles(Object.entries(SAMPLE_CSV).map(([name, text]) => ({ name, mimeType: "text/csv", buffer: Buffer.from(text) })));
     await page.waitForFunction(() => document.querySelectorAll(".files-table tbody tr").length === 6);
-    assert.match(await page.locator("#dataFiles").innerText(), /Not used: demo data is fixed/);
+    await page.waitForFunction(() => /Not used: demo data is fixed/.test(document.querySelector("#dataFiles").innerText), null, { timeout: 5000 });
     assert.equal(await page.evaluate(() => S.firm), "F01");
     await page.click("#dataAddSources");
     await page.locator("#dataFileInput").setInputFiles({ name: "extra.csv", mimeType: "text/csv", buffer: Buffer.from(SAMPLE_CSV["financials.csv"]) });
