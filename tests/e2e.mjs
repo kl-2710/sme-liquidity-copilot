@@ -81,6 +81,7 @@ await step("desktop sidebar collapses and expands; mobile sidebar opens as a dra
   const drawerToggle = page.locator('.la-menu--drawer-open');
   assert.equal(await toggle.isVisible(), true);
   assert.equal(await drawerToggle.isVisible(), false);
+  await page.locator('[data-theme-set="dark"]').click();
   assert.equal(await page.locator(".la-brand__wordmark:visible").count(), 1);
   assert.equal(await page.locator(".la-brand__symbol:visible").count(), 0);
   await toggle.click();
@@ -99,6 +100,8 @@ await step("desktop sidebar collapses and expands; mobile sidebar opens as a dra
   await toggle.click();
   assert.equal(await page.locator("body").evaluate((el) => el.classList.contains("la-sidebar-collapsed")), false);
   assert.equal(await page.locator(".la-brand__wordmark:visible").count(), 1);
+  assert.equal(await page.locator(".la-brand__symbol:visible").count(), 0);
+  await page.locator('[data-theme-set="system"]').click();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await drawerToggle.isVisible(), true);
   await drawerToggle.click();
