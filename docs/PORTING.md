@@ -17,7 +17,7 @@
 - **Do not run `tools/port_prototype.py` again.** It would regenerate the UI and overwrite this single-flow and Company data work.
 
 ## Kept exactly as in the prototype
-- **Flow and business behaviour:** all screens and their order, the auth flow, chat routing and intents, task unlocking, tool calls and tiers, the calculations, the financing catalogue and ranking, the what-if levers, drafts, approval and rejection dialogs, the audit log, data upload, settings and pins.
+- **Flow and business behaviour:** all screens and their order, the auth flow, chat routing and intents, task unlocking, tool calls and tiers, the calculations, the financing catalogue and ranking, the what-if levers, drafts, approval and rejection dialogs, audit log event collection, data upload, settings and pins.
 - **Data:** the synthetic data (`DATA`) and the scenario presets (`SC`).
 - **Language:** English UI text.
 
@@ -34,3 +34,8 @@
 ## Text and bug fixes
 - **Mixed-language strings:** a few leftover Vietnamese strings in an otherwise English UI were translated: "Mọi draft(s) phải được you duyệt…", "…để đưa on hàng chờ, then duyệt…", the "Ra" (out) label in the chart tooltip, the "before / sau" heading and the "Xong" button.
 - **Missing function:** `botNote()` was called after an approval, and on chat errors, but was never defined. That threw a ReferenceError and the confirmation message never appeared in the chat. It is now defined with the prototype's own `newBot`, `say` and `suggestRow` helpers.
+
+
+## Single chat workspace updates
+
+The interface hides the audit log while keeping `addLog` and its in-memory events. Scenario selection is fixed by `defCase`. Chat history is stored in this browser per account; buttons in restored conversations are disabled until the user asks again. Billing is a demo placeholder and does not collect payment data.

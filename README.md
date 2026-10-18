@@ -2,7 +2,7 @@
 
 This branch (`feature/frontend-demo`) is a static web demo: HTML, CSS and vanilla JS, with no build step and no backend.
 
-- **Flow and business logic** follow the *SME Finance Copilot AI Agent v2-4* prototype exactly; the four tasks now appear as one continuous conversation with a four-step progress bar.
+- **Flow and business logic** follow the *SME Finance Copilot AI Agent v2-4* prototype exactly; the four analysis stages continue in a single conversation, with local chat history and account settings.
 - **Visual identity** comes from the Lilact brand kit: logos, colour tokens, Inter fonts and light/dark themes.
 - **Not used:** the earlier Lilact 9-case routing workflow.
 
@@ -15,19 +15,19 @@ python3 -m http.server 8000        # or any static file server
 
 ## What the demo does (from the prototype)
 - **Sign in:** sign in or sign up (stored in this browser only), or use the demo account. Sign-up requires a company name, a unique 10- or 13-digit tax code, and a password with upper/lowercase letters, a digit and a symbol.
-- **Chat:** one continuous conversation. Its four-step progress bar unlocks as the conversation progresses; selecting an available step scrolls to its marker and opens its dashboard tab without restarting the conversation:
+- **Chat:** one continuous conversation. Analysis advances through the same four business stages in order:
   1. Working-capital diagnosis (DSO · DIO · DPO · CCC)
   2. Cash-flow forecast (13 weeks, shortfall windows)
   3. Financing match (ranked catalogue products)
   4. What-if and drafts (levers, then drafts awaiting approval)
-- **Detailed dashboard:** tabs for Dashboard, Shortfall, What-if, Approvals and Log. Company data is a full-page workspace with Files and Businesses & snapshots tabs.
+- **Detailed dashboard:** tabs for Dashboard, Shortfall, What-if, Approvals. Audit events remain available internally but are not displayed. Company data is a full-page workspace with Files and Businesses & snapshots tabs.
 - **Company files:** upload CSV, XLSX, XLS and DOCX files. Files stay in this browser's IndexedDB; Word files are reference-only. Uploaded tables do not affect Copilot until reviewed and saved as a snapshot. Deleting a file keeps snapshots already created from it.
 - **Permission tiers:** T0 Read · T1 Advise · T2 Draft · T3 Approve. Only the Approve click in the UI runs a *simulated* execution.
-- **Data:** three synthetic companies (F01–F03) with collection scenarios. This is not a credit decision.
+- **Data:** three synthetic companies (F01–F03) with fixed default collection assumptions. This is not a credit decision.
 
 ## Test
 ```bash
-node tests/e2e.mjs                 # 31 browser checks in light, dark and 390 px mobile (needs Playwright + Chromium)
+node tests/e2e.mjs                 # browser checks in light, dark and 390 px mobile (needs Playwright + Chromium)
 ```
 
 ## Structure
@@ -42,3 +42,6 @@ tools/port_prototype.py historical importer; do not rerun after the single-flow 
 tests/e2e.mjs           Playwright smoke test
 ```
 See `docs/PORTING.md` for what was changed relative to the prototype.
+
+
+- Chat history, account settings and help are stored or rendered locally. Audit events remain in memory for internal traceability; the audit log is not shown in the interface. Scenarios are fixed by company defaults. Billing is a demo placeholder.
