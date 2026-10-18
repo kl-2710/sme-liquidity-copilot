@@ -70,14 +70,16 @@
       <div id="nav"></div>
     </nav>
     <div class="lc-sidebar__bottom">
-      <div class="lc-theme-switch" role="group" aria-label="Color theme">
-        <button type="button" data-theme-set="light" aria-pressed="false">Light</button>
-        <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
-        <button type="button" data-theme-set="system" aria-pressed="true">System</button>
-      </div>
-      <div class="la-user" aria-label="Guest demo account">
-        <span class="la-user__avatar" aria-hidden="true">G</span>
-        <span class="la-user__details"><strong>Guest user</strong><small>Demo mode · Not signed in</small></span>
+      <div class="la-account-wrap">
+        <div class="la-account-menu" id="account-menu" role="menu" aria-label="Account menu" hidden>
+          <div class="la-account-menu__identity"><span class="la-user__avatar" aria-hidden="true">G</span><span class="la-user__details"><strong>Guest user</strong><small>Demo mode ? Not signed in</small></span></div>
+          <div class="la-account-menu__divider" role="separator"></div>
+          <button type="button" role="menuitem" data-open-settings>Settings</button>
+          <button type="button" role="menuitem" data-demo-logout>Log out</button>
+        </div>
+        <button type="button" class="la-user" id="account-menu-toggle" aria-label="Open account menu" aria-haspopup="menu" aria-controls="account-menu" aria-expanded="false">
+          <span class="la-user__avatar" aria-hidden="true">G</span><span class="la-user__details"><strong>Guest user</strong><small>Demo mode ? Not signed in</small></span><span class="la-account-chevron" aria-hidden="true">???</span>
+        </button>
       </div>
     </div>
   </aside>
@@ -101,6 +103,11 @@
     </footer>
   </main>
 </div>
+<dialog class="la-settings" id="settings-dialog" aria-labelledby="settings-title">
+  <header class="la-settings__head"><div><h2 id="settings-title">Settings</h2><p>Theme preferences are saved in this browser.</p></div><button type="button" class="lc-btn lc-btn--tertiary" data-close-settings aria-label="Close settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+  <section class="la-settings__section" aria-labelledby="settings-appearance"><h3 id="settings-appearance">Appearance</h3><div class="lc-theme-switch" role="group" aria-label="Color theme"><button type="button" data-theme-set="light" aria-pressed="false">Light</button><button type="button" data-theme-set="dark" aria-pressed="false">Dark</button><button type="button" data-theme-set="system" aria-pressed="true">System</button></div></section>
+  <footer class="la-settings__foot"><button type="button" class="lc-btn lc-btn--primary" data-close-settings>Done</button></footer>
+</dialog>
 <aside class="la-drawer" id="drawer" hidden role="dialog" aria-modal="false" aria-labelledby="drawer-title">
   <header class="la-drawer__head">
     <h2 id="drawer-title" tabindex="-1">Evidence</h2>

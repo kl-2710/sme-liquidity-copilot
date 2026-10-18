@@ -28,6 +28,19 @@
     return valid;
   }
   document.addEventListener("click", function (event) {
+    var accountToggle = event.target.closest("#account-menu-toggle"), accountMenu = document.getElementById("account-menu"), settingsDialog = document.getElementById("settings-dialog");
+    if (accountToggle && accountMenu) { accountMenu.hidden = !accountMenu.hidden; accountToggle.setAttribute("aria-expanded", String(!accountMenu.hidden)); if (!accountMenu.hidden) accountMenu.querySelector("[role=menuitem]").focus(); return; }
+    if (event.target.closest("[data-open-settings]") && settingsDialog) { if (accountMenu) accountMenu.hidden = true; var toggle = document.getElementById("account-menu-toggle"); if (toggle) toggle.setAttribute("aria-expanded", "false"); settingsDialog.showModal(); return; }
+    if (event.target.closest("[data-close-settings]") && settingsDialog) { settingsDialog.close(); return; }
+    if (event.target.closest("[data-demo-logout]")) {
+      if (accountMenu) accountMenu.hidden = true;
+      var accountButton = document.getElementById("account-menu-toggle"); if (accountButton) accountButton.setAttribute("aria-expanded", "false");
+      document.getElementById("demo-app").hidden = true; document.getElementById("auth-screen").hidden = false;
+      document.querySelector(".la-skip").setAttribute("href", "#auth-title");
+      document.querySelectorAll("#login-form input[type=password], #register-form input[type=password]").forEach(function (field) { field.value = ""; });
+      setView("login"); history.pushState(null, "", "#login"); return;
+    }
+    if (accountMenu && !accountMenu.hidden && !event.target.closest(".la-account-wrap")) { accountMenu.hidden = true; var menuToggle = document.getElementById("account-menu-toggle"); if (menuToggle) menuToggle.setAttribute("aria-expanded", "false"); }
     var view = event.target.closest("[data-auth-view]");
     if (view) {
       event.preventDefault();
@@ -49,6 +62,9 @@
       var title = document.getElementById("page-title"); if (title) title.focus({ preventScroll: true });
     }
   });
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape") { var menu = document.getElementById("account-menu"); if (menu && !menu.hidden) { menu.hidden = true; var toggle = document.getElementById("account-menu-toggle"); if (toggle) { toggle.setAttribute("aria-expanded", "false"); toggle.focus(); } } } });
+  var settingsDialog = document.getElementById("settings-dialog");
+  if (settingsDialog) settingsDialog.addEventListener("click", function (event) { if (event.target === settingsDialog) settingsDialog.close(); });
   window.addEventListener("popstate", function () {
     if (location.hash !== "" && location.hash !== "#login" && location.hash !== "#register") return;
     document.getElementById("auth-screen").hidden = false;

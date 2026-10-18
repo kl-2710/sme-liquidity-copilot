@@ -75,6 +75,21 @@ await step("auth screens switch, validate and expose the demo without authentica
   assert.equal(await page.locator("#demo-app").isVisible(), true);
   assert.equal(await page.locator("#auth-screen").isVisible(), false);
 });
+await step("guest account menu opens settings, changes theme and returns to sign-in", async () => {
+  await page.locator("#account-menu-toggle").click();
+  assert.equal(await page.locator("#account-menu").isVisible(), true);
+  await page.locator("[data-open-settings]").click();
+  assert.equal(await page.locator("#settings-dialog").evaluate((el) => el.open), true);
+  await page.locator('#settings-dialog [data-theme-set="dark"]').click();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  await page.locator("#settings-dialog [data-close-settings]").last().click();
+  await page.locator("#account-menu-toggle").click();
+  await page.locator("[data-demo-logout]").click();
+  assert.equal(await page.locator("#auth-screen").isVisible(), true);
+  assert.equal(await page.locator("#demo-app").isVisible(), false);
+  assert.equal(await page.locator("#login-form input[type=password]").inputValue(), "");
+  await page.locator("[data-enter-demo]").click();
+});
 await step("desktop sidebar collapses and expands; mobile sidebar opens as a drawer", async () => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const toggle = page.locator('#sidebar [data-action="sidebar-toggle"]');
