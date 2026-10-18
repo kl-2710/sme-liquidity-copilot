@@ -815,3 +815,10 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 .no-company-data #panelBtn,.no-company-data #pendChip,.no-company-data #demoChips{display:none!important}
 .no-company-data #chatInput:disabled{cursor:not-allowed}
 .chatcol:not(.is-empty) .composer-wrap{padding-bottom:16px}
+/* Composer: attach, input and send on one line; the box hugs a single line of text and grows with it. */
+.composer{flex-wrap:wrap;align-items:flex-end;gap:10px;padding:7px 7px 7px 9px;border-radius:26px}
+.composer textarea{flex:1 1 0;order:1;min-height:36px;padding:7px 0;line-height:22px}
+.composer .comp-row{flex:0 0 auto;order:2}
+.composer .attach-btn{order:0;margin:0 0 2px}
+.composer .upload-chips{margin:2px 2px 0}
+.composer textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
