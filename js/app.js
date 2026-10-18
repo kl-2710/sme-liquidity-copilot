@@ -1326,16 +1326,56 @@ function renderFirmSel(){
 }
 
 
-const DW={view:'list',firmId:null,files:{},fmt:'auto',mode:'replace',form:{},pick:{},err:''};
+const FILE_MAX=10*1024*1024, FILE_EXTS=new Set(['csv','txt','xlsx','xls','docx']);
+let fileDbPromise=null,fileStoreWarned=false;
+const FILES={
+  memory:[],
+  async db(){if(!('indexedDB'in window))throw new Error('IndexedDB is unavailable');if(!fileDbPromise)fileDbPromise=new Promise((resolve,reject)=>{const r=indexedDB.open('lilact.files.v1',1);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('files')){const s=db.createObjectStore('files',{keyPath:'id'});s.createIndex('userId','userId')}};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error||new Error('Could not open file storage'))});return fileDbPromise},
+  warn(){if(!fileStoreWarned){fileStoreWarned=true;toast('Browser file storage is unavailable. You can still review and import files in this session.')}},
+  async put(file,{firmId=S.firm,status}={}){const ext=String(file.name.split('.').pop()||'').toLowerCase();if(!FILE_EXTS.has(ext))throw new Error(`${file.name}: unsupported file type`);if(file.size>FILE_MAX)throw new Error(`${file.name}: file exceeds the 10 MB limit`);const kind=ext==='docx'?'document':'table',rec={id:`file-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,userId:S.user.id,firmId:firmId||null,name:file.name,ext,kind,size:file.size,uploadedAt:new Date().toISOString(),status:status||(kind==='document'?'Reference only':'Pending review'),snapshotId:null,blob:file};try{const db=await this.db();await new Promise((ok,no)=>{const r=db.transaction('files','readwrite').objectStore('files').put(rec);r.onsuccess=ok;r.onerror=()=>no(r.error)});return rec}catch(e){this.warn();this.memory=this.memory.filter(x=>x.id!==rec.id);this.memory.push(rec);return rec}},
+  async list(){try{const db=await this.db(),all=await new Promise((ok,no)=>{const r=db.transaction('files').objectStore('files').getAll();r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)}),mine=all.filter(x=>x.userId===S.user.id),ids=new Set(mine.map(x=>x.id));return mine.concat(this.memory.filter(x=>x.userId===S.user.id&&!ids.has(x.id)))}catch(e){this.warn();return this.memory.filter(x=>x.userId===S.user.id)}},
+  async get(id){return (await this.list()).find(x=>x.id===id)||null},
+  async markUsed(ids,snapshotId){if(!ids?.length)return;try{const db=await this.db();await Promise.all(ids.map(id=>new Promise((ok,no)=>{const tx=db.transaction('files','readwrite'),s=tx.objectStore('files'),r=s.get(id);r.onsuccess=()=>{if(r.result&&r.result.userId===S.user.id){r.result.status=`Used in snapshot ${snapshotId}`;r.result.snapshotId=snapshotId;s.put(r.result)}};tx.oncomplete=ok;tx.onerror=()=>no(tx.error)})))}catch(e){this.warn();this.memory.forEach(x=>{if(ids.includes(x.id)){x.status=`Used in snapshot ${snapshotId}`;x.snapshotId=snapshotId}})}},
+  async remove(ids){try{const db=await this.db();await Promise.all(ids.map(id=>new Promise((ok,no)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').delete(id);tx.oncomplete=ok;tx.onerror=()=>no(tx.error)})))}catch(e){this.warn()}this.memory=this.memory.filter(x=>!ids.includes(x.id))}
+};
+FILES.setFirm=async function(ids,firmId){if(!ids?.length)return;try{const db=await this.db();await Promise.all(ids.map(id=>new Promise((ok,no)=>{const tx=db.transaction('files','readwrite'),s=tx.objectStore('files'),r=s.get(id);r.onsuccess=()=>{if(r.result&&r.result.userId===S.user.id){r.result.firmId=firmId;s.put(r.result)}};tx.oncomplete=ok;tx.onerror=()=>no(tx.error)})))}catch(e){this.warn();this.memory.forEach(x=>{if(ids.includes(x.id))x.firmId=firmId})}};
+async function fileText(file){const ext=String(file.name.split('.').pop()||'').toLowerCase();if(ext==='docx')return null;if(ext==='xlsx'||ext==='xls'){if(!window.XLSX)throw new Error(`${file.name}: Excel support could not be loaded`);const wb=XLSX.read(await file.arrayBuffer(),{type:'array'}),sheet=wb.Sheets[wb.SheetNames[0]];return XLSX.utils.sheet_to_csv(sheet)}return file.text()}
+function detectedFileType(text){if(!text)return null;const rows=parseCSV(text);return rows.length?detectType(rows[0].map(canon)):null}
+let fileFilters={q:'',type:'all',sort:'newest'},selectedFiles=new Set();
+function loadFileFilters(){try{fileFilters={...fileFilters,...JSON.parse(localStorage.getItem(`lilact.files.filters.${S.user.id}`)||'{}')}}catch(e){}}
+function saveFileFilters(){try{localStorage.setItem(`lilact.files.filters.${S.user.id}`,JSON.stringify(fileFilters))}catch(e){}}
+function openDataScreen(tab='files'){$('#work').hidden=true;$('#dataScreen').hidden=false;$('#filesTab').classList.toggle('on',tab==='files');$('#filesTab').setAttribute('aria-selected',tab==='files');$('#businessesTab').classList.toggle('on',tab==='businesses');$('#businessesTab').setAttribute('aria-selected',tab==='businesses');$('#dataFiles').hidden=tab!=='files';$('#dataBusinesses').hidden=tab!=='businesses';syncViewNav();if(tab==='files')renderFiles();else renderData()}
+function closeDataScreen(){$('#dataScreen').hidden=true;$('#work').hidden=false;syncViewNav()}
+$('#dataBack').onclick=closeDataScreen;
+$('#filesTab').onclick=()=>openDataScreen('files');$('#businessesTab').onclick=()=>openDataScreen('businesses');
+$('#dataAddSources').onclick=()=>$('#dataFileInput').click();
+async function acceptFiles(files,{firmId=S.firm}={}){const out=[];for(const f of files){try{const ext=String(f.name.split('.').pop()||'').toLowerCase();if(!FILE_EXTS.has(ext))throw new Error(`${f.name}: unsupported file type. Choose CSV, XLSX, XLS or DOCX.`);if(f.size>FILE_MAX)throw new Error(`${f.name}: file exceeds the 10 MB limit.`);const text=ext==='docx'?null:await fileText(f),detected=detectedFileType(text),status=ext==='docx'?'Reference only':detected?'Pending review':'Not recognised';out.push(await FILES.put(f,{firmId,status}))}catch(e){toast(e.message||`Could not read ${f.name}`)}}return out}
+$('#dataFileInput').onchange=async e=>{const added=await acceptFiles([...e.target.files]);e.target.value='';if(added.length){toast(`${added.length} file${added.length===1?'':'s'} added`);renderFiles()}};
+function sizeLabel(n){if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(0)} KB`;return `${(n/1024/1024).toFixed(1)} MB`}
+function renderFiles(){if($('#dataScreen').hidden)return Promise.resolve();loadFileFilters();const root=$('#dataFiles');return FILES.list().then(files=>{
+  const filtered=files.filter(f=>(!fileFilters.q||f.name.toLowerCase().includes(fileFilters.q.toLowerCase()))&&(fileFilters.type==='all'||(fileFilters.type==='docx'?f.ext==='docx':['csv','xlsx','xls','txt'].includes(f.ext))));
+  filtered.sort((a,b)=>fileFilters.sort==='oldest'?Date.parse(a.uploadedAt)-Date.parse(b.uploadedAt):fileFilters.sort==='alpha'?a.name.localeCompare(b.name):Date.parse(b.uploadedAt)-Date.parse(a.uploadedAt));
+  const empty=!files.length,none=!filtered.length;const row=f=>`<tr data-file-row="${esc(f.id)}"><td><input type="checkbox" class="file-select" value="${esc(f.id)}" aria-label="Select ${esc(f.name)}" ${selectedFiles.has(f.id)?'checked':''}></td><td><span class="file-name"><span aria-hidden="true">${f.kind==='document'?'▤':'▦'}</span><b>${esc(f.name)}</b></span></td><td>${f.ext.toUpperCase()}</td><td>${sizeLabel(f.size)}</td><td>${esc(f.firmId?(FIRMS[f.firmId]?.name||f.firmId):'—')}</td><td>${new Date(f.uploadedAt).toLocaleString('en-GB')}</td><td><span class="status ${f.status.startsWith('Used')?'green':f.status==='Not recognised'?'amber':f.kind==='document'?'blue':'gray'}">${esc(f.status)}</span></td><td><button type="button" class="file-delete" aria-label="Delete ${esc(f.name)}" data-file-delete="${esc(f.id)}">⌫</button></td></tr>`;
+  root.innerHTML=`<div class="files-toolbar"><label class="sr" for="filesSearch">Search files</label><input id="filesSearch" type="search" placeholder="Search files by name" value="${esc(fileFilters.q)}"><label class="sr" for="filesType">Filter by file type</label><select id="filesType"><option value="all">All types</option><option value="docx">Word (.docx)</option><option value="tables">Excel &amp; CSV (.xlsx, .xls, .csv)</option></select><label class="sr" for="filesSort">Sort files</label><select id="filesSort"><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="alpha">Alphabetical</option></select></div><div class="file-selection" id="fileSelection" hidden></div>${empty?`<div class="files-empty"><b>No files uploaded yet</b><button class="btn primary" type="button" data-empty-add>Add sources</button></div>`:none?`<div class="files-empty"><b>No files match your search</b><button class="btn sec" type="button" data-clear-filters>Clear filters</button></div>`:`<div class="files-table-wrap"><table class="files-table"><thead><tr><th><input id="filesSelectAll" type="checkbox" aria-label="Select all visible files"></th><th>Name</th><th>Type</th><th>Size</th><th>Company</th><th>Uploaded</th><th>Status</th><th></th></tr></thead><tbody>${filtered.map(row).join('')}</tbody></table></div>`}`;
+  $('#filesType').value=fileFilters.type;$('#filesSort').value=fileFilters.sort;
+  $('#filesSearch').oninput=e=>{const pos=e.target.selectionStart;fileFilters.q=e.target.value;saveFileFilters();renderFiles().then(()=>{const input=$('#filesSearch');if(input){input.focus();input.setSelectionRange(pos,pos)}})};$('#filesType').onchange=e=>{fileFilters.type=e.target.value;saveFileFilters();renderFiles()};$('#filesSort').onchange=e=>{fileFilters.sort=e.target.value;saveFileFilters();renderFiles()};
+  const boxes=$$('.file-select',root),all=$('#filesSelectAll');if(all){const count=boxes.filter(x=>x.checked).length;all.checked=boxes.length>0&&count===boxes.length;all.indeterminate=count>0&&count<boxes.length;all.onchange=()=>{boxes.forEach(x=>{x.checked=all.checked;if(all.checked)selectedFiles.add(x.value);else selectedFiles.delete(x.value)});renderFiles()}}
+  boxes.forEach(x=>x.onchange=()=>{x.checked?selectedFiles.add(x.value):selectedFiles.delete(x.value);renderFiles()});
+  if(selectedFiles.size){const bar=$('#fileSelection');bar.hidden=false;bar.innerHTML=`<b>${selectedFiles.size} selected</b><button type="button" class="btn danger sm" id="deleteSelected">Delete selected</button><button type="button" class="btn sec sm" id="clearSelected">Clear</button>`;$('#deleteSelected').onclick=()=>confirmDeleteFiles([...selectedFiles]);$('#clearSelected').onclick=()=>{selectedFiles.clear();renderFiles()}}
+  $$('[data-file-delete]',root).forEach(b=>b.onclick=()=>confirmDeleteFiles([b.dataset.fileDelete]));$('[data-empty-add]',root)?.addEventListener('click',()=>$('#dataFileInput').click());$('[data-clear-filters]',root)?.addEventListener('click',()=>{fileFilters={q:'',type:'all',sort:fileFilters.sort};saveFileFilters();renderFiles()});
+})}
+function confirmDeleteFiles(ids){openModal(`<h3>Delete ${ids.length} ${ids.length===1?'file':'files'}?</h3><p>Snapshots already created from these files are kept; you can roll back in History.</p><div class="acts"><button class="btn sec" id="filesNo">Cancel</button><button class="btn danger" id="filesYes">Delete</button></div>`,m=>{$('#filesNo',m).onclick=closeModal;$('#filesYes',m).onclick=async()=>{await FILES.remove(ids);selectedFiles.clear();closeModal();addLog({tool:'delete_files',tier:1,args:{count:ids.length},status:'ok',summary:`Deleted ${ids.length} uploaded file${ids.length===1?'':'s'}`});toast(`${ids.length} file${ids.length===1?'':'s'} deleted`);renderFiles()}})}
+const DW={view:'list',firmId:null,files:{},fmt:'auto',mode:'replace',form:{},pick:{},err:'',registryIds:[]};
 const fmtVND=n=>n==null||isNaN(n)?'–':nf(n/1e6,1)+'M';
 function nextFirmId(d){let n=1;while(d.firms['U'+String(n).padStart(2,'0')])n++;return 'U'+String(n).padStart(2,'0')}
 function startImport(firmId){
-  DW.view='import';DW.firmId=firmId||null;DW.files={};DW.fmt='auto';DW.mode=firmId?'upsert':'replace';DW.pick={};DW.err='';
+  DW.view='import';DW.firmId=firmId||null;DW.files={};DW.registryIds=[];DW.fmt='auto';DW.mode=firmId?'upsert':'replace';DW.pick={};DW.err='';
   const f=firmId?dstore.load().firms[firmId]:null,snap=f&&activeSnap(f);
   DW.form=f?{name:f.name,industry:f.industry||'',buffer:f.buffer,asOf:snap.asOf,rev:snap.tables.fin[0].rev,cogs:snap.tables.fin[0].cogs,cash0:snap.tables.fin[0].cash0!=null?snap.tables.fin[0].cash0:snap.tables.fin[0].opening,touched:{}}
     :{name:'',industry:'',buffer:'',asOf:'',rev:'',cogs:'',cash0:'',touched:{}};
-  setTab('data');
+  openDataScreen('businesses');
 }
+async function openReviewImport(ids){const firmId=['F01','F02','F03'].includes(S.firm)?null:S.firm;startImport(firmId);for(const id of ids){const rec=await FILES.get(id);if(!rec||!rec.blob)continue;try{const text=await fileText(rec.blob),rows=text&&parseCSV(text);if(rows&&rows.length>1&&detectedFileType(text)){addRaw(rec.name,text);DW.registryIds.push(id)}}catch(e){toast(e.message||`Could not read ${rec.name}`)}}DW._refresh&&DW._refresh()}
 function addRaw(name,text){
   const rows=parseCSV(text);if(rows.length<2){toast(`${name}: file is empty or has only a header`);return}
   const hdr=rows[0].map(canon),type=detectType(hdr);
@@ -1445,7 +1485,7 @@ function renderImport(p){
   p.innerHTML=`
   <div class="card-head"><div><h3>${upd?'Update data':'Add business'}</h3><p>${upd?`Upload new files for <b>${esc(F.name)}</b>. Results are saved as a new snapshot; older ones are kept so you can roll back.`:'Step 1: upload files. Step 2: review. Step 3: save.'}</p></div><button class="btn sec sm" id="dBack">← Back</button></div>
   <div class="card" id="dz" tabindex="0"><div class="dz"><b>Drop CSV files here</b> or <button class="lnk" id="dPick" type="button">browse files</button><small>Multiple files at once are fine. The system detects each file type from its column names. UTF-8 with comma, semicolon or tab separators is supported.</small>
-   <input type="file" id="dFile" accept=".csv,.txt,text/csv" multiple hidden></div>
+   <input type="file" id="dFile" accept=".csv,.txt,.xlsx,.xls,.docx" multiple hidden></div>
    <div class="dz-act"><button class="btn sec sm" id="dPaste">Paste CSV content</button><button class="btn sec sm" id="dSample">Load sample dataset</button>
    <span class="dz-tpl">Sample file: ${Object.entries(TYPES).filter(([k])=>k!=='firms').map(([k,t])=>`<button class="lnk" data-tpl="${k}" type="button">${t.file}</button>`).join(' · ')}</span></div>
    <div id="dPasteBox" hidden><textarea id="dPasteTa" rows="5" placeholder="The first row is the column header, for example: invoice_id,buyer,amount_vnd,issue_date,due_date,paid_date"></textarea><button class="btn primary sm" id="dPasteOk">Read content</button></div></div>
@@ -1484,7 +1524,7 @@ function renderImport(p){
   $('#fFmt').onchange=e=>{DW.fmt=e.target.value;F.touched.asOf=false;refresh()};
   $$('input[name=dmode]').forEach(r=>r.onchange=()=>{DW.mode=r.value;$$('.dm').forEach(x=>x.classList.toggle('on',x.querySelector('input').checked));refresh()});
   $('#dBack').onclick=()=>{DW.view='list';renderData()};
-  const take=async fl=>{for(const f of fl){try{addRaw(f.name,await f.text())}catch(e){toast('Could not read '+f.name)}}F.touched.asOf=false;refresh();if(fl.length)toast(`Received ${fl.length} file`)};
+  const take=async fl=>{const accepted=await acceptFiles(fl);for(const rec of accepted){if(rec.kind==='document')continue;try{const text=await fileText(rec.blob),rows=text&&parseCSV(text);if(rows&&rows.length>1&&detectedFileType(text)){addRaw(rec.name,text);DW.registryIds.push(rec.id)}}catch(e){toast(e.message||`Could not read ${rec.name}`)}}F.touched.asOf=false;refresh();if(accepted.length)toast(`Received ${accepted.length} file${accepted.length===1?'':'s'}`)};
   $('#dPick').onclick=()=>$('#dFile').click();$('#dFile').onchange=e=>{take([...e.target.files]);e.target.value=''};
   const dz=$('#dz');['dragenter','dragover'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('over')}));
   ['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('over')}));
@@ -1522,6 +1562,7 @@ function saveImport(ev){
 
   try{const c=buildCase(fn,snap);if(!c.days.length)throw new Error('empty')}catch(e){console.error(e);return fail('Could not build data from these files. Check the columns and dates.')}
   d.firms[id]=fn;if(!dstore.save(d))return;
+  void FILES.markUsed(DW.registryIds,snap.id);void FILES.setFirm(DW.registryIds,id);DW.registryIds=[];
   syncUserFirms();DW.view='list';
   switchContext(id,'base');
   addLog({tool:upd?'update_company_data':'create_company_data',tier:1,args:{firm_id:id,snapshot:snap.id,mode},status:'ok',summary:`${name}: saved version ${snap.id}, cut-off ${fd(snap.asOf)}`});
