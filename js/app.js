@@ -819,10 +819,11 @@ function closePanel(){
   S.panel=false;$('#work').classList.remove('panel-open');pWrap.inert=true;pWrap.setAttribute('aria-hidden','true');
   $('#panelBtn').classList.remove('on');$('#panelBtn').setAttribute('aria-pressed','false');syncViewNav();
 }
-function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',S.panel&&b.dataset.view===S.tab))}
-function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr,log:renderLog,data:renderData})[S.tab]()}
+function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?!$('#dataScreen').hidden:S.panel&&b.dataset.view===S.tab))}
+function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr,log:renderLog})[S.tab]()}
 function refreshTab(){if(S.panel)renderTab()}
 function setTab(id){
+  if(id==='data'){openDataScreen('businesses');return}
   if((id==='gap'&&S.stage<2)||(id==='whatif'&&S.stage<3))id='dash';
   S.tab=id;$$('.tab').forEach(t=>{const on=t.dataset.tab===id;t.classList.toggle('on',on);t.setAttribute('aria-selected',on)});
   $$('.tabpane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+id));
@@ -831,7 +832,7 @@ function setTab(id){
 }
 $('#panelClose').addEventListener('click',closePanel);
 $('#panelBtn').addEventListener('click',()=>S.panel?closePanel():setTab(S.tab&&S.tab!=='appr'&&S.tab!=='log'?S.tab:TASKS[S.task].tab));
-$$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(S.panel&&S.tab===b.dataset.view){closePanel()}else setTab(b.dataset.view);closeSide()}));
+$$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.view==='data')openDataScreen('files');else if(S.panel&&S.tab===b.dataset.view){closePanel()}else setTab(b.dataset.view);closeSide()}));
 
 
 function openSide(){$('#app').classList.add('side-open')}
@@ -1426,7 +1427,7 @@ function previewHTML(ev){
   return h;
 }
 function renderData(){
-  const p=$('#pane-data');const d=dstore.load();
+  const p=$('#dataBusinesses');const d=dstore.load();
   if(!S.user){p.innerHTML='';return}
   if(DW.view==='import')return renderImport(p);
   if(DW.view==='hist')return renderHist(p,d);
@@ -1707,7 +1708,7 @@ function renderDash(){
   $$('.gv b[data-v]',p).forEach(e=>animNum(e,+e.dataset.v,v=>nf(v,1),1000));
   $$('[data-csv]',p).forEach(b=>b.onclick=()=>exportFlowCSV(c,M));
   window._csvCtx=()=>exportFlowCSV(c,M);
-  $$('[data-go]',p).forEach(b=>b.onclick=()=>{const g=b.dataset.go;if(g==='new')startImport(null);else if(g==='upd')startImport(S.firm);else{DW.view='hist';DW.firmId=S.firm;setTab('data')}});
+  $$('[data-go]',p).forEach(b=>b.onclick=()=>{const g=b.dataset.go;if(g==='new')startImport(null);else if(g==='upd')startImport(S.firm);else{DW.view='hist';DW.firmId=S.firm;openDataScreen('businesses')}});
   decorateWidgets(p);
   if(S.stage<2){const m=$('[data-wid="min"]',p);m&&(m.style.display='none');$$('.dsec',p).forEach(z=>{const h=(z.querySelector('h2')||{}).textContent||'';if(/13-week cash forecast|Risk and what-if/.test(h))z.style.display='none'})}
 }

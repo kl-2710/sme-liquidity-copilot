@@ -150,7 +150,6 @@
           <button class="tab" role="tab" data-tab="whatif" aria-selected="false">⟳ What-if <kbd>3</kbd></button>
           <button class="tab" role="tab" data-tab="appr" aria-selected="false">☑ Approvals <span class="badge zero" id="apprBadge">0</span> <kbd>4</kbd></button>
           <button class="tab" role="tab" data-tab="log" aria-selected="false">≣ Log <kbd>5</kbd></button>
-          <button class="tab" role="tab" data-tab="data" aria-selected="false">⇪ Data</button>
           <span class="ink" id="ink"></span>
         </div>
         <div class="tabpane on" id="pane-dash" role="tabpanel"></div>
@@ -158,15 +157,22 @@
         <div class="tabpane" id="pane-whatif" role="tabpanel"></div>
         <div class="tabpane" id="pane-appr" role="tabpanel"></div>
         <div class="tabpane" id="pane-log" role="tabpanel"></div>
-        <div class="tabpane" id="pane-data" role="tabpanel"></div>
       </section>
     </aside>
   </div>
+  <section class="data-screen" id="dataScreen" aria-label="Company data" hidden>
+    <input type="file" id="dataFileInput" multiple accept=".csv,.xlsx,.xls,.docx" hidden>
+    <header class="data-page-head"><div><button type="button" class="data-back" id="dataBack">← Back to chat</button><h1>Company data</h1><p>Manage uploaded files, businesses and saved snapshots.</p></div><button type="button" class="btn primary" id="dataAddSources">Add sources</button></header>
+    <div class="data-page-tabs" role="tablist" aria-label="Company data sections"><button type="button" role="tab" id="filesTab" aria-selected="true" class="on">Files</button><button type="button" role="tab" id="businessesTab" aria-selected="false">Businesses &amp; snapshots</button></div>
+    <section id="dataFiles" role="tabpanel" aria-labelledby="filesTab"></section>
+    <section id="dataBusinesses" role="tabpanel" aria-labelledby="businessesTab" hidden></section>
+  </section>
 </div>
 
 <div class="scrim" id="scrim" role="dialog" aria-modal="true"><div class="modal" id="modal"></div></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script src="js/data.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
