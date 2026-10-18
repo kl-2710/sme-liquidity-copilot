@@ -37,6 +37,17 @@
 
   function route() { var h = (location.hash || "#/uc00").replace(/^#\/?/, ""); return NAV.some(function (n) { return n.id === h; }) ? h : "uc00"; }
 
+  function syncSidebarControls() {
+    var mobile = window.matchMedia("(max-width: 900px)").matches;
+    var expanded = mobile ? document.body.classList.contains("la-nav-open") : !document.body.classList.contains("la-sidebar-collapsed");
+    var label = mobile ? (expanded ? "Close navigation" : "Open navigation") : (expanded ? "Collapse sidebar" : "Expand sidebar");
+    document.querySelectorAll('[data-action="sidebar-toggle"]').forEach(function (button) {
+      button.setAttribute("aria-expanded", String(expanded));
+      button.setAttribute("aria-label", label);
+      button.title = label;
+    });
+  }
+
   function renderNav(ctx, lk, cur) {
     var F = ctx.fs;
     document.getElementById("nav").innerHTML = NAV.map(function (n) {
@@ -75,6 +86,7 @@
     main.innerHTML = html;
     view.lastSim = ctx.lastSim || null;
     document.body.classList.remove("la-nav-open");
+    syncSidebarControls();
   }
 
   /* ---------- toast & drawer ---------- */
@@ -180,20 +192,13 @@
     if (a === "sidebar-toggle") {
       if (window.matchMedia("(max-width: 900px)").matches) {
         document.body.classList.toggle("la-nav-open");
-        var open = document.body.classList.contains("la-nav-open");
-        t.setAttribute("aria-expanded", String(open));
-        t.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
-        t.title = open ? "Close navigation" : "Open navigation";
       } else {
         document.body.classList.toggle("la-sidebar-collapsed");
-        var expanded = !document.body.classList.contains("la-sidebar-collapsed");
-        t.setAttribute("aria-expanded", String(expanded));
-        t.setAttribute("aria-label", expanded ? "Collapse sidebar" : "Expand sidebar");
-        t.title = expanded ? "Collapse sidebar" : "Expand sidebar";
       }
+      syncSidebarControls();
       return;
     }
-    if (a === "menu") { document.body.classList.remove("la-nav-open"); return; }
+    if (a === "menu") { document.body.classList.remove("la-nav-open"); syncSidebarControls(); return; }
   }
   function onChange(e) {
     var t = e.target;

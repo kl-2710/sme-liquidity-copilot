@@ -77,16 +77,20 @@ await step("auth screens switch, validate and expose the demo without authentica
 });
 await step("desktop sidebar collapses and expands; mobile sidebar opens as a drawer", async () => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const toggle = page.locator('[data-action="sidebar-toggle"]');
+  const toggle = page.locator('#sidebar [data-action="sidebar-toggle"]');
+  const drawerToggle = page.locator('.la-menu--drawer-open');
+  assert.equal(await toggle.isVisible(), true);
+  assert.equal(await drawerToggle.isVisible(), false);
   await toggle.click();
   assert.equal(await page.locator("body").evaluate((el) => el.classList.contains("la-sidebar-collapsed")), true);
   assert.equal(await toggle.getAttribute("aria-label"), "Expand sidebar");
   await toggle.click();
   assert.equal(await page.locator("body").evaluate((el) => el.classList.contains("la-sidebar-collapsed")), false);
   await page.setViewportSize({ width: 390, height: 844 });
-  await toggle.click();
+  assert.equal(await drawerToggle.isVisible(), true);
+  await drawerToggle.click();
   assert.equal(await page.locator("body").evaluate((el) => el.classList.contains("la-nav-open")), true);
-  await page.locator(".la-scrim").click({ position: { x: 380, y: 700 } });
+  await toggle.click();
   assert.equal(await page.locator("body").evaluate((el) => el.classList.contains("la-nav-open")), false);
 });
 await go("uc00");
