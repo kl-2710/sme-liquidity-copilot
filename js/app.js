@@ -246,7 +246,7 @@ function rankTable(t3){
   const rows=t3.ranked.map((r,i)=>{const cat=CAT.find(c=>c.id===r.product_id),isInv=INV_PRODUCTS.includes(r.product_id)&&r.invoice_id!=='–';
     return `<tr class="${i===0?'top1':''}"><td><span class="rank">${r.rank}</span></td><td><b>${r.product_id}</b> · ${esc(cat.provider)}<small>${TYPE_VN[cat.type]||cat.type}${cat.recourse==='Y'?' · with recourse':''}</small></td><td>${isInv?`<span class="num">${r.invoice_id}</span>`:'<span class="neu">–</span>'}</td><td><span class="tier t${r.tier}">${r.tier===0?'0 · fully covered':'1 · partly covered'}</span></td><td class="num">${mm(r.cash)}</td><td class="num">${nf(r.cost/1e6,2)}M</td><td class="num">${nf(r.cpg*100,2)}%<div class="bar"><span style="width:${Math.max(6,r.cpg/maxC*100)}%"></span></div></td><td class="num">${r.days} days</td><td class="num ${r.gap_rem>0?'neg':'pos'}">${r.gap_rem>0?mm(r.gap_rem):'0'}</td><td class="num">${nf(r.ccc_after,1)}</td><td>${isInv?`<button class="btn sec sm" data-try="${r.invoice_id}|${r.product_id}">Try →</button>`:'<span class="subtle" style="font-size:10.5px;color:var(--muted)">Not an invoice lever</span>'}</td></tr>`}).join('');
   const rej=t3.rejected.length?`<div style="margin-top:12px"><div class="legend" style="margin-bottom:6px"><b style="color:var(--ink2)">Excluded (${t3.rejected.length})</b></div>${t3.rejected.map(r=>`<span class="status gray" style="margin:0 6px 6px 0" title="${r.reason}">${r.product_id} · ${REJ[r.reason]||r.reason}</span>`).join('')}</div>`:'';
-  return `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Option</th><th>Invoice</th><th>Tier</th><th>Cash received</th><th>Cost</th><th>Cost / shortfall</th><th>Funding</th><th>Remaining gap</th><th>CCC sau</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>${rej}`;
+  return `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Option</th><th>Invoice</th><th>Tier</th><th>Cash received</th><th>Cost</th><th>Cost / shortfall</th><th>Funding</th><th>Remaining gap</th><th>CCC after</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>${rej}`;
 }
 
 
@@ -320,7 +320,7 @@ function buildWI(p){
       <div class="f"><label for="line">Inventory line</label><select class="sel" id="line">${c.inv.map(x=>`<option value="${esc(x.name)}" ${x.own>0?'':'disabled'}>${esc(x.name)} · ${mm(x.own)}${x.excl?' (subcontracted goods)':x.slow?' · aged':''}${/in transit/.test(x.name)?' · heading to port':''}</option>`).join('')}</select></div>
       ${slider('Z',0,50,L.Z,{l:'Cut inventory',u:'%'},['0','15','30','50'])}<div class="hint" id="h3"></div>`)}
     ${lever('l4','◈','Finance one invoice','Receive cash on the cash-needed date, repay when the customer pays',`
-      <div class="f"><label for="inv_id">Invoice</label><select class="sel" id="inv_id">${invs.map(e=>`<option value="${e[0]}">${e[0]} · ${esc(shortN(e[3]))} · ${mm(e[4])} · thu ${fds(e[5])}</option>`).join('')}</select></div>
+      <div class="f"><label for="inv_id">Invoice</label><select class="sel" id="inv_id">${invs.map(e=>`<option value="${e[0]}">${e[0]} · ${esc(shortN(e[3]))} · ${mm(e[4])} · expected ${fds(e[5])}</option>`).join('')}</select></div>
       <div class="f"><label for="prod">Catalogue product</label><select class="sel" id="prod">${CAT.filter(x=>INV_PRODUCTS.includes(x.id)).map(x=>`<option value="${x.id}">${x.id} · ${x.provider} · ${TYPE_VN[x.type]}</option>`).join('')}</select></div><div class="hint" id="h4"></div>`)}
    </div>
    <div>
@@ -331,7 +331,7 @@ function buildWI(p){
     </div>
     <div class="card" style="margin-top:12px"><div class="card-head" style="margin-bottom:6px"><div><h3>Cash line before / after</h3><p>VND million · hover for each day</p></div></div><div class="chartbox" id="wiChart"></div>
       <div class="legend" style="margin-top:6px"><span><i class="ln" style="background:var(--lc-color-data-historical)"></i>Base</span><span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span><span><i class="ds"></i>Buffer</span></div></div>
-    <div class="card" style="margin-top:12px"><div class="table-wrap" style="border:0"><table class="dtable" style="min-width:0"><thead><tr><th>Metric</th><th>Before</th><th>Sau</th><th>Change</th></tr></thead><tbody id="mTbl"></tbody></table></div></div>
+    <div class="card" style="margin-top:12px"><div class="table-wrap" style="border:0"><table class="dtable" style="min-width:0"><thead><tr><th>Metric</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody id="mTbl"></tbody></table></div></div>
     <div class="row" style="margin-top:12px"><button class="btn sec" id="wiSave">＋ Save to compare</button><button class="btn primary" id="wiDraft">✎ Create draft</button><span class="subtle" style="font-size:11px;color:var(--muted);align-self:center">Drafts are only created, never sent.</span></div>
     <div id="cmpBox"></div>
    </div>
@@ -406,7 +406,7 @@ function renderCmp(){
   b.innerHTML=`<div class="cmp-h"><h3 style="margin:0;font-size:14px">Compare scenarios</h3><span class="subtle" style="font-size:11px;color:var(--muted)">${S.cmp.length}/4 · the cheapest that fully covers is highlighted</span></div>
   <div class="table-wrap"><table class="dtable" style="min-width:0"><thead><tr><th>Metric</th>${S.cmp.map((x,i)=>`<th class="${x===best?'cmpcol best':''}">${x===best?'★ ':''}Scenario ${i+1} <button data-rm="${i}" aria-label="Delete" style="color:var(--lc-color-text-muted)">✕</button></th>`).join('')}</tr></thead><tbody>
   <tr><td>Content</td>${S.cmp.map(x=>`<td style="text-align:right;font-size:11px;white-space:normal;min-width:120px">${esc(x.label)}</td>`).join('')}</tr>
-  <tr><td>CCC sau</td>${S.cmp.map(x=>`<td class="num ${x===best?'cmpcol best':''}">${nf(x.res.ccc,1)}</td>`).join('')}</tr>
+  <tr><td>CCC after</td>${S.cmp.map(x=>`<td class="num ${x===best?'cmpcol best':''}">${nf(x.res.ccc,1)}</td>`).join('')}</tr>
   <tr><td>Remaining gap</td>${S.cmp.map(x=>`<td class="num ${x.res.gap_epi<1?'pos':'neg'}">${mm(x.res.gap_epi)}</td>`).join('')}</tr>
   <tr><td>New gap days</td>${S.cmp.map(x=>`<td class="num">${x.res.newDays}</td>`).join('')}</tr>
   <tr><td>Cost</td>${S.cmp.map(x=>`<td class="num">${nf(x.res.cost/1e6,2)}M</td>`).join('')}</tr>
