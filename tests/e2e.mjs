@@ -115,6 +115,7 @@ await step("desktop sidebar collapses and expands; mobile sidebar opens as a dra
   assert.equal(await page.locator(".la-brand__symbol:visible").count(), 1);
   await page.locator("#account-menu-toggle").click();
   assert.equal(await page.locator("#account-menu").isVisible(), true);
+  assert.equal(await page.locator("#sidebar").evaluate((el) => getComputedStyle(el).zIndex), "35");
   assert.equal(await page.locator("#account-menu .la-account-menu__identity .la-user__details").innerText(), "Guest user");
   assert.equal(await page.locator("#account-menu [data-open-settings]").isVisible(), true);
   assert.equal(await page.locator("#account-menu [data-demo-logout]").isVisible(), true);
