@@ -655,6 +655,7 @@ html[data-density=compact] .ft th,html[data-density=compact] .ft td{padding:4px 
 @media(min-width:861px){
   .side-fold{display:inline-grid}
   .side-toggle{display:none}
+  .shell.side-collapsed .side-fold,.shell.fs-mode .side-fold{display:none}
   .shell.side-collapsed .side-toggle,.shell.fs-mode .side-toggle{display:inline-grid}
   .side{transition:width .34s var(--ease),padding .34s var(--ease),opacity .22s,border-color .3s;overflow:hidden}
   .side>*{min-width:250px}
