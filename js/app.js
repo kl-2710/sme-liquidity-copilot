@@ -709,22 +709,18 @@ function bootApp(){
 const TASKS={
   tv1:{n:'TV1',title:'Working-capital diagnosis',tab:'dash',
     hello:s=>`How is ${s}’s liquidity today?`,
-    lead:'Ask where your working capital is stuck. We go one step at a time: diagnosis, then the cause of any shortfall, then funding that fits the cause, then what-if. Each step opens only when you ask for it.',
     ph:'Ask where your working capital is stuck…',
     chips:['How is my liquidity?','What is my CCC?','Which customer holds most of my receivables?']},
   tv2:{n:'TV2',title:'Cash-flow forecast',tab:'gap',
     hello:s=>`The next 13 weeks of cash for ${s}`,
-    lead:'I forecast the daily balance and show the gaps below the buffer, with the date cash is needed.',
     ph:'Ask about cash-short weeks, the date cash is needed…',
     chips:['Which week am I short of cash?','Which gap is the largest?']},
   tv3:{n:'TV3',title:'Financing match',tab:'gap',
     hello:s=>`Find funding for ${s}`,
-    lead:'I match the shortfall against the synthetic product catalogue and rank by full coverage, timing and cost.',
     ph:'Ask about financing options, rejected products…',
     chips:['Rank financing options for the gap','Why were some products rejected?']},
   tv4:{n:'TV4',title:'What-if and drafts',tab:'whatif',
     hello:s=>`Test levers for ${s} before you decide`,
-    lead:'Switch on early collection, extended payables, lower inventory or financing one invoice on a copy of the data. Only when you approve a draft does a simulated action exist.',
     ph:'Example: What if we collect from K1 10 days early?',
     chips:[]}
 };
@@ -907,12 +903,10 @@ async function respondConc(bot){
 
 
 function welcome(task){
-  task=task||S.task;const th=THREADS[task],T=TASKS[task],c=C();th.innerHTML='';th.dataset.init='1';
-  const worst=EPS.length?EPS.reduce((a,e)=>e.peak>a.peak?e:a,EPS[0]):null;
-  const note='';const _unused=task==='tv1'||task==='tv2'?(worst?`In the next 13 weeks there are <b>${EPS.length} gaps</b> where the balance falls below the buffer ${money(c.buffer)}; largest shortfall <b>${mm(worst.peak)}</b> from ${fd(worst.start)}.`:`Balance stays above the buffer ${money(c.buffer)} in 13 weeks${S.firm!=='F01'?'. No cash shortfall in the 13-week forecast, so there is nothing to simulate.':'.'}`):'';
+  task=task||S.task;const th=THREADS[task],T=TASKS[task];th.innerHTML='';th.dataset.init='1';
   const h=document.createElement('div');h.className='hero';
-  h.innerHTML=`<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div><h1>Hi ${esc(userFirst())}. ${esc(T.hello(FIRMS[S.firm].short))}</h1><p>${T.lead}</p>${note?`<div class="ctxnote"><span>◷</span><span>${note}</span></div>`:''}`;
-  th.appendChild(h);
+  h.innerHTML=`<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div><h1>Hi ${esc(userFirst())}. ${esc(T.hello(FIRMS[S.firm].short))}</h1>`;
+  th.appendChild(h);syncChatEmpty();
 }
 function renderDemoChips(){
   const box=$('#demoChips'),list=currentChips();box.hidden=!!(msgs&&msgs.querySelector('.msg.user'));
@@ -1820,16 +1814,16 @@ const CHAT_KEY=()=>`lilact.chats.v1.${S.user?.id||'anon'}`;let chats=[],activeCh
 function chatsRead(){try{return JSON.parse(localStorage.getItem(CHAT_KEY())||'[]')}catch(e){return []}}
 function chatsWrite(){try{chats.sort((a,b)=>b.updatedAt-a.updatedAt);chats=chats.slice(0,50);localStorage.setItem(CHAT_KEY(),JSON.stringify(chats))}catch(e){toast('Chat history could not be saved')}}
 function chatHasMessages(){return !!msgs?.querySelector('.msg.user')}
-function chatSave(){if(!S.user||!activeChat||!msgs)return;const c=chats.find(x=>x.id===activeChat);if(!c)return;Object.assign(c,{firmId:S.firm,case:S.case,updatedAt:Date.now(),stage:S.stage,cause:S.cause,done:[...S.done],html:msgs.innerHTML});chatsWrite();chatRender()}
-function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});msgs=THREADS.tv1;resetFlow();welcome('tv1');activeChat='c'+Date.now().toString(36);chats.unshift({id:activeChat,title:'New chat',firmId:S.firm,case:S.case,createdAt:Date.now(),updatedAt:Date.now(),stage:S.stage,cause:null,done:[],html:msgs.innerHTML});chatsWrite();$('#taskTitle').textContent='New chat';chatRender();renderDemoChips()}
+function chatSave(){if(!S.user||!activeChat||!msgs)return;const c=chats.find(x=>x.id===activeChat);if(!c)return;Object.assign(c,{firmId:S.firm,case:S.case,updatedAt:Date.now(),stage:S.stage,cause:S.cause,done:[...S.done],html:threadHTML()});chatsWrite();chatRender()}
+function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});msgs=THREADS.tv1;resetFlow();welcome('tv1');activeChat='c'+Date.now().toString(36);chats.unshift({id:activeChat,title:'New chat',firmId:S.firm,case:S.case,createdAt:Date.now(),updatedAt:Date.now(),stage:S.stage,cause:null,done:[],html:threadHTML()});chatsWrite();$('#taskTitle').textContent='New chat';chatRender();renderDemoChips()}
 function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}<small>${esc(FIRMS[c.firmId]?.short||c.firmId)}</small></button><button class="chat-more" aria-label="Chat options">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>chatRestore(b.closest('.chat-row').dataset.id));box.querySelectorAll('.chat-more').forEach(b=>b.onclick=()=>{const c=chats.find(x=>x.id===b.closest('.chat-row').dataset.id);openModal(`<h2>Chat options</h2><button class="btn sec" id="renameChat">Rename</button> <button class="btn danger" id="deleteChat">Delete</button>`,m=>{m.querySelector('#renameChat').onclick=()=>{closeModal();openModal(`<h2>Rename chat</h2><input id="chatName" value="${esc(c.title)}" maxlength="48"><button class="btn primary" id="chatSaveName">Save</button>`,n=>n.querySelector('#chatSaveName').onclick=()=>{c.title=n.querySelector('#chatName').value.slice(0,48)||'New chat';chatsWrite();chatRender();closeModal()})};m.querySelector('#deleteChat').onclick=()=>{closeModal();confirmAction('Delete this chat?','This conversation will be removed from this browser.',()=>{chats=chats.filter(x=>x!==c);if(activeChat===c.id)chatNew();else{chatsWrite();chatRender()}closeModal()})}})})}
-function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.rcact button,.liq-act button,.suggest button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});applyStage();$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
+function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.rcact button,.liq-act button,.suggest button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});applyStage();$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
 function chatLoad(){chats=chatsRead();chatRender();if(chats.length)chatRestore(chats[0].id);else chatNew()}
 $('#newChat').onclick=chatNew;$('#newChatSide').onclick=chatNew;
 $('#taskTitle').ondblclick=()=>{const h=$('#taskTitle'),v=h.textContent,i=document.createElement('input');i.value=v;i.className='chat-title-input';h.replaceChildren(i);i.focus();i.select();i.onkeydown=e=>{if(e.key==='Enter'){const c=chats.find(x=>x.id===activeChat);if(c){c.title=i.value.slice(0,48)||'New chat';chatsWrite();chatRender()}h.textContent=c?.title||'New chat'}if(e.key==='Escape')h.textContent=v};i.onblur=()=>{if(i.isConnected)h.textContent=v}};
 document.addEventListener('change',e=>{if(e.target.id==='firmSel'&&chatHasMessages())chatSave()},true);
-const uploadOriginal=uploadComposerFiles;uploadComposerFiles=async function(){await uploadOriginal();chatSave()};
-const sendChatOriginal=sendChat;sendChat=async function(t){if(!activeChat)chatNew();const c=chats.find(x=>x.id===activeChat);if(c&&c.title==='New chat'){c.title=String(t).slice(0,48);$('#taskTitle').textContent=c.title;chatRender()}await sendChatOriginal(t);chatSave()};
+const uploadOriginal=uploadComposerFiles;uploadComposerFiles=async function(){if(pendingChatFiles.length)leaveChatEmpty();await uploadOriginal();chatSave()};
+const sendChatOriginal=sendChat;sendChat=async function(t){if(!activeChat)chatNew();const c=chats.find(x=>x.id===activeChat);if(c&&c.title==='New chat'){c.title=String(t).slice(0,48);$('#taskTitle').textContent=c.title;chatRender()}if(String(t||'').trim()&&!busy)leaveChatEmpty();await sendChatOriginal(t);chatSave()};
 const enterAppOriginal=enterApp;enterApp=function(u,o={}){const r=enterAppOriginal(u,o);document.getElementById('umName').textContent=u.name||'Business owner';document.getElementById('umEmail').textContent=u.email||'';document.getElementById('umCompany').textContent=u.company||'';document.getElementById('umTax').textContent=u.taxCode?`Tax code ${u.taxCode}`:'';if(o.fresh){chats=[];activeChat=null}chatLoad();return r};
 const firmSelOld=$('#firmSel').onchange;$('#firmSel').addEventListener('change',()=>{if(chatHasMessages())chatSave();activeChat=null;chatNew()});
 $('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};
@@ -1846,4 +1840,17 @@ function openSettings(section='General',query=''){
  if(sel==='Usage')void (async()=>{const files=await FILES.list(),d=dstore.load(),snaps=Object.values(d.firms||{}).reduce((n,f)=>n+(f.snaps||[]).length,0),bytes=files.reduce((n,f)=>n+(f.size||0),0),sent=chats.reduce((n,c)=>n+(c.html.match(/class="msg user"/g)||[]).length,0),pending=S.drafts.filter(x=>x.status==='pending_approval').length,approved=S.drafts.filter(x=>x.status==='executed (simulated)').length,rejected=S.drafts.filter(x=>x.status==='rejected').length;const b=document.querySelector('#usageStats');if(b)b.innerHTML='<div><b>'+chats.length+'</b><span>Conversations</span></div><div><b>'+sent+'</b><span>Messages sent</span></div><div><b>'+files.length+' · '+sizeLabel(bytes)+'</b><span>Uploaded files</span></div><div><b>'+snaps+'</b><span>Snapshots</span></div><div><b>'+pending+' / '+approved+' / '+rejected+'</b><span>Pending / approved / rejected drafts</span></div>'})()
 }
 $('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};
+// Empty chat: greeting, composer and starter questions sit centred in the chat column until the first
+// message (typed, chip or file upload). The greeting is removed then and never saved to chat history.
+function threadIsEmpty(){return !msgs||![...msgs.children].some(e=>!e.classList.contains('hero'))}
+function syncChatEmpty(){const col=document.querySelector('.chatcol');if(col)col.classList.toggle('is-empty',threadIsEmpty())}
+function threadHTML(){const c=msgs.cloneNode(true);c.querySelectorAll('.hero').forEach(h=>h.remove());return c.innerHTML}
+function leaveChatEmpty(){
+  if(!msgs||!threadIsEmpty())return;
+  msgs.querySelectorAll('.hero').forEach(h=>h.remove());
+  const col=document.querySelector('.chatcol');col.classList.remove('is-empty');
+  if(PREF.motion!==false&&!reduceMotion){col.classList.add('is-leaving');setTimeout(()=>col.classList.remove('is-leaving'),220)}
+}
+new MutationObserver(syncChatEmpty).observe(document.getElementById('thread-flow'),{childList:true});
+
 initAuth();
