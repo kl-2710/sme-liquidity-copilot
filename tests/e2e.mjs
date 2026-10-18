@@ -294,6 +294,22 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator(".messages.on .msg.bot .rcact button").count(), 0, "no review step");
     assert.equal(await page.evaluate(() => S.firm), "F01");
   });
+  if (theme === "light") await step("chat options open next to the row; rename has Cancel and Save", async () => {
+    const row = page.locator(".chat-row").first();
+    await row.hover(); await row.locator(".chat-more").click();
+    assert.equal(await page.locator(".chat-menu").isVisible(), true);
+    assert.equal(await page.locator("#scrim.show").count(), 0, "the menu is not a modal");
+    const btn = await row.locator(".chat-more").boundingBox(), menu = await page.locator(".chat-menu").boundingBox();
+    assert.ok(Math.abs(menu.y - (btn.y + btn.height)) < 12 || Math.abs(menu.y + menu.height - btn.y) < 12, "menu sits next to the button");
+    const before = await row.locator(".chat-open").innerText();
+    await page.click('[data-chat-act="rename"]');
+    assert.equal(await page.locator(".chat-menu").count(), 0);
+    await page.fill("#chatName", "Not saved"); await page.click("#chatCancelName");
+    assert.equal(await row.locator(".chat-open").innerText(), before);
+    await row.hover(); await row.locator(".chat-more").click(); await page.click('[data-chat-act="rename"]');
+    await page.fill("#chatName", "Cash review"); await page.click("#chatSaveName");
+    assert.equal(await page.locator(".chat-row .chat-open").first().innerText(), "Cash review");
+  });
   // ERR_TUNNEL_CONNECTION_FAILED only comes from a sandbox proxy blocking the XLSX CDN script.
   await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors.filter((e) => !/ERR_TUNNEL_CONNECTION_FAILED/.test(e)), []));
   await page.close();

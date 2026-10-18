@@ -1820,7 +1820,7 @@ function chatsWrite(){try{chats.sort((a,b)=>b.updatedAt-a.updatedAt);chats=chats
 function chatHasMessages(){return !!msgs?.querySelector('.msg.user')}
 function chatSave(){if(!S.user||!activeChat||!msgs)return;const c=chats.find(x=>x.id===activeChat);if(!c)return;Object.assign(c,{firmId:accountFirm(),case:S.case,updatedAt:Date.now(),stage:S.stage,cause:S.cause,done:[...S.done],html:threadHTML()});chatsWrite();chatRender()}
 function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});msgs=THREADS.tv1;resetFlow();welcome('tv1');activeChat='c'+Date.now().toString(36);chats.unshift({id:activeChat,title:'New chat',firmId:accountFirm(),case:S.case,createdAt:Date.now(),updatedAt:Date.now(),stage:S.stage,cause:null,done:[],html:threadHTML()});chatsWrite();$('#taskTitle').textContent='New chat';chatRender();renderDemoChips()}
-function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button><button class="chat-more" aria-label="Chat options">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>chatRestore(b.closest('.chat-row').dataset.id));box.querySelectorAll('.chat-more').forEach(b=>b.onclick=()=>{const c=chats.find(x=>x.id===b.closest('.chat-row').dataset.id);openModal(`<h2>Chat options</h2><button class="btn sec" id="renameChat">Rename</button> <button class="btn danger" id="deleteChat">Delete</button>`,m=>{m.querySelector('#renameChat').onclick=()=>{closeModal();openModal(`<h2>Rename chat</h2><input id="chatName" value="${esc(c.title)}" maxlength="48"><button class="btn primary" id="chatSaveName">Save</button>`,n=>n.querySelector('#chatSaveName').onclick=()=>{c.title=n.querySelector('#chatName').value.slice(0,48)||'New chat';chatsWrite();chatRender();closeModal()})};m.querySelector('#deleteChat').onclick=()=>{closeModal();confirmAction('Delete this chat?','This conversation will be removed from this browser.',()=>{chats=chats.filter(x=>x!==c);if(activeChat===c.id)chatNew();else{chatsWrite();chatRender()}closeModal()})}})})}
+function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button><button class="chat-more" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>chatRestore(b.closest('.chat-row').dataset.id));box.querySelectorAll('.chat-more').forEach(b=>b.onclick=e=>{e.stopPropagation();openChatMenu(b,chats.find(x=>x.id===b.closest('.chat-row').dataset.id))})}
 function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;if(c.firmId&&FIRMS[c.firmId])switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.rcact button,.liq-act button,.suggest button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});applyStage();$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
 function chatLoad(){chats=chatsRead();chatRender();if(chats.length)chatRestore(chats[0].id);else chatNew()}
 $('#newChat').onclick=chatNew;$('#newChatSide').onclick=chatNew;
@@ -1950,5 +1950,30 @@ async function uploadComposerAuto(){
   const b=newBot();await say(b,`<p>${esc(importNote(added.length,r))}</p>${docs?`<p>Word documents are kept for reference only.</p>`:''}${r.status==='saved'?'<p>Ask a question to analyse the updated data.</p>':''}`);scroll();
 }
 document.addEventListener('click',e=>{if(e.target.closest('[data-setup-data]')){openDataScreen('files');$('#dataFileInput').click()}});
+
+// Chat row options open as a small menu next to the ⋯ button; Rename opens a dialog with Cancel and Save.
+function closeChatMenu(){const m=document.querySelector('.chat-menu');if(!m)return;m.remove();document.querySelectorAll('.chat-more[aria-expanded="true"]').forEach(x=>{x.setAttribute('aria-expanded','false');x.closest('.chat-row')?.classList.remove('menu-open')})}
+function openChatMenu(btn,c){
+  const open=btn.getAttribute('aria-expanded')==='true';closeChatMenu();if(open||!c)return;
+  const m=document.createElement('div');m.className='chat-menu';m.setAttribute('role','menu');
+  m.innerHTML='<button type="button" role="menuitem" data-chat-act="rename"><span aria-hidden="true">✎</span>Rename</button><button type="button" role="menuitem" class="danger" data-chat-act="delete"><span aria-hidden="true">⌫</span>Delete</button>';
+  document.body.appendChild(m);btn.setAttribute('aria-expanded','true');btn.closest('.chat-row')?.classList.add('menu-open');
+  const r=btn.getBoundingClientRect(),w=m.offsetWidth,h=m.offsetHeight;
+  m.style.left=Math.max(8,Math.min(r.right-w,innerWidth-w-8))+'px';
+  m.style.top=(r.bottom+4+h>innerHeight-8?r.top-h-4:r.bottom+4)+'px';
+  m.querySelector('[data-chat-act="rename"]').onclick=()=>{closeChatMenu();renameChatDialog(c)};
+  m.querySelector('[data-chat-act="delete"]').onclick=()=>{closeChatMenu();confirmAction('Delete this chat?','This conversation will be removed from this browser.',()=>{chats=chats.filter(x=>x!==c);if(activeChat===c.id)chatNew();else{chatsWrite();chatRender()}closeModal()})};
+  m.querySelector('button').focus({preventScroll:true});
+}
+function renameChatDialog(c){
+  openModal(`<form class="rename-chat" id="renameChatForm"><h3>Rename chat</h3><label class="sr" for="chatName">Chat name</label><input id="chatName" value="${esc(c.title)}" maxlength="48" autocomplete="off"><div class="acts"><button type="button" class="btn sec" id="chatCancelName">Cancel</button><button type="submit" class="btn primary" id="chatSaveName">Save</button></div></form>`,n=>{
+    const input=n.querySelector('#chatName');setTimeout(()=>{input.focus();input.select()},40);
+    n.querySelector('#chatCancelName').onclick=closeModal;
+    n.querySelector('#renameChatForm').onsubmit=e=>{e.preventDefault();c.title=input.value.trim().slice(0,48)||'New chat';chatsWrite();chatRender();if(activeChat===c.id)$('#taskTitle').textContent=c.title;closeModal()};
+  });
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.chat-menu'))closeChatMenu()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.querySelector('.chat-menu')){const b=document.querySelector('.chat-more[aria-expanded="true"]');closeChatMenu();b&&b.focus()}});
+addEventListener('resize',closeChatMenu);document.addEventListener('scroll',closeChatMenu,true);
 
 ensureDemoAccounts().then(initAuth);

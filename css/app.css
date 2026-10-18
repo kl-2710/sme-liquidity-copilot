@@ -826,3 +826,13 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 .composer-wrap{position:relative;z-index:2}
 .chatcol:not(.is-empty) .composer-wrap{padding-top:28px;margin-top:-28px;background:linear-gradient(180deg,color-mix(in srgb,var(--paper) 0%,transparent),var(--paper) 26px)}
 .composer:focus-within{border-color:var(--lc-color-border-focus);box-shadow:0 0 0 1px color-mix(in srgb,var(--lc-color-border-focus) 35%,transparent),0 0 18px 2px color-mix(in srgb,var(--lc-color-action-primary) 16%,transparent),0 10px 28px -6px color-mix(in srgb,var(--lc-color-action-primary) 22%,transparent)}
+/* Chat row options menu, anchored to the ⋯ button */
+.chat-menu{position:fixed;z-index:90;min-width:168px;padding:5px;background:var(--lc-color-bg-surface);border:1px solid var(--lc-color-border-default);border-radius:12px;box-shadow:var(--shadow2);animation:pop .16s var(--ease)}
+.chat-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--lc-color-text-primary);text-align:left}
+.chat-menu button span{width:16px;text-align:center;color:var(--lc-color-text-secondary)}
+.chat-menu button:hover,.chat-menu button:focus-visible{background:var(--lc-color-bg-hover);outline:0}
+.chat-menu button.danger,.chat-menu button.danger span{color:var(--lc-color-status-error)}
+.chat-row.menu-open{background:var(--lc-color-bg-selected)}.chat-row.menu-open .chat-more{opacity:1;background:var(--lc-color-bg-hover)}
+.rename-chat h3{margin:0 0 12px}
+.rename-chat input{width:100%;padding:10px 12px;border:1px solid var(--lc-color-border-default);border-radius:10px;background:var(--lc-color-bg-input);color:var(--lc-color-text-primary);font:inherit;font-size:14px}
+.rename-chat input:focus{outline:0;border-color:var(--lc-color-border-focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--lc-color-border-focus) 22%,transparent)}
