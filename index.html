@@ -128,6 +128,9 @@
       <div class="composer-wrap">
         <div class="demo-chips" id="demoChips" aria-label="Suggested questions"></div>
         <form class="composer" id="chatForm" autocomplete="off">
+          <input type="file" id="chatFile" multiple accept=".csv,.xlsx,.xls,.docx" hidden>
+          <button type="button" class="attach-btn" id="attachBtn" aria-label="Upload company data files" title="Upload company data files">+</button>
+          <div class="upload-chips" id="chatFileChips" hidden></div>
           <textarea id="chatInput" rows="1" placeholder="Ask about liquidity, shortfalls or test a lever…" aria-label="Type a question"></textarea>
           <div class="comp-row">
             <span class="info tierq" tabindex="0" data-tip="Permission tiers: T0 Read · T1 Advise · T2 Draft · T3 Approve (UI only)">i</span><div class="tier-legend" aria-label="Agent permission tiers"><span class="tl t0">T0 Read</span><span class="tl t1">T1 Advise</span><span class="tl t2">T2 Draft</span><span class="tl t3">T3 Approve (UI)</span></div>
