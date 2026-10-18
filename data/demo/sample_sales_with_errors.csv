@@ -1,9 +1,0 @@
-invoice_id,firm_id,buyer,amount_vnd,issue_date,due_date,paid_date,ghi_chu
-S-DEMO-0001,F01,Nhà xuất khẩu Lớn K1,346438000,2026-08-20,2026-09-19,,
-S-DEMO-0002,F01,Nhà xuất khẩu K2,"120.500.000",2026-08-25,2026-09-24,,số có dấu chấm
-S-DEMO-0002,F01,Nhà xuất khẩu K2,98000000,2026-08-26,2026-09-25,,trùng mã
-S-DEMO-0004,F01,Thương hiệu nội địa K3,,2026-09-01,2026-10-01,,thiếu số tiền
-S-DEMO-0005,F01,Thương hiệu nội địa K3,75000000,05/09/2026,2026-10-05,,ngày sai định dạng
-S-DEMO-0006,F01,Nhà xuất khẩu Lớn K1,-5000000,2026-09-10,2026-10-10,,số âm
-S-DEMO-0007,F01,Nhà xuất khẩu Lớn K1,210000000,2026-10-03,2026-11-02,,sau ngày chốt
-S-DEMO-0008,F02,Xưởng may KH2,50000000,2026-09-12,2026-09-02,,khác DN và hạn trước ngày phát hành
