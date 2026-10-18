@@ -9,6 +9,13 @@
 - Advancing the conversation adds one divider per reached step. New chat and company changes clear the dividers with the conversation.
 - Only the interface and its browser tests changed for this presentation. Routing, calculations, data, and the order of the four business steps are preserved.
 
+## Sign-up and company files
+- Sign-up requires a company name (at least two characters), a unique tax code (10 or 13 digits; an optional hyphenated 10+3 form is normalized to digits), and a password with at least eight characters, uppercase and lowercase letters, a digit and a symbol. The same password rule is used in the browser password-reset form.
+- Uploaded files are indexed in the browser's IndexedDB database `lilact.files.v1`, scoped to the signed-in user. CSV/XLS/XLSX tables can be reviewed through the existing importer; XLS/XLSX uses the first worksheet. DOCX files are reference-only and never enter the importer or calculations.
+- Uploading or deleting files does not alter Copilot's active data. A reviewed import affects Copilot only after the existing save flow creates a snapshot. Deleting registry entries leaves all created snapshots available in History.
+- Company data is presented as a full-page workspace with Files and Businesses & snapshots views. It reuses the existing business, import and snapshot-history screens.
+- **Do not run `tools/port_prototype.py` again.** It would regenerate the UI and overwrite this single-flow and Company data work.
+
 ## Kept exactly as in the prototype
 - **Flow and business behaviour:** all screens and their order, the auth flow, chat routing and intents, task unlocking, tool calls and tiers, the calculations, the financing catalogue and ranking, the what-if levers, drafts, approval and rejection dialogs, the audit log, data upload, settings and pins.
 - **Data:** the synthetic data (`DATA`) and the scenario presets (`SC`).
