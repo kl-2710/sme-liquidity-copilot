@@ -10,11 +10,14 @@ This branch (`feature/frontend-demo`) is a static web demo: HTML, CSS and vanill
 ```bash
 git checkout feature/frontend-demo
 python3 -m http.server 8000        # or any static file server
-# open http://127.0.0.1:8000/  → "Use the demo account"
+# open http://127.0.0.1:8000/  → "Use the demo account" (or one of the other demo companies)
 ```
 
 ## What the demo does (from the prototype)
 - **Sign in:** sign in or sign up (stored in this browser only), or use the demo account. Sign-up requires a company name, a unique 10- or 13-digit tax code, and a password with upper/lowercase letters, a digit and a symbol.
+- **One account, one company:** each account analyses exactly one company, shown in the sidebar's *Company* card and taken from the account (name, tax code). There is no company switcher.
+  - Demo accounts (password `Demo@2026`) are each bound to one sample company: `demo@smecopilot.vn` → F01 Alpha Garment Subcontractor, `beta.demo@smecopilot.vn` → F02 Beta Fabric Distributor, `gamma.demo@smecopilot.vn` → F03 Gamma Packaging & Trims. Their data is fixed; imports are not available.
+  - A new account starts without data: the chat asks to *Upload company data* and stays disabled until the first snapshot is saved. The business name always comes from the account (change it in Settings → Account), whatever the uploaded files say.
 - **Chat:** one continuous conversation. Analysis advances through the same four business stages in order:
   1. Working-capital diagnosis (DSO · DIO · DPO · CCC)
   2. Cash-flow forecast (13 weeks, shortfall windows)
@@ -23,7 +26,7 @@ python3 -m http.server 8000        # or any static file server
 - **Detailed dashboard:** tabs for Dashboard, Shortfall, What-if, Approvals. Audit events remain available internally but are not displayed. Company data is a full-page workspace with Files and Businesses & snapshots tabs.
 - **Company files:** upload CSV, XLSX, XLS and DOCX files. Files stay in this browser's IndexedDB; Word files are reference-only. Uploaded tables do not affect Copilot until reviewed and saved as a snapshot. Deleting a file keeps snapshots already created from it.
 - **Permission tiers:** T0 Read · T1 Advise · T2 Draft · T3 Approve. Only the Approve click in the UI runs a *simulated* execution.
-- **Data:** three synthetic companies (F01–F03) with fixed default collection assumptions. This is not a credit decision.
+- **Data:** three synthetic companies (F01–F03), one per demo account, with fixed default collection assumptions. This is not a credit decision.
 
 ## Test
 ```bash

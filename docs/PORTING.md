@@ -39,3 +39,10 @@
 ## Single chat workspace updates
 
 The interface hides the audit log while keeping `addLog` and its in-memory events. Scenario selection is fixed by `defCase`. Chat history is stored in this browser per account; buttons in restored conversations are disabled until the user asks again. Billing is a demo placeholder and does not collect payment data.
+
+## One account, one company
+- The prototype let any account switch between F01–F03 (and its own uploaded businesses). Each account is now bound to a single company, shown in the sidebar *Company* card; the company selector is hidden.
+- Demo accounts are bound to F01, F02 and F03 respectively (`demo@`, `beta.demo@`, `gamma.demo@smecopilot.vn`) and cannot import data. A signed-up account analyses the one business it creates from its own files; that business is named after the account's company and renamed when the profile changes. Until it exists, the chat input is disabled and the welcome screen offers *Upload company data*.
+- Saved chats record the company they belong to and only the account's company chats are listed.
+- Calculations, routing and the four steps are unchanged; only which company is in context changed.
+
