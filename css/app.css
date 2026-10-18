@@ -723,6 +723,33 @@ html[data-theme=dark] .msg.bot:before{background-image:url("../assets/brand/lila
 .auth-copy h1 em{font-style:normal;color:var(--lc-color-action-primary-active)}
 html[data-theme=dark] .auth-copy h1 em{color:var(--lc-color-brand-accent)}
 .auth-hero{background:var(--lc-color-bg-brand)}
+
+/* Single conversation progress: keep every state on Lilact theme tokens. */
+.flow-steps{display:flex;align-items:center;gap:8px;list-style:none;margin:0;padding:8px 20px 10px;flex:0 0 auto;border-bottom:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-page)}
+.flow-steps li{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.flow-step{display:flex;align-items:center;gap:8px;min-width:0;width:100%;padding:8px 10px;border:1px solid var(--lc-color-border-default);border-radius:var(--lc-radius-lg);background:var(--lc-color-bg-surface);color:var(--lc-color-text-secondary);text-align:left;font:var(--lc-type-label);transition:background-color var(--lc-motion-duration-fast),border-color var(--lc-motion-duration-fast),color var(--lc-motion-duration-fast)}
+.flow-step:hover:not(:disabled){background:var(--lc-color-bg-hover);border-color:var(--lc-color-border-strong);color:var(--lc-color-text-primary)}
+.flow-step:focus-visible{outline:2px solid var(--lc-color-border-focus);outline-offset:2px}
+.flow-step-number{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border-radius:var(--lc-radius-full);background:var(--lc-color-bg-subtle);color:var(--lc-color-text-secondary);font-variant-numeric:tabular-nums;font-weight:600}
+.flow-step-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.flow-step.done{border-color:var(--lc-color-border-strong);color:var(--lc-color-text-primary)}
+.flow-step.done .flow-step-number{background:var(--lc-color-bg-selected);color:var(--lc-color-text-link)}
+.flow-step.current{background:var(--lc-color-bg-selected);border-color:var(--lc-color-border-focus);color:var(--lc-color-text-primary);font-weight:600}
+.flow-step.current .flow-step-number{background:var(--lc-color-action-primary);color:var(--lc-color-text-onAction)}
+.flow-step.locked{opacity:.58;cursor:not-allowed}
+.flow-route{display:none}
+.flow-divider{display:flex;align-items:center;gap:10px;width:100%;color:var(--lc-color-text-muted);font:var(--lc-type-label);scroll-margin-top:14px}
+.flow-divider:before,.flow-divider:after{content:"";height:1px;flex:1;background:var(--lc-color-border-default)}
+@media(max-width:520px){
+  .flow-steps{gap:4px;padding:7px 10px 9px}
+  .flow-steps li{flex:0 0 34px;gap:0}
+  .flow-steps li.is-current{flex:1;min-width:0}
+  .flow-step{justify-content:center;gap:7px;padding:5px 4px;border-radius:var(--lc-radius-md)}
+  .flow-step-number{flex-basis:24px;width:24px;height:24px}
+  .flow-step-label{display:none}
+  .flow-steps li.is-current .flow-step{justify-content:flex-start;padding-left:8px;padding-right:8px}
+  .flow-steps li.is-current .flow-step-label{display:block}
+}
 .auth-copy h1 em{color:var(--lc-color-brand-accent)}
 :focus-visible{outline:2px solid var(--lc-color-border-focus)}
 .btn.primary,.send{background:var(--lc-color-action-primary);color:var(--lc-color-text-onAction)}
