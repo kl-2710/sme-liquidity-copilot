@@ -72,7 +72,7 @@ const SAMPLE_CSV = {
     await page.click("#tabReg"); await page.waitForTimeout(200);
     await complete("0101 234567", "signup-first@example.com");
     await page.waitForFunction(() => !document.querySelector("#app").hidden, null, { timeout: 5000 }).catch(async () => { const detail=await page.evaluate(()=>({company:document.querySelector('#rgCompanyE').textContent,tax:document.querySelector('#rgTaxE').textContent,email:document.querySelector('#rgEmailE').textContent,password:document.querySelector('#rgPwE').textContent,form:document.querySelector('#rgErr').textContent})); throw new Error(`signup did not enter app: ${JSON.stringify(detail)}`) });
-    assert.equal(await page.locator("#acctCompanyName").innerText(), "Alpha Co.");
+    assert.equal(await page.locator("#uSub").innerText(), "Alpha Co.");
     await page.click("#userBtn");
     assert.equal(await page.locator("#umName").innerText(), "Test Owner");
     assert.equal(await page.locator("#umCompany").innerText(), "Alpha Co.");
@@ -96,8 +96,7 @@ const SAMPLE_CSV = {
     await page.check("#rgTerms"); await page.click("#rgSubmit");
     await page.waitForSelector("#app:not([hidden])");
     assert.equal(await page.locator(".firmbox").isVisible(), false);
-    assert.equal(await page.locator("#acctCompanyName").innerText(), "Delta Textiles");
-    assert.match(await page.locator("#acctCompanyMeta").innerText(), /Tax code 0312345678 · No data yet/);
+    assert.equal(await page.locator("#uSub").innerText(), "Delta Textiles");
     assert.equal(await page.locator("#chatInput").isDisabled(), true);
     assert.match(await page.locator(".hero h1").innerText(), /Let’s set up Delta Textiles/);
     await page.click("[data-setup-data]");
@@ -113,11 +112,10 @@ const SAMPLE_CSV = {
     assert.equal(await page.locator("#dNew").isVisible(), false, "one account has one company");
     await page.click("#dataBack");
     assert.equal(await page.locator("#chatInput").isDisabled(), false);
-    assert.match(await page.locator("#acctCompanyMeta").innerText(), /Your uploaded data/);
     await page.fill("#chatInput", "Where is my working capital stuck?"); await page.click("#sendBtn"); await page.waitForTimeout(3800);
     assert.match(await page.locator(".messages.on .msg.bot").last().innerText(), /Delta Textiles/);
     await page.reload(); await page.waitForSelector("#app:not([hidden])"); await page.waitForTimeout(500);
-    assert.equal(await page.locator("#acctCompanyName").innerText(), "Delta Textiles");
+    assert.equal(await page.locator("#uSub").innerText(), "Delta Textiles");
     await page.evaluate(() => localStorage.clear());
   });
   await step("each demo account opens its own sample company", async () => {
@@ -125,7 +123,7 @@ const SAMPLE_CSV = {
       await page.reload(); await authReady();
       await page.click(`[data-demo=${id}]`); await page.waitForSelector("#app:not([hidden])"); await page.waitForTimeout(500);
       assert.equal(await page.evaluate(() => S.firm), id);
-      assert.equal(await page.locator("#acctCompanyName").innerText(), name);
+      assert.equal(await page.locator("#uSub").innerText(), name);
       await page.evaluate(() => { localStorage.removeItem("smefc.session.v1"); sessionStorage.removeItem("smefc.session.v1"); });
     }
     await page.evaluate(() => localStorage.clear());
@@ -157,7 +155,7 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator('[data-view="log"], [data-tab="log"], #pane-log, #navSettings').count(), 0);
     assert.equal(await page.locator(".tnav" + "[data-task]").count(), 0);
     assert.equal(await page.locator(`.side .lilact-logo--${theme}`).isVisible(), true);
-    assert.equal(await page.locator("#acctCompanyName").innerText(), "Alpha Garment Subcontractor");
+    assert.equal(await page.locator("#uSub").innerText(), "Alpha Garment Subcontractor");
     assert.equal(await page.locator(".firmbox").isVisible(), false);
     await page.waitForTimeout(400);
     await shot(page, `${theme}-flow`);
@@ -249,7 +247,7 @@ for (const theme of ["light", "dark"]) {
     await page.click("#newChat"); await page.waitForTimeout(500);
     assert.equal(await page.locator(".messages.on .flow-divider").count(), 0);
     assert.equal(await page.evaluate(() => S.firm), "F01");
-    assert.equal(await page.locator("#acctCompanyName").innerText(), "Alpha Garment Subcontractor");
+    assert.equal(await page.locator("#uSub").innerText(), "Alpha Garment Subcontractor");
   });
   if (theme === "light") await step("file registry supports import, search, filters, sorting and safe deletion", async () => {
     await page.click('[data-view="data"]'); await page.click("#businessesTab");

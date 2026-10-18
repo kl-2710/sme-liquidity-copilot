@@ -15,7 +15,7 @@ python3 -m http.server 8000        # or any static file server
 
 ## What the demo does (from the prototype)
 - **Sign in:** sign in or sign up (stored in this browser only), or use the demo account. Sign-up requires a company name, a unique 10- or 13-digit tax code, and a password with upper/lowercase letters, a digit and a symbol.
-- **One account, one company:** each account analyses exactly one company, shown in the sidebar's *Company* card and taken from the account (name, tax code). There is no company switcher.
+- **One account, one company:** each account analyses exactly one company, kept in the user account (account card and menu: company name, tax code). There is no company switcher.
   - Demo accounts (password `Demo@2026`) are each bound to one sample company: `demo@smecopilot.vn` → F01 Alpha Garment Subcontractor, `beta.demo@smecopilot.vn` → F02 Beta Fabric Distributor, `gamma.demo@smecopilot.vn` → F03 Gamma Packaging & Trims. Their data is fixed; imports are not available.
   - A new account starts without data: the chat asks to *Upload company data* and stays disabled until the first snapshot is saved. The business name always comes from the account (change it in Settings → Account), whatever the uploaded files say.
 - **Chat:** one continuous conversation. Analysis advances through the same four business stages in order:
