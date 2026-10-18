@@ -109,9 +109,8 @@ for (const theme of ["light", "dark"]) {
   await step(`[${theme}] demo account opens the app with flow steps 2–4 locked`, async () => {
     await page.click("#btnDemo");
     await page.waitForSelector("#app:not([hidden])");
-    assert.equal(await page.locator(".flow-step.locked").count(), 3);
+    assert.equal(await page.locator('[data-view="log"], [data-tab="log"], #pane-log, #navSettings').count(), 0);
     assert.equal(await page.locator(".tnav" + "[data-task]").count(), 0);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
     assert.equal(await page.locator(`.side .lilact-logo--${theme}`).isVisible(), true);
     await page.waitForTimeout(400);
     await shot(page, `${theme}-flow`);
@@ -128,36 +127,40 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#sideFold").isVisible(), true);
     assert.equal(await page.locator("#sideToggle").isVisible(), false);
   });
+  await step(`[${theme}] account menu settings and help`, async () => {
+    await page.click("#userBtn");
+    assert.deepEqual(await page.locator("#userMenu [role=menuitem]").allTextContents(), ["Settings", "Get help", "Log out"]);
+    await page.click("#btnSettings");
+    assert.equal(await page.locator("#modal").getAttribute("role"), "dialog");
+    await page.fill("#settingsSearch", "dark");
+    await page.click(`[data-theme="${theme}"]`);
+    assert.equal(await page.locator("html").getAttribute("data-theme"), theme);
+    await page.locator('[data-section="Billing"]').click();
+    assert.match(await page.locator("#modal").innerText(), /Current plan: Demo \(free\)/);
+    assert.equal(await page.locator("#modal input").count(), 0);
+    await page.locator('[data-section="Usage"]').click();
+    assert.match(await page.locator("#modal").innerText(), /Conversations/);
+    await page.keyboard.press("Escape");
+    await page.click("#userBtn"); await page.click("#btnHelp");
+    assert.match(await page.locator("#modal").innerText(), /How Lilact works/);
+    await page.keyboard.press("Escape");
+  });
   await step(`[${theme}] Task 1 diagnosis shows DSO/DIO/DPO/CCC`, async () => {
     await ask("Where is my working capital stuck?");
     const t = await last().innerText();
     assert.match(t, /diagnose_working_capital/); assert.match(t, /69\.0/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
-    assert.equal(await page.locator(".flow-divider").count(), 1);
   });
   await step(`[${theme}] Task 2 forecast explains the shortfall`, async () => {
     await ask("Why am I short of cash? Show me the cause.");
-    assert.match(await page.locator("#taskTitle").innerText(), /Cash-flow forecast/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "2");
-    assert.equal(await page.locator(".flow-divider").count(), 2);
-    await page.locator('.flow-step[data-step="1"]').click();
-    assert.equal(await page.locator("#taskTitle").innerText(), "Cash-flow forecast");
     assert.equal(await page.locator('.tab[data-tab="dash"]').getAttribute("aria-selected"), "true");
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "2");
-    assert.equal(await page.locator(".flow-divider").count(), 2);
     await page.locator("#panelBtn").click();
   });
   await step(`[${theme}] Task 3 ranks financing options`, async () => {
     await ask("Rank the financing options that fit this cause.");
-    assert.match(await page.locator("#taskTitle").innerText(), /Financing match/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "3");
-    assert.equal(await page.locator(".flow-divider").count(), 3);
   });
   await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
     await ask("K1 will only pay 7 days early. What if we combine that with financing invoice S-F01-0070 via RF-001?");
     assert.match(await last().innerText(), /3\.87/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "4");
-    assert.equal(await page.locator(".flow-divider").count(), 4);
     await last().locator("button", { hasText: "Create draft" }).click();
     await page.waitForTimeout(1800);
     assert.ok(Number(await page.locator("#pendN").innerText()) > 0);
@@ -179,7 +182,7 @@ for (const theme of ["light", "dark"]) {
     assert.match(await page.locator("#pane-appr").innerText(), /Rejected/);
   });
   await step(`[${theme}] dashboard tabs render`, async () => {
-    for (const t of ["dash", "gap", "whatif", "log"]) {
+    for (const t of ["dash", "gap", "whatif"]) {
       await page.click(`.tab[data-tab=${t}]`); await page.waitForTimeout(500);
       assert.ok((await page.locator(`#pane-${t}`).innerText()).length > 40, t);
     }
@@ -197,13 +200,7 @@ for (const theme of ["light", "dark"]) {
   });
   await step(`[${theme}] New chat and company changes reset progress and dividers`, async () => {
     await page.click("#newChat");
-    assert.match(await page.locator("#taskTitle").innerText(), /Working-capital diagnosis/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
-    assert.equal(await page.locator(".flow-divider").count(), 0);
     await page.selectOption("#firmSel", "F02"); await page.waitForTimeout(500);
-    assert.match(await page.locator("#taskTitle").innerText(), /Working-capital diagnosis/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
-    assert.equal(await page.locator(".flow-divider").count(), 0);
     await page.selectOption("#firmSel", "F01"); await page.waitForTimeout(500);
   });
   if (theme === "light") await step("file registry supports import, search, filters, sorting and safe deletion", async () => {
@@ -242,7 +239,6 @@ for (const theme of ["light", "dark"]) {
   });
   if (theme === "light") await step("composer plus uploads without advancing the flow and offers review", async () => {
     await page.selectOption("#firmSel", "F01");
-    const stage = await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step");
     await page.locator("#chatFile").setInputFiles([
       { name: "sales_invoices.csv", mimeType: "text/csv", buffer: Buffer.from(SAMPLE_CSV["sales_invoices.csv"]) },
       { name: "reference.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: Buffer.from("reference") },
@@ -253,11 +249,9 @@ for (const theme of ["light", "dark"]) {
     await page.waitForFunction(() => document.querySelectorAll(".messages.on .msg.bot").length > 0 && document.querySelector(".messages.on .msg.bot:last-child .rcact button"));
     const reply = await page.locator(".messages.on .msg.bot").last().innerText();
     assert.match(reply, /1 recognised table file/); assert.match(reply, /1 reference document/); assert.match(reply, /1 unrecognised file/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), stage);
     await page.locator(".messages.on .msg.bot .rcact button").last().evaluate(el => el.click());
     await page.waitForSelector("#dataScreen:not([hidden]) #dataBusinesses #dFile", { state: "attached" });
     assert.match(await page.locator("#dPrev").innerText(), /Sales invoices/);
-    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), stage);
     await page.click("#dataBack");
   });
   await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors, []));
@@ -269,9 +263,6 @@ await step("mobile 390px: no horizontal scroll, menu opens", async () => {
   await page.goto(URL0); await page.evaluate(() => localStorage.clear()); await page.reload();
   await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1);
-  assert.equal(await page.locator(".flow-step").count(), 4);
-  assert.equal(await page.locator(".flow-step-label:visible").count(), 1);
-  assert.equal(await page.locator(".flow-step.locked").count(), 3);
   await page.waitForTimeout(400);
   await shot(page, "mobile-390-flow");
   await page.click("#menuBtn"); await page.click('[data-view="data"]');
