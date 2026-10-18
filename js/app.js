@@ -92,14 +92,15 @@ function animNum(el,to,fmt,dur=650){
   const step=t=>{const p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,3);el.textContent=fmt(from+(to-from)*e);if(p<1)el._raf=requestAnimationFrame(step)};
   el._raf=requestAnimationFrame(step);
 }
-function openModal(html,onMount){const m=$('#modal');m.innerHTML=html;$('#scrim').classList.add('show');onMount&&onMount(m);const f=m.querySelector('textarea,button.primary,button.ok');f&&setTimeout(()=>f.focus(),50)}
-function closeModal(){$('#scrim').classList.remove('show')}
+let modalReturnFocus=null;
+function openModal(html,onMount){const m=$('#modal');modalReturnFocus=document.activeElement;m.innerHTML=html;m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');$('#scrim').classList.add('show');onMount&&onMount(m);const f=m.querySelector('input,textarea,button.primary,button.ok,button:not([disabled])');f&&setTimeout(()=>f.focus(),30)}
+function closeModal(){$('#scrim').classList.remove('show');modalReturnFocus?.focus?.();modalReturnFocus=null}
 $('#scrim').addEventListener('mousedown',e=>{if(e.target.id==='scrim')closeModal()});
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape')closeModal();
+  if($('#scrim').classList.contains('show')){const m=$('#modal'),f=[...m.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter(x=>!x.hidden);if(e.key==='Escape'){e.preventDefault();closeModal();return}if(e.key==='Tab'&&f.length){if(e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===f.at(-1)){e.preventDefault();f[0].focus()}}return}
   const tag=(e.target.tagName||'').toLowerCase();
   if(['input','textarea','select'].includes(tag)||e.metaKey||e.ctrlKey)return;
-  const map={'1':'dash','2':'gap','3':'whatif','4':'appr','5':'log'};
+  const map={'1':'dash','2':'gap','3':'whatif','4':'appr'};
   if(map[e.key])setTab(map[e.key]);
   if(e.key==='/'){e.preventDefault();$('#chatInput').focus()}
 });
@@ -169,22 +170,16 @@ function placeInk(){const t=$(`.tab[data-tab="${S.tab}"]`),ink=$('#ink');if(!t)r
 $('#tabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)setTab(t.dataset.tab)});
 
 
-function fillCases(){
-  const opts=String(S.firm)[0]==='U'?[['base','Your uploaded data']]:S.firm==='F01'?[['base','Original scenario (TV2 case 1)']]:[['base','Customers pay on time'],['s7','Collections slip 7 more days']];
-  $('#caseSel').innerHTML=opts.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');$('#caseSel').value=S.case;$('#caseSel').disabled=opts.length<2;
-}
 function switchContext(firm,cs,{silent}={}){
   S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;
   const c=C();const eps=episodes(c);if(c.defk)S.epIdx=c.defk-1;else if(eps.length)S.epIdx=eps.reduce((a,e,i)=>e.peak>eps[a].peak?i:a,0);
-  derive();S.lev=freshLev();fillCases();$('#firmSel').value=firm;
-  $('#ctxLine').textContent=`${firm} · ${FIRMS[firm].short} · advice only, every action needs your approval`;
+  derive();S.lev=freshLev();$('#firmSel').value=firm;
   const w=$('#work');w.classList.add('loading');setTimeout(()=>w.classList.remove('loading'),260);
   $('#panelSub').textContent=`${firm} · ${FIRMS[firm].name}`;renderDemoChips();refreshTab();
-  Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});S.done=new Set();resetFlow();renderFlowSteps();
+  Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});S.done=new Set();resetFlow();
   if(!silent)welcome(S.task);
 }
 $('#firmSel').addEventListener('change',e=>{const f=e.target.value;if(f==='__add'){$('#firmSel').value=S.firm;startImport(null);return}switchContext(f,defCase(f));addLog({tool:'get_firm_context',tier:0,args:{firm_id:f},status:'ok',summary:'Switched company, started a new session'});toast(`Switched to ${f} · ${FIRMS[f].short}`)});
-$('#caseSel').addEventListener('change',e=>{S.case=e.target.value;S.last=null;const c=C(),eps=episodes(c);S.epIdx=c.defk?c.defk-1:(eps.length?eps.reduce((a,x,i)=>x.peak>eps[a].peak?i:a,0):0);derive();S.lev=freshLev();resetFlow();welcome(S.task);renderDemoChips();refreshTab();toast('Changed collection scenario: '+e.target.selectedOptions[0].text);addLog({tool:'set_case',tier:0,args:{firm_id:S.firm,case:S.case},status:'ok',summary:e.target.selectedOptions[0].text})});
 
 
 function renderDashOld(){
@@ -207,7 +202,7 @@ function renderDashOld(){
   </div>
   <div class="grid" style="grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);margin-top:14px" id="dashLow">
     <div class="card hov"><div class="card-head"><div><h3>Weeks to watch</h3><p>${EPS.length?EPS.length+' gaps below the buffer in 13 weeks':'No cash gaps'}</p></div></div>
-      ${EPS.length?EPS.slice().sort((a,b)=>b.peak-a.peak).slice(0,3).map(e=>`<button class="ep ${EP.k===e.k?'on':''}" style="width:100%;margin-bottom:8px;display:flex;align-items:center;gap:12px" data-ep="${e.k}"><div style="flex:1"><div class="k">Gap ${e.k} · ${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''}${e.censored?' · not yet ended':''}</div><div class="a num">${mm(e.peak)}</div><div class="d">Peak shortfall vs buffer · cash needed ${fd(e.start)}</div></div><span class="btn sec sm">See options →</span></button>`).join(''):`<div class="empty"><div class="big">✓</div>Balance stays ≥ ${money(c.buffer)} throughout 13 weeks.${(S.firm==='F02'||S.firm==='F03')?'<br>Try the <b>Collections slip 7 more days</b> scenario to see liquidity pressure.':''}</div>`}
+      ${EPS.length?EPS.slice().sort((a,b)=>b.peak-a.peak).slice(0,3).map(e=>`<button class="ep ${EP.k===e.k?'on':''}" style="width:100%;margin-bottom:8px;display:flex;align-items:center;gap:12px" data-ep="${e.k}"><div style="flex:1"><div class="k">Gap ${e.k} · ${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''}${e.censored?' · not yet ended':''}</div><div class="a num">${mm(e.peak)}</div><div class="d">Peak shortfall vs buffer · cash needed ${fd(e.start)}</div></div><span class="btn sec sm">See options →</span></button>`).join(''):`<div class="empty"><div class="big">✓</div>Balance stays ≥ ${money(c.buffer)} throughout 13 weeks.${(S.firm==='F02'||S.firm==='F03')?'<br>No cash shortfall in the 13-week forecast, so there is nothing to simulate.':''}</div>`}
     </div>
     <div class="card hov"><div class="card-head"><div><h3>Copilot insights</h3><p>Drawn from synthetic data</p></div></div>
       <div class="callout amber" style="margin-bottom:9px"><span>⚠</span><div><b>Concentrated receivables</b><br>${tb?esc(tb.k)+' makes up '+nf(tb.v/tot*100,1)+'% of open receivables ('+money(tb.v)+').':'No data yet.'}</div></div>
@@ -227,7 +222,7 @@ function renderDashOld(){
 
 function renderGap(){
   const c=C(),p=$('#pane-gap'),t3=c.tv3;
-  if(!EPS.length){p.innerHTML=`<div class="card"><div class="empty"><div class="big">✓</div><b>No cash shortfall forecast in the next 13 weeks</b><br>Lowest balance still ≥ buffer ${money(c.buffer)}, so Copilot does not move on to financing match.${(S.firm==='F02'||S.firm==='F03')?'<br><br><button class="btn primary" id="goStress">See the 7-days-slower collection case →</button>':''}</div></div>`;const b=$('#goStress');b&&b.addEventListener('click',()=>{$('#caseSel').value='s7';$('#caseSel').dispatchEvent(new Event('change'))});return}
+  if(!EPS.length){p.innerHTML=`<div class="card"><div class="empty"><b>No cash shortfall in the 13-week forecast, so there is nothing to simulate.</b></div></div>`;return}
   const asOf=dn(c.as_of),need=dn(EP.start),dl=need-asOf;
   const isDef=c.defk&&EP.k===c.defk&&t3;
   p.innerHTML=`
@@ -300,7 +295,7 @@ function runNow(label){
 }
 function renderWhatIf(keep){
   const c=C(),p=$('#pane-whatif'),L=S.lev;
-  if(EP.none){p.innerHTML=`<div class="card"><div class="empty"><div class="big">⟳</div><b>No shortfall to simulate</b><br>Choose the <b>Collections slip 7 more days</b> scenario in the top bar to create liquidity pressure, then test levers.</div></div>`;return}
+  if(EP.none){p.innerHTML=`<div class="card"><div class="empty"><div class="big">⟳</div><b>No shortfall to simulate</b><br>No cash shortfall in the 13-week forecast, so there is nothing to simulate.</div></div>`;return}
   if(!keep||!$('#wiRes')){buildWI(p)}
   syncWI();
 }
@@ -528,29 +523,7 @@ function rejectDlg(d){
 const ST_CLS={ok:'blue','pending_approval':'amber','executed (simulated)':'green',rejected:'gray',blocked:'red'};
 function addLog(e){
   const o={n:++S.seq,ts:Date.now(),firm:S.firm,...e};S.log.unshift(o);
-  if(S.tab==='log')renderLog(o.n);
-}
-function logRows(){
-  const f=S.logFilter,q=f.q.toLowerCase();
-  return S.log.filter(x=>x.firm===S.firm&&(f.status==='all'||x.status===f.status||(f.status==='executed (simulated)'&&x.status.startsWith('executed')))&&(!q||(x.draftId||'').toLowerCase().includes(q)||x.tool.includes(q)||x.summary.toLowerCase().includes(q)));
-}
-function renderLog(flash){
-  const p=$('#pane-log'),rows=logRows(),all=S.log.filter(x=>x.firm===S.firm);
-  const cnt=k=>all.filter(x=>k==='all'||x.status===k).length;
-  const four=['pending_approval','executed (simulated)','rejected','blocked'].map(k=>all.some(x=>x.status===k));
-  p.innerHTML=`<div class="card-head"><div><h3>Execution log</h3><p>One line per tool call, including rejected or blocked ones. Click a row to see the JSON parameters.</p></div><button class="btn sec" id="csvBtn">⇩ Export CSV</button></div>
-  <div class="fbar"><div class="seg" id="logSeg">${[['all','All'],['ok','ok'],['pending_approval','Pending'],['executed (simulated)','Approved'],['rejected','Rejected'],['blocked','Blocked']].map(([k,t])=>`<button data-f="${k}" class="${S.logFilter.status===k?'on':''}">${t} ${cnt(k)}</button>`).join('')}</div><input class="search" id="logQ" placeholder="Search by draft ID, tool…" value="${esc(S.logFilter.q)}" aria-label="Search the log"></div>
-  <div class="callout ${four.every(Boolean)?'green':''}" style="margin-bottom:12px"><span>${four.every(Boolean)?'✓':'ℹ'}</span><div><b>Execution evidence:</b> ${['Pending','Approved','Rejected','Blocked'].map((t,i)=>`<span class="status ${four[i]?'green':'gray'}" style="margin-left:4px">${four[i]?'✓':'○'} ${t}</span>`).join('')}</div></div>
-  ${rows.length?`<div class="table-wrap"><table><thead><tr><th>Time</th><th>DN</th><th>Tool</th><th>Tier</th><th>Summary</th><th>Status</th></tr></thead><tbody>${rows.map(r=>`<tr class="logrow ${r.n===flash?'flash':''}" data-n="${r.n}"><td class="num">${new Date(r.ts).toLocaleTimeString('en-GB')}</td><td>${r.firm}</td><td><code style="font:600 11.5px ui-monospace,monospace">${r.tool}</code></td><td><span class="tl t${r.tier}">T${r.tier}</span></td><td style="white-space:normal;min-width:220px">${esc(r.summary)}</td><td><span class="status ${ST_CLS[r.status]||'gray'}"><i></i>${r.status}</span></td></tr>`).join('')}</tbody></table></div>`:`<div class="card"><div class="empty"><div class="big">≣</div>No entries match the filter.</div></div>`}`;
-  $$('#logSeg button',p).forEach(b=>b.onclick=()=>{S.logFilter.status=b.dataset.f;renderLog()});
-  const q=$('#logQ');q.oninput=()=>{S.logFilter.q=q.value;const pos=q.selectionStart;renderLog();const n=$('#logQ');n.focus();n.setSelectionRange(pos,pos)};
-  $('#csvBtn').onclick=exportCSV;
-  $$('.logrow',p).forEach(tr=>tr.onclick=()=>{const nx=tr.nextElementSibling;if(nx&&nx.classList.contains('jsonrow')){nx.remove();return}const r=S.log.find(x=>x.n===+tr.dataset.n);const j=document.createElement('tr');j.className='jsonrow';j.innerHTML=`<td colspan="6"><pre>${esc(JSON.stringify({ts:new Date(r.ts).toISOString(),firm_id:r.firm,tool:r.tool,tier:r.tier,args:r.args,status:r.status,reason:r.reason||undefined,draft_id:r.draftId||undefined},null,2))}</pre></td>`;tr.after(j)});
-}
-function exportCSV(){
-  const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
-  const csv=['time,firm_id,tool,tier,status,summary,args'].concat(S.log.slice().reverse().map(r=>[new Date(r.ts).toISOString(),r.firm,r.tool,r.tier,r.status,r.summary,JSON.stringify(r.args)].map(q).join(','))).join('\n');
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv'}));a.download='copilot_execution_log.csv';a.click();toast('Log exported as CSV');
+
 }
 
 
@@ -623,7 +596,7 @@ function route(raw){
 let busy=false;
 async function sendChat(text){
   text=(text||'').trim();if(!text||busy)return;busy=true;$('#sendBtn').disabled=true;$('#chatInput').value='';
-  if(!msgs.querySelector('.msg.user'))addFlowDivider(1);
+
   {const ch=currentChips().find(x=>norm(x.ask)===norm(text));if(ch)S.done.add(ch.id)}userMsg(text);$('#demoChips').hidden=true;const ty=typingEl();await sleep(reduceMotion?0:420);ty.remove();
   try{await respond(route(text),text)}catch(err){console.error(err);await botNote('There was an error processing the request. Please try again.')}
   busy=false;$('#sendBtn').disabled=false;renderDemoChips();$('#chatInput').focus({preventScroll:true});
@@ -674,7 +647,7 @@ async function runScenarioInChat(bot,sc){
 }
 async function runLevInChat(bot,L,sc,text){
   const label=sc?sc.name:describeLev(L);
-  if(EP.none){await say(bot,'No gap to simulate. Switch to the case <b>Collections slip 7 more days</b>.');return}
+  if(EP.none){await say(bot,'No gap to simulate. No cash shortfall in the 13-week forecast, so there is nothing to simulate.');return}
   const out=await toolCall(bot,'simulate_scenario',1,{firm_id:S.firm,levers:leverArgs(L)},()=>{
     S.lev={...L};const res=runSim(L),run=commit(L,res,label);if(sc){run.scId=sc.id;S.done.add(sc.id)}return {run,bad:run.st.k==='bl'&&!res.l.some(Boolean)};
   });
@@ -760,32 +733,6 @@ const THREADS={};
 (function(){const box=$('#threads');const d=document.createElement('div');d.className='messages on';d.id='thread-flow';d.dataset.init='0';box.appendChild(d);Object.keys(TASKS).forEach(t=>{THREADS[t]=d})})();
 msgs=THREADS.tv1;
 
-const FLOW_NAMES={1:'Working-capital diagnosis',2:'Cash-flow forecast',3:'Financing match',4:'What-if and drafts'};
-function addFlowDivider(n,before){
-  if(!msgs||msgs.querySelector(`.flow-divider[data-step="${n}"]`))return;
-  const divider=document.createElement('div');divider.className='flow-divider';divider.dataset.step=n;divider.setAttribute('role','separator');divider.textContent=`Step ${n} \u00b7 ${FLOW_NAMES[n]}`;
-  const hero=msgs.querySelector('.hero');
-  if(n===1&&hero)hero.after(divider);
-  else if(before&&before.parentElement===msgs)msgs.insertBefore(divider,before);
-  else msgs.appendChild(divider);
-}
-function renderFlowSteps(){
-  const current=Math.max(1,Math.min(4,S.stage|0));
-  $$('.flow-step').forEach(button=>{
-    const n=+button.dataset.step,locked=!unlockedTask(n),done=!locked&&n<current,isCurrent=!locked&&n===current;
-    button.disabled=locked;button.classList.toggle('locked',locked);button.classList.toggle('done',done);button.classList.toggle('current',isCurrent);
-    button.title=locked?'Opens as the conversation reaches this step':FLOW_NAMES[n];
-    button.setAttribute('aria-label',`Step ${n}: ${FLOW_NAMES[n]}${locked?', locked':done?', complete':isCurrent?', current':''}`);
-    if(isCurrent)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');
-    button.closest('li')?.classList.toggle('is-current',isCurrent);
-  });
-}
-$('#flowSteps').addEventListener('click',event=>{
-  const button=event.target.closest('.flow-step');if(!button||button.disabled)return;
-  const n=+button.dataset.step;setTab(TASKS['tv'+n].tab);
-  const target=msgs.querySelector(`.flow-divider[data-step="${n}"]`)||(n===1?msgs.querySelector('.hero'):null);
-  if(target)target.scrollIntoView({behavior:reduceMotion?'auto':'smooth',block:'start'});
-});
 function currentChips(){
   const st=S.stage|0;
   if(st>=3)return SCEN();
@@ -797,16 +744,15 @@ const unlockedTask=k=>k===1||(S.stage|0)>=(k===4?3:k);
 function applyStage(){
   const g=$('.tab[data-tab="gap"]'),w=$('.tab[data-tab="whatif"]');
   if(g)g.hidden=S.stage<2;if(w)w.hidden=S.stage<3;
-  renderFlowSteps();
 }
 function advance(n,bot){
   const previous=S.stage;S.stage=Math.max(S.stage,n);S.task='tv'+n;
-  if(S.stage>previous)addFlowDivider(n,bot);
-  $('#taskTitle').textContent=TASKS[S.task].title;$('#chatInput').placeholder=TASKS[S.task].ph;
-  applyStage();renderFlowSteps();
+
+  $('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';
+  applyStage();
   if(S.panel){if(S.tab!==TASKS[S.task].tab)setTab(TASKS[S.task].tab);else renderTab()}
 }
-function resetFlow(){S.stage=0;S.cause=null;S.task='tv1';if(msgs)msgs.querySelectorAll('.flow-divider').forEach(d=>d.remove());$('#taskTitle').textContent=TASKS.tv1.title;$('#chatInput').placeholder=TASKS.tv1.ph;applyStage();renderFlowSteps();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
+function resetFlow(){S.stage=0;S.cause=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';applyStage();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
 function userFirst(){const n=(S.user&&S.user.name||'you').trim().split(/\s+/);return n[n.length-1]}
 
 
@@ -820,7 +766,7 @@ function closePanel(){
   $('#panelBtn').classList.remove('on');$('#panelBtn').setAttribute('aria-pressed','false');syncViewNav();
 }
 function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?!$('#dataScreen').hidden:S.panel&&b.dataset.view===S.tab))}
-function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr,log:renderLog})[S.tab]()}
+function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr})[S.tab]()}
 function refreshTab(){if(S.panel)renderTab()}
 function setTab(id){
   if(id==='data'){openDataScreen('businesses');return}
@@ -831,7 +777,7 @@ function setTab(id){
   renderTab();placeInk();setTimeout(placeInk,480);
 }
 $('#panelClose').addEventListener('click',closePanel);
-$('#panelBtn').addEventListener('click',()=>S.panel?closePanel():setTab(S.tab&&S.tab!=='appr'&&S.tab!=='log'?S.tab:TASKS[S.task].tab));
+$('#panelBtn').addEventListener('click',()=>S.panel?closePanel():setTab(S.tab&&S.tab!=='appr'?S.tab:TASKS[S.task].tab));
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.view==='data')openDataScreen('files');else if(S.panel&&S.tab===b.dataset.view){closePanel()}else setTab(b.dataset.view);closeSide()}));
 
 
@@ -844,14 +790,12 @@ function setTask(id,{force}={}){
   const same=S.task===id;S.task=id;
   Object.values(THREADS).forEach(el=>el.classList.add('on'));
   msgs=THREADS[id];
-  $('#taskTitle').textContent=TASKS[id].title;$('#chatInput').placeholder=TASKS[id].ph;
+  $('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';
   if(msgs.dataset.init!=='1'||force)welcome(id);
   renderDemoChips();
   if(S.panel&&!same)setTab(TASKS[id].tab);
-  renderFlowSteps();
-  closeSide();scroll();
+closeSide();scroll();
 }
-$('#newChat').addEventListener('click',()=>{S.done=new Set();resetFlow();welcome(S.task);renderDemoChips();$('#chatInput').focus();closeSide()});
 
 
 const ci=$('#chatInput');
@@ -965,7 +909,7 @@ async function respondConc(bot){
 function welcome(task){
   task=task||S.task;const th=THREADS[task],T=TASKS[task],c=C();th.innerHTML='';th.dataset.init='1';
   const worst=EPS.length?EPS.reduce((a,e)=>e.peak>a.peak?e:a,EPS[0]):null;
-  const note='';const _unused=task==='tv1'||task==='tv2'?(worst?`In the next 13 weeks there are <b>${EPS.length} gaps</b> where the balance falls below the buffer ${money(c.buffer)}; largest shortfall <b>${mm(worst.peak)}</b> from ${fd(worst.start)}.`:`Balance stays above the buffer ${money(c.buffer)} in 13 weeks${S.firm!=='F01'?'. Switch to <b>Collections slip 7 more days</b> in the top bar to see liquidity pressure.':'.'}`):'';
+  const note='';const _unused=task==='tv1'||task==='tv2'?(worst?`In the next 13 weeks there are <b>${EPS.length} gaps</b> where the balance falls below the buffer ${money(c.buffer)}; largest shortfall <b>${mm(worst.peak)}</b> from ${fd(worst.start)}.`:`Balance stays above the buffer ${money(c.buffer)} in 13 weeks${S.firm!=='F01'?'. No cash shortfall in the 13-week forecast, so there is nothing to simulate.':'.'}`):'';
   const h=document.createElement('div');h.className='hero';
   h.innerHTML=`<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div><h1>Hi ${esc(userFirst())}. ${esc(T.hello(FIRMS[S.firm].short))}</h1><p>${T.lead}</p>${note?`<div class="ctxnote"><span>◷</span><span>${note}</span></div>`:''}`;
   th.appendChild(h);
@@ -1081,11 +1025,10 @@ function enterApp(u,{fresh,restore}={}){
   S.user=u;syncUserFirms();
   $('#authRoot').hidden=true;$('#app').hidden=false;document.title='Lilact · SME Liquidity Copilot';
   $('#uAvatar').textContent=initials(u.name);$('#uName').textContent=u.name;$('#uSub').textContent=u.company||u.email;
-  $('#umName').textContent=u.company||u.name;$('#umEmail').textContent=[u.taxCode&&`Tax code ${u.taxCode}`,u.email].filter(Boolean).join(' · ');
+  $('#umName').textContent=u.name||'Business owner';$('#umEmail').textContent=u.email||'';$('#umCompany').textContent=u.company||'';$('#umTax').textContent=u.taxCode?`Tax code ${u.taxCode}`:'';
   if(!booted){booted=true;bootApp()}else{resetSession();switchContext('F01','base');updatePending()}
   setTask('tv1',{force:true});
-  renderFlowSteps();
-  if(!restore)toast(fresh?`Welcome ${userFirst()}! Your account has been created.`:`Hello ${userFirst()}, you are signed in.`);
+if(!restore)toast(fresh?`Welcome ${userFirst()}! Your account has been created.`:`Hello ${userFirst()}, you are signed in.`);
 }
 function resetSession(){
   S.drafts=[];S.log=[];S.draftN=0;S.cmp=[];S.last=null;S.done=new Set();S.seq=0;S.runN=0;closePanel();
@@ -1741,12 +1684,10 @@ const isDark=()=>PREF.theme==='dark'||(PREF.theme==='system'&&mqDark.matches);
 function applyPrefs(){
   const h=document.documentElement;h.dataset.theme=isDark()?'dark':'light';h.dataset.density=PREF.density;h.dataset.motion=PREF.motion?'on':'off';
   let m=document.querySelector('meta[name=theme-color]');if(!m){m=document.createElement('meta');m.name='theme-color';document.head.appendChild(m)}m.content=isDark()?'#0F0C1E':'#F7F6FB';
-  const tb=$('#themeBtn');tb&&tb.setAttribute('aria-label',isDark()?'Switch to light theme':'Switch to dark theme');
 }
 function savePrefs(){try{localStorage.setItem(PK,JSON.stringify(PREF))}catch(e){}applyPrefs()}
 mqDark.addEventListener&&mqDark.addEventListener('change',()=>{if(PREF.theme==='system')applyPrefs()});
 function toggleTheme(){PREF.theme=isDark()?'light':'dark';savePrefs();toast(isDark()?'Switched to dark theme':'Switched to light theme',1800)}
-$('#themeBtn').addEventListener('click',toggleTheme);$('#authTheme').addEventListener('click',toggleTheme);
 function openSettings(){
   const u=S.user||{};
   const seg=(key,opts,two)=>`<div class="stseg ${two?'two':''}" data-seg="${key}">${opts.map(([v,l,pv])=>`<button type="button" data-v="${v}" class="${String(PREF[key])===v?'on':''}" aria-pressed="${String(PREF[key])===v}">${pv?`<span class="pv ${pv}"></span>`:''}${l}</button>`).join('')}</div>`;
@@ -1761,8 +1702,7 @@ function openSettings(){
     m.querySelector('#setReset').onclick=()=>{Object.assign(PREF,{theme:'light',density:'comfy',motion:true});savePrefs();closeModal();toast('Settings reset');setTimeout(openSettings,250)};
     m.querySelector('#setDone').onclick=closeModal});
 }
-$('#navSettings').addEventListener('click',()=>{openSettings();closeSide()});
-$('#btnSettings').addEventListener('click',()=>{$('#userMenu').hidden=true;$('#userBtn').setAttribute('aria-expanded','false');openSettings()});
+// Account menu actions are wired after the settings and help dialogs are defined below.
 applyPrefs();
 
 
@@ -1774,7 +1714,7 @@ document.addEventListener('pointerdown',e=>{
 
 
 const _setTask=setTask;
-setTask=function(...a){const r=_setTask.apply(this,a);renderFlowSteps();const t=THREADS[S.task];if(t&&PREF.motion){t.classList.remove('swap');void t.offsetWidth;t.classList.add('swap')}return r};
+setTask=function(...a){const r=_setTask.apply(this,a);const t=THREADS[S.task];if(t&&PREF.motion){t.classList.remove('swap');void t.offsetWidth;t.classList.add('swap')}return r};
 
 
 const PINS={firms:[],prompts:[],widgets:[]};
@@ -1874,4 +1814,36 @@ addEventListener('keydown',e=>{
 setSide(PREF.side!=='closed',false);
 const _cp=closePanel;closePanel=function(){setWide(false);return _cp.apply(this,arguments)};
 
+
+// Local conversation history and account help/settings views.
+const CHAT_KEY=()=>`lilact.chats.v1.${S.user?.id||'anon'}`;let chats=[],activeChat=null;
+function chatsRead(){try{return JSON.parse(localStorage.getItem(CHAT_KEY())||'[]')}catch(e){return []}}
+function chatsWrite(){try{chats.sort((a,b)=>b.updatedAt-a.updatedAt);chats=chats.slice(0,50);localStorage.setItem(CHAT_KEY(),JSON.stringify(chats))}catch(e){toast('Chat history could not be saved')}}
+function chatHasMessages(){return !!msgs?.querySelector('.msg.user')}
+function chatSave(){if(!S.user||!activeChat||!msgs)return;const c=chats.find(x=>x.id===activeChat);if(!c)return;Object.assign(c,{firmId:S.firm,case:S.case,updatedAt:Date.now(),stage:S.stage,cause:S.cause,done:[...S.done],html:msgs.innerHTML});chatsWrite();chatRender()}
+function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});msgs=THREADS.tv1;resetFlow();welcome('tv1');activeChat='c'+Date.now().toString(36);chats.unshift({id:activeChat,title:'New chat',firmId:S.firm,case:S.case,createdAt:Date.now(),updatedAt:Date.now(),stage:S.stage,cause:null,done:[],html:msgs.innerHTML});chatsWrite();$('#taskTitle').textContent='New chat';chatRender();renderDemoChips()}
+function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}<small>${esc(FIRMS[c.firmId]?.short||c.firmId)}</small></button><button class="chat-more" aria-label="Chat options">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>chatRestore(b.closest('.chat-row').dataset.id));box.querySelectorAll('.chat-more').forEach(b=>b.onclick=()=>{const c=chats.find(x=>x.id===b.closest('.chat-row').dataset.id);openModal(`<h2>Chat options</h2><button class="btn sec" id="renameChat">Rename</button> <button class="btn danger" id="deleteChat">Delete</button>`,m=>{m.querySelector('#renameChat').onclick=()=>{closeModal();openModal(`<h2>Rename chat</h2><input id="chatName" value="${esc(c.title)}" maxlength="48"><button class="btn primary" id="chatSaveName">Save</button>`,n=>n.querySelector('#chatSaveName').onclick=()=>{c.title=n.querySelector('#chatName').value.slice(0,48)||'New chat';chatsWrite();chatRender();closeModal()})};m.querySelector('#deleteChat').onclick=()=>{closeModal();confirmAction('Delete this chat?','This conversation will be removed from this browser.',()=>{chats=chats.filter(x=>x!==c);if(activeChat===c.id)chatNew();else{chatsWrite();chatRender()}closeModal()})}})})}
+function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.rcact button,.liq-act button,.suggest button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});applyStage();$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
+function chatLoad(){chats=chatsRead();chatRender();if(chats.length)chatRestore(chats[0].id);else chatNew()}
+$('#newChat').onclick=chatNew;$('#newChatSide').onclick=chatNew;
+$('#taskTitle').ondblclick=()=>{const h=$('#taskTitle'),v=h.textContent,i=document.createElement('input');i.value=v;i.className='chat-title-input';h.replaceChildren(i);i.focus();i.select();i.onkeydown=e=>{if(e.key==='Enter'){const c=chats.find(x=>x.id===activeChat);if(c){c.title=i.value.slice(0,48)||'New chat';chatsWrite();chatRender()}h.textContent=c?.title||'New chat'}if(e.key==='Escape')h.textContent=v};i.onblur=()=>{if(i.isConnected)h.textContent=v}};
+document.addEventListener('change',e=>{if(e.target.id==='firmSel'&&chatHasMessages())chatSave()},true);
+const uploadOriginal=uploadComposerFiles;uploadComposerFiles=async function(){await uploadOriginal();chatSave()};
+const sendChatOriginal=sendChat;sendChat=async function(t){if(!activeChat)chatNew();const c=chats.find(x=>x.id===activeChat);if(c&&c.title==='New chat'){c.title=String(t).slice(0,48);$('#taskTitle').textContent=c.title;chatRender()}await sendChatOriginal(t);chatSave()};
+const enterAppOriginal=enterApp;enterApp=function(u,o={}){const r=enterAppOriginal(u,o);document.getElementById('umName').textContent=u.name||'Business owner';document.getElementById('umEmail').textContent=u.email||'';document.getElementById('umCompany').textContent=u.company||'';document.getElementById('umTax').textContent=u.taxCode?`Tax code ${u.taxCode}`:'';if(o.fresh){chats=[];activeChat=null}chatLoad();return r};
+const firmSelOld=$('#firmSel').onchange;$('#firmSel').addEventListener('change',()=>{if(chatHasMessages())chatSave();activeChat=null;chatNew()});
+$('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};
+$('#btnHelp').onclick=()=>{closeUserMenu();openModal(`<div class="help-modal"><button class="settings-close" aria-label="Close">×</button><h2>How Lilact works</h2><p>Ask in English. Copilot diagnoses working capital, forecasts cash, finds funding and tests what-if options. Every action is a draft that waits for your approval.</p><h3>Try a question</h3>${['Where is my working capital stuck?','Which customer holds most of my receivables?','Why am I short of cash? Show me the cause.'].map(q=>`<button class="btn sec help-prompt">${esc(q)}</button>`).join('')}<h3>Keyboard shortcuts</h3><p>Ctrl+B sidebar · / chat · Enter send · Shift+Enter new line · Esc close</p><h3>Frequently asked questions</h3><details><summary>Where is data stored?</summary><p>In this browser.</p></details><details><summary>Which files affect calculations?</summary><p>Reviewed table files after saving a snapshot; Word files are reference only.</p></details><details><summary>Why are figures estimates?</summary><p>The demo uses synthetic data and indicative products.</p></details></div>`,m=>{m.querySelector('.settings-close').onclick=closeModal;m.querySelectorAll('.help-prompt').forEach(b=>b.onclick=()=>{$('#chatInput').value=b.textContent;closeModal();$('#chatInput').focus()})})};
+function closeUserMenu(){$('#userMenu').hidden=true;$('#userBtn').setAttribute('aria-expanded','false')}
+function openSettings(section='General',query=''){
+ const u=S.user||{},demo=u.id==='u-demo'||u.email===DEMO.email,names=['General','Account','Privacy','Billing','Usage','Log out'],fields={General:['Appearance','Light','Dark','System','Display density','Motion effects','Reset settings'],Account:['Full name','Company','Email','Tax code','Change password','Delete account'],Privacy:['Clear chat history','Delete all uploaded files','Export my data'],Billing:['Current plan','Billing is not available'],Usage:['conversations','messages','files','snapshots','drafts']};let q=query.toLowerCase(),sel=names.slice(0,5).find(n=>n.toLowerCase().includes(q)||(fields[n]||[]).some(x=>x.toLowerCase().includes(q)))||section;if(!names.includes(sel)||sel==='Log out')sel='General';
+ let content='';if(sel==='General')content=`<h2>General</h2><section class="settings-block" data-label="Appearance"><h3>Appearance</h3><div class="settings-choice">${['Light','Dark','System'].map(x=>`<button data-theme="${x.toLowerCase()}" aria-pressed="${PREF.theme===x.toLowerCase()}">${x}</button>`).join('')}</div></section><section class="settings-block"><h3>Display density</h3><div class="settings-choice">${[['comfy','Comfortable'],['compact','Compact']].map(([v,x])=>`<button data-density="${v}" aria-pressed="${PREF.density===v}">${x}</button>`).join('')}</div></section><section class="settings-block"><label class="settings-switch"><span><b>Motion effects</b><small>Reduce transitions and chart animation.</small></span><input id="settingsMotion" type="checkbox" ${PREF.motion?'checked':''}></label></section><button class="btn sec" id="resetSettings">Reset settings</button>`;
+ if(sel==='Account')content=`<h2>Account</h2><div class="settings-avatar"><span class="avatar">${esc(initials(u.name))}</span>${demo?'Demo account':'Account details'}</div><form id="profileForm"><label class="settings-field">Full name<input name="name" value="${esc(u.name||'')}" ${demo?'disabled':''}></label><label class="settings-field">Company<input name="company" value="${esc(u.company||'')}" ${demo?'disabled':''}></label><label class="settings-field">Email<input value="${esc(u.email||'')}" readonly></label><label class="settings-field">Tax code<input value="${esc(u.taxCode||'Not provided')}" readonly></label>${demo?'':'<button class="btn primary">Save profile</button>'}</form>${demo?'':'<section class="settings-block"><h3>Change password</h3><form id="changePw"><label class="settings-field">Current password<input name="old" type="password"></label><label class="settings-field">New password<input name="new" type="password"></label><label class="settings-field">Confirm password<input name="confirm" type="password"></label><p id="pwError" class="settings-error"></p><button class="btn sec">Change password</button></form></section><button class="btn danger" id="deleteAccount">Delete account</button>'}`;
+ if(sel==='Privacy')content=`<h2>Privacy</h2><p>Your data is stored in this browser. Copilot provides advice only; actions require your review and approval.</p><section class="settings-block"><button class="btn sec" id="clearChats">Clear chat history</button></section><section class="settings-block"><button class="btn sec" id="clearFiles">Delete all uploaded files</button><p>Snapshots already created from these files are kept; you can roll back in History.</p></section><button class="btn sec" id="exportData">Export my data</button>`;
+ if(sel==='Billing')content='<h2>Billing</h2><section class="settings-block billing-card"><b>Current plan: Demo (free)</b><p>Billing is not available in this demo.</p></section>';
+ if(sel==='Usage')content='<h2>Usage</h2><p>Counted in this browser only</p><div id="usageStats" class="usage-stats"><p>Loading local usage...</p></div>';
+ openModal(`<div class="settings-shell"><aside class="settings-nav"><label class="settings-search"><input id="settingsSearch" placeholder="Search settings" value="${esc(query)}"></label><nav>${names.slice(0,5).map(n=>`<button data-section="${n}" class="${n===sel?'on':''}">${n}</button>`).join('')}<div class="settings-nav-rule"></div><button class="settings-logout" data-section="Log out">Log out</button></nav></aside><section class="settings-content"><button class="settings-close" aria-label="Close settings">×</button><button class="settings-back">← Back</button><div class="settings-no-results" hidden>No settings match</div><div class="settings-body">${content}</div></section></div>`,m=>{const shell=m.querySelector('.settings-shell'),reopen=(s=sel,v='')=>openSettings(s,v);m.querySelector('.settings-close').onclick=closeModal;m.querySelector('.settings-back').onclick=()=>shell.classList.remove('content-open');if(innerWidth<=600)shell.classList.add('content-open');m.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>b.dataset.section==='Log out'?confirmAction('Log out?','Return to sign in?',()=>{closeModal();leaveApp()}):reopen(b.dataset.section));m.querySelector('#settingsSearch').oninput=e=>{const v=e.target.value.toLowerCase(),n=names.slice(0,5).find(x=>x.toLowerCase().includes(v)||(fields[x]||[]).some(y=>y.toLowerCase().includes(v)));if(!v)return;if(!n){m.querySelector('.settings-no-results').hidden=false;m.querySelector('.settings-body').hidden=true}else reopen(n,v)};m.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{PREF.theme=b.dataset.theme;savePrefs();reopen('General')});m.querySelectorAll('[data-density]').forEach(b=>b.onclick=()=>{PREF.density=b.dataset.density;savePrefs();reopen('General')});const motion=m.querySelector('#settingsMotion');if(motion)motion.onchange=()=>{PREF.motion=motion.checked;savePrefs()};const reset=m.querySelector('#resetSettings');if(reset)reset.onclick=()=>{Object.assign(PREF,{theme:'light',density:'comfy',motion:true});savePrefs();reopen('General')};const pf=m.querySelector('#profileForm');if(pf)pf.onsubmit=e=>{e.preventDefault();const all=users(),i=all.findIndex(x=>x.id===u.id);all[i].name=pf.elements.name.value.trim()||u.name;all[i].company=pf.elements.company.value.trim()||u.company;saveUsers(all);S.user=all[i];$('#uName').textContent=u.name;$('#umName').textContent=u.name;$('#umCompany').textContent=u.company;toast('Profile updated');reopen('Account')};const pw=m.querySelector('#changePw');if(pw)pw.onsubmit=async e=>{e.preventDefault();const all=users(),x=all.find(v=>v.id===u.id),err=m.querySelector('#pwError');if(await hashPw(pw.elements.old.value,x.salt)!==x.hash){err.textContent='Current password is incorrect';return}if(pwRuleErrors(pw.elements.new.value).length){err.textContent='Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character';return}if(pw.elements.new.value!==pw.elements.confirm.value){err.textContent='Passwords do not match';return}x.salt=salt();x.hash=await hashPw(pw.elements.new.value,x.salt);saveUsers(all);err.textContent='Password changed'};const cl=m.querySelector('#clearChats');if(cl)cl.onclick=()=>confirmAction('Clear chat history?','All saved conversations will be removed from this browser.',()=>{try{localStorage.removeItem(CHAT_KEY())}catch(e){}chats=[];activeChat=null;chatNew();closeModal()});const cf=m.querySelector('#clearFiles');if(cf)cf.onclick=async()=>{const fs=await FILES.list();confirmAction('Delete uploaded files?','Snapshots already created from these files are kept; you can roll back in History.',async()=>{await FILES.remove(fs.map(x=>x.id));addLog({tool:'delete_files',tier:1,args:{count:fs.length},status:'ok',summary:'Deleted uploaded files'});toast('Uploaded files deleted');reopen('Privacy')})};const ex=m.querySelector('#exportData');if(ex)ex.onclick=async()=>{const f=await FILES.list(),safe={account:{id:u.id,name:u.name,company:u.company,email:u.email,taxCode:u.taxCode||null},files:f.map(({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})=>({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})),chats};dlFile('lilact-my-data.json',JSON.stringify(safe,null,2),'application/json')};const del=m.querySelector('#deleteAccount');if(del)del.onclick=()=>confirmAction('Delete account?','Confirm again to delete this account and its browser data.',()=>confirmAction('Confirm account deletion','This permanently removes your local account data.',async()=>{const email=u.email.toLowerCase();saveUsers(users().filter(x=>x.id!==u.id));store.del(DK+email);store.del('smefc.pins.v1.'+email);try{localStorage.removeItem(CHAT_KEY())}catch(e){}const fs=await FILES.list();await FILES.remove(fs.map(x=>x.id));closeModal();leaveApp()}))})
+ if(sel==='Usage')void (async()=>{const files=await FILES.list(),d=dstore.load(),snaps=Object.values(d.firms||{}).reduce((n,f)=>n+(f.snaps||[]).length,0),bytes=files.reduce((n,f)=>n+(f.size||0),0),sent=chats.reduce((n,c)=>n+(c.html.match(/class="msg user"/g)||[]).length,0),pending=S.drafts.filter(x=>x.status==='pending_approval').length,approved=S.drafts.filter(x=>x.status==='executed (simulated)').length,rejected=S.drafts.filter(x=>x.status==='rejected').length;const b=document.querySelector('#usageStats');if(b)b.innerHTML='<div><b>'+chats.length+'</b><span>Conversations</span></div><div><b>'+sent+'</b><span>Messages sent</span></div><div><b>'+files.length+' · '+sizeLabel(bytes)+'</b><span>Uploaded files</span></div><div><b>'+snaps+'</b><span>Snapshots</span></div><div><b>'+pending+' / '+approved+' / '+rejected+'</b><span>Pending / approved / rejected drafts</span></div>'})()
+}
+$('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};
 initAuth();
