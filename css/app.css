@@ -807,3 +807,16 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 .chatcol.is-leaving .threads{animation:fade .2s var(--lc-motion-easing-standard)}
 @keyframes composerSettle{from{opacity:.4;transform:translateY(-24px)}to{opacity:1;transform:none}}
 @media(max-width:860px){.chatcol.is-empty .threads,.chatcol.is-empty .composer-wrap{width:calc(100% - 24px)}.chatcol.is-empty .hero{margin-top:0}}
+
+/* ---------- One account = one company ---------- */
+.account-company{display:grid;gap:1px;padding:9px 12px;margin:0 2px;border:1px solid var(--lc-color-border-default);border-radius:var(--lc-radius-md);background:var(--lc-color-bg-surface)}
+.account-company .acct-label{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--lc-color-text-secondary);font-weight:800}
+.account-company b{font-size:13px;color:var(--lc-color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-company small{font-size:11px;color:var(--lc-color-text-muted)}
+.demo-more{margin:10px 0 0;text-align:center;font-size:12px;color:var(--lc-color-text-muted)}
+.demo-more .linkbtn{font-size:12px}
+.hero-setup{margin:8px 0 14px;color:var(--lc-color-text-secondary);font-size:14px}
+.no-company-data #panelBtn,.no-company-data #pendChip,.no-company-data #demoChips{display:none!important}
+.no-company-data #chatInput:disabled{cursor:not-allowed}
+.field-hint{display:block;margin-top:4px;font-size:12px;font-weight:400;color:var(--lc-color-text-muted)}
+#fName[readonly]{background:var(--lc-color-bg-subtle);color:var(--lc-color-text-muted);cursor:default}
