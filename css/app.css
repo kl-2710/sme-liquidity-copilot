@@ -646,7 +646,7 @@ html[data-density=compact] .ft th,html[data-density=compact] .ft td{padding:4px 
 .tnav .tt small{display:none}.tnav.on .tt small{display:block}
 .sidenav .sec{opacity:.75}
 .topbar{box-shadow:none;border-bottom-color:transparent}
-.tierq{margin-right:auto}
+.comp-row .send{margin-left:auto}
 .comp-row{align-items:center}
 .card{border-color:color-mix(in srgb,var(--line) 70%,transparent)}
 .foot-note{opacity:.85}
@@ -802,7 +802,7 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 .chatcol.is-empty .composer{order:1}
 .chatcol.is-empty .demo-chips{order:2;flex-wrap:wrap;justify-content:center;overflow:visible;padding:14px 0 4px}
 .chatcol.is-empty .demo-chips button{white-space:normal}
-.chatcol.is-empty .disc{order:3}
+
 .chatcol.is-leaving .composer-wrap{animation:composerSettle .2s var(--lc-motion-easing-standard)}
 .chatcol.is-leaving .threads{animation:fade .2s var(--lc-motion-easing-standard)}
 @keyframes composerSettle{from{opacity:.4;transform:translateY(-24px)}to{opacity:1;transform:none}}
@@ -814,3 +814,4 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 .hero-setup{margin:8px 0 14px;color:var(--lc-color-text-secondary);font-size:14px}
 .no-company-data #panelBtn,.no-company-data #pendChip,.no-company-data #demoChips{display:none!important}
 .no-company-data #chatInput:disabled{cursor:not-allowed}
+.chatcol:not(.is-empty) .composer-wrap{padding-bottom:16px}
