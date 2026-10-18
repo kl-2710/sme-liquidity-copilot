@@ -1,7 +1,13 @@
 # Porting notes: SME Finance Copilot v2-4 → Lilact identity
 
 **Source:** `SME_Finance_Copilot_AI_Agent_v2-4.html`, a single-file prototype.
-**Regenerate:** `python tools/port_prototype.py <prototype.html> .`
+**Importer:** `tools/port_prototype.py` is retained as a historical porting utility. **Do not rerun it:** it regenerates `index.html`, `css/app.css` and application JavaScript and would overwrite the single-flow interface changes. This demo has no build step.
+
+## Single-flow interface
+- The four task navigation modules have been replaced by one continuous conversation with a four-step progress bar.
+- Step status is presented from the existing `S.stage` and `unlockedTask()` state. Selecting an available step scrolls to its conversation divider (or the welcome hero for Step 1 before its first divider exists) and opens its dashboard tab; it does not change the stage or rerun calculations.
+- Advancing the conversation adds one divider per reached step. New chat and company changes clear the dividers with the conversation.
+- Only the interface and its browser tests changed for this presentation. Routing, calculations, data, and the order of the four business steps are preserved.
 
 ## Kept exactly as in the prototype
 - **Flow and business behaviour:** all screens and their order, the auth flow, chat routing and intents, task unlocking, tool calls and tiers, the calculations, the financing catalogue and ranking, the what-if levers, drafts, approval and rejection dialogs, the audit log, data upload, settings and pins.
