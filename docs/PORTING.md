@@ -11,9 +11,10 @@
 
 ## Sign-up and company files
 - Sign-up requires a company name (at least two characters), a unique tax code (10 or 13 digits; an optional hyphenated 10+3 form is normalized to digits), and a password with at least eight characters, uppercase and lowercase letters, a digit and a symbol. The same password rule is used in the browser password-reset form.
-- Uploaded files are indexed in the browser's IndexedDB database `lilact.files.v1`, scoped to the signed-in user. CSV/XLS/XLSX tables can be reviewed through the existing importer; XLS/XLSX uses the first worksheet. DOCX files are reference-only and never enter the importer or calculations.
-- Uploading or deleting files does not alter Copilot's active data. A reviewed import affects Copilot only after the existing save flow creates a snapshot. Deleting registry entries leaves all created snapshots available in History.
-- Company data is presented as a full-page workspace with Files and Businesses & snapshots views. It reuses the existing business, import and snapshot-history screens.
+- Uploaded files are indexed in the browser's IndexedDB database `lilact.files.v1`, scoped to the signed-in user. CSV/XLS/XLSX tables go through the existing importer (XLS/XLSX uses the first worksheet). DOCX files are reference-only and never enter the importer or calculations.
+- Company data is a single Files screen. Reading, checking and saving uploaded tables is a background task: after each upload the newest file of each recognised type is passed through the existing `addRaw` → `evalImport` → `formDefaults` → `saveImport` pipeline, which creates a snapshot as before. The review form, the Businesses & snapshots view and the import success toast are no longer shown.
+- If something required is missing (financial statements, a cash-flow table, required columns), nothing is saved and the files show what is still needed. Files of the same type that were superseded show *Replaced by a newer file*. Deleting files leaves the data already in use unchanged.
+- Demo accounts keep their fixed sample data; their uploads are stored but marked *Not used*.
 - **Do not run `tools/port_prototype.py` again.** It would regenerate the UI and overwrite this single-flow and Company data work.
 
 ## Kept exactly as in the prototype

@@ -17,14 +17,14 @@ python3 -m http.server 8000        # or any static file server
 - **Sign in:** sign in or sign up (stored in this browser only), or use the demo account. Sign-up requires a company name, a unique 10- or 13-digit tax code, and a password with upper/lowercase letters, a digit and a symbol.
 - **One account, one company:** each account analyses exactly one company, kept in the user account (account card and menu: company name, tax code). There is no company switcher.
   - Demo accounts (password `Demo@2026`) are each bound to one sample company: `demo@smecopilot.vn` → F01 Alpha Garment Subcontractor, `beta.demo@smecopilot.vn` → F02 Beta Fabric Distributor, `gamma.demo@smecopilot.vn` → F03 Gamma Packaging & Trims. Their data is fixed; imports are not available.
-  - A new account starts without data: the chat asks to *Upload company data* and stays disabled until the first snapshot is saved. The business name always comes from the account (change it in Settings → Account), whatever the uploaded files say.
+  - A new account starts without data: the chat asks to *Upload company data* and stays disabled until the required files are uploaded. The business name always comes from the account (change it in Settings → Account), whatever the uploaded files say.
 - **Chat:** one continuous conversation. Analysis advances through the same four business stages in order:
   1. Working-capital diagnosis (DSO · DIO · DPO · CCC)
   2. Cash-flow forecast (13 weeks, shortfall windows)
   3. Financing match (ranked catalogue products)
   4. What-if and drafts (levers, then drafts awaiting approval)
-- **Detailed dashboard:** tabs for Dashboard, Shortfall, What-if, Approvals. Audit events remain available internally but are not displayed. Company data is a full-page workspace with Files and Businesses & snapshots tabs.
-- **Company files:** upload CSV, XLSX, XLS and DOCX files. Files stay in this browser's IndexedDB; Word files are reference-only. Uploaded tables do not affect Copilot until reviewed and saved as a snapshot. Deleting a file keeps snapshots already created from it.
+- **Detailed dashboard:** tabs for Dashboard, Shortfall, What-if, Approvals. Audit events remain available internally but are not displayed. Company data is a single full-page Files screen.
+- **Company files:** upload CSV, XLSX, XLS and DOCX files. Files stay in this browser's IndexedDB; Word files are reference-only. Recognised tables (sales and purchase invoices, inventory, 13-week plan, financial statements) are read and checked in the background; once financial statements and at least one cash-flow table are present, the company data is updated automatically and each file shows *Used in analysis* (or what is still missing). The newest file of each type wins. Deleting a file keeps the data already in use.
 - **Permission tiers:** T0 Read · T1 Advise · T2 Draft · T3 Approve. Only the Approve click in the UI runs a *simulated* execution.
 - **Data:** three synthetic companies (F01–F03), one per demo account, with fixed default collection assumptions. This is not a credit decision.
 
