@@ -298,6 +298,7 @@ for (const theme of ["light", "dark"]) {
     const row = page.locator(".chat-row").first();
     await row.hover(); await row.locator(".chat-more").click();
     assert.equal(await page.locator(".chat-menu").isVisible(), true);
+    await page.waitForTimeout(300); // let the open animation settle before measuring
     assert.equal(await page.locator("#scrim.show").count(), 0, "the menu is not a modal");
     const btn = await row.locator(".chat-more").boundingBox(), menu = await page.locator(".chat-menu").boundingBox();
     assert.ok(Math.abs(menu.y - (btn.y + btn.height)) < 12 || Math.abs(menu.y + menu.height - btn.y) < 12, "menu sits next to the button");
