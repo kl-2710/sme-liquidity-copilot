@@ -46,8 +46,8 @@ code { font: var(--lc-type-code); font-size: 12.5px; color: var(--lc-color-text-
 .la-settings__section { margin-top:24px; }
 .la-settings__section h3 { margin:0 0 10px; color:var(--lc-color-text-secondary); font:var(--lc-type-overline); }
 .la-settings__section .lc-theme-switch { padding:4px; }
-.la-settings__section .lc-theme-switch button { min-height:40px; }
-.la-settings .lc-theme-switch button[aria-pressed="true"] { background:var(--lc-color-bg-selected); }
+.la-settings__section .lc-theme-switch button { min-height:40px; border:2px solid transparent; }
+.la-settings .lc-theme-switch button[aria-pressed="true"] { background:var(--lc-color-bg-selected); border-color:var(--lc-color-action-primary); color:var(--lc-color-text-primary); font-weight:700; }
 .la-settings__foot { display:flex; justify-content:flex-end; margin-top:24px; padding-top:16px; border-top:1px solid var(--lc-color-border-default); }
 
 .la-sidebar-collapsed .la-app { grid-template-columns:76px minmax(0,1fr); }

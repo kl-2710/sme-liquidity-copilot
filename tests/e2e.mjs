@@ -83,7 +83,12 @@ await step("guest account menu opens settings, changes theme and returns to sign
   assert.equal(await page.locator("#account-menu-toggle .la-account-chevron").count(), 0);
   await page.locator("[data-open-settings]").click();
   assert.equal(await page.locator("#settings-dialog").evaluate((el) => el.open), true);
-  await page.locator('#settings-dialog [data-theme-set="dark"]').click();
+  for (const theme of ["light", "system", "dark"]) {
+    const choice = page.locator(`#settings-dialog [data-theme-set="${theme}"]`);
+    await choice.click();
+    assert.equal(await choice.getAttribute("aria-pressed"), "true");
+    assert.equal(await choice.evaluate((el) => getComputedStyle(el).borderTopWidth), "2px");
+  }
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   await page.locator("#settings-dialog [data-close-settings]").last().click();
   await page.locator("#account-menu-toggle").click();
