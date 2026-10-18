@@ -5,13 +5,14 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 
 const require = createRequire(import.meta.url);
 let pw;
 try { pw = require("playwright"); } catch { pw = require(path.join(execSync("npm root -g").toString().trim(), "playwright")); }
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2" };
 const server = http.createServer(async (req, res) => {
   const p = path.join(ROOT, decodeURIComponent(new URL(req.url, "http://x").pathname));
@@ -23,7 +24,7 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const URL0 = `http://127.0.0.1:${server.address().port}/index.html`;
 const browser = await pw.chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 const results = [];
-async function step(name, fn) { try { await fn(); results.push(["ok", name]); } catch (e) { results.push(["FAIL", name + " — " + e.message.split("\n")[0]]); } }
+async function step(name, fn) { try { await fn(); results.push(["ok", name]); } catch (e) { results.push(["FAIL", name + " — " + e.message.replace(/\s+/g, " ").slice(0, 220)]); } }
 const shot = async (p, n) => { if (process.env.SHOTS) await p.screenshot({ path: `${process.env.SHOTS}/${n}.png` }); };
 
 for (const theme of ["light", "dark"]) {
@@ -44,11 +45,15 @@ for (const theme of ["light", "dark"]) {
     assert.equal(bg, theme === "dark" ? "rgb(15, 12, 30)" : "rgb(247, 246, 251)");
     await shot(page, `${theme}-auth`);
   });
-  await step(`[${theme}] demo account opens the app with tasks 2–4 locked`, async () => {
+  await step(`[${theme}] demo account opens the app with flow steps 2–4 locked`, async () => {
     await page.click("#btnDemo");
     await page.waitForSelector("#app:not([hidden])");
-    assert.equal(await page.locator(".tnav.locked").count(), 3);
+    assert.equal(await page.locator(".flow-step.locked").count(), 3);
+    assert.equal(await page.locator(".tnav" + "[data-task]").count(), 0);
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
     assert.equal(await page.locator(`.side .lilact-logo--${theme}`).isVisible(), true);
+    await page.waitForTimeout(400);
+    await shot(page, `${theme}-flow`);
   });
   await step(`[${theme}] one sidebar toggle moves between sidebar and chat header`, async () => {
     assert.equal(await page.locator("#sideFold").isVisible(), true);
@@ -66,18 +71,32 @@ for (const theme of ["light", "dark"]) {
     await ask("Where is my working capital stuck?");
     const t = await last().innerText();
     assert.match(t, /diagnose_working_capital/); assert.match(t, /69\.0/);
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
+    assert.equal(await page.locator(".flow-divider").count(), 1);
   });
   await step(`[${theme}] Task 2 forecast explains the shortfall`, async () => {
     await ask("Why am I short of cash? Show me the cause.");
     assert.match(await page.locator("#taskTitle").innerText(), /Cash-flow forecast/);
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "2");
+    assert.equal(await page.locator(".flow-divider").count(), 2);
+    await page.locator('.flow-step[data-step="1"]').click();
+    assert.equal(await page.locator("#taskTitle").innerText(), "Cash-flow forecast");
+    assert.equal(await page.locator('.tab[data-tab="dash"]').getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "2");
+    assert.equal(await page.locator(".flow-divider").count(), 2);
+    await page.locator("#panelBtn").click();
   });
   await step(`[${theme}] Task 3 ranks financing options`, async () => {
     await ask("Rank the financing options that fit this cause.");
     assert.match(await page.locator("#taskTitle").innerText(), /Financing match/);
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "3");
+    assert.equal(await page.locator(".flow-divider").count(), 3);
   });
   await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
     await ask("K1 will only pay 7 days early. What if we combine that with financing invoice S-F01-0070 via RF-001?");
     assert.match(await last().innerText(), /3\.87/);
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "4");
+    assert.equal(await page.locator(".flow-divider").count(), 4);
     await last().locator("button", { hasText: "Create draft" }).click();
     await page.waitForTimeout(1800);
     assert.ok(Number(await page.locator("#pendN").innerText()) > 0);
@@ -104,6 +123,17 @@ for (const theme of ["light", "dark"]) {
       assert.ok((await page.locator(`#pane-${t}`).innerText()).length > 40, t);
     }
   });
+  await step(`[${theme}] New chat and company changes reset progress and dividers`, async () => {
+    await page.click("#newChat");
+    assert.match(await page.locator("#taskTitle").innerText(), /Working-capital diagnosis/);
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
+    assert.equal(await page.locator(".flow-divider").count(), 0);
+    await page.selectOption("#firmSel", "F02"); await page.waitForTimeout(500);
+    assert.match(await page.locator("#taskTitle").innerText(), /Working-capital diagnosis/);
+    assert.equal(await page.locator('.flow-step[aria-current="step"]').getAttribute("data-step"), "1");
+    assert.equal(await page.locator(".flow-divider").count(), 0);
+    await page.selectOption("#firmSel", "F01"); await page.waitForTimeout(500);
+  });
   await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors, []));
   await page.close();
 }
@@ -113,6 +143,11 @@ await step("mobile 390px: no horizontal scroll, menu opens", async () => {
   await page.goto(URL0); await page.evaluate(() => localStorage.clear()); await page.reload();
   await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1);
+  assert.equal(await page.locator(".flow-step").count(), 4);
+  assert.equal(await page.locator(".flow-step-label:visible").count(), 1);
+  assert.equal(await page.locator(".flow-step.locked").count(), 3);
+  await page.waitForTimeout(400);
+  await shot(page, "mobile-390-flow");
   await page.click("#menuBtn"); await page.waitForTimeout(500);
   assert.equal(await page.locator("#side").isVisible(), true);
   await page.close();
