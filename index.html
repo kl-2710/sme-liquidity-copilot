@@ -55,11 +55,13 @@
         <p class="sub">Takes under a minute. Account data stays in this browser only.</p>
         <div class="two">
           <div class="fld"><label for="rgName">Full name</label><input id="rgName" name="name" type="text" autocomplete="name" placeholder="John Smith"><p class="ferr" id="rgNameE" role="alert"></p></div>
-          <div class="fld"><label for="rgCompany">Company <span class="opt">(optional)</span></label><input id="rgCompany" name="org" type="text" autocomplete="organization" placeholder="Acme Co., Ltd."><p class="ferr" id="rgCompanyE" role="alert"></p></div>
+          <div class="fld"><label for="rgCompany">Company</label><input id="rgCompany" name="org" type="text" autocomplete="organization" placeholder="Acme Co., Ltd."><p class="ferr" id="rgCompanyE" role="alert"></p></div>
         </div>
+        <div class="fld"><label for="rgTax">Tax code</label><input id="rgTax" name="taxCode" type="text" inputmode="numeric" autocomplete="off" placeholder="10 or 13 digits"><p class="ferr" id="rgTaxE" role="alert"></p></div>
         <div class="fld"><label for="rgEmail">Email</label><input id="rgEmail" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@company.com"><p class="ferr" id="rgEmailE" role="alert"></p></div>
         <div class="fld"><label for="rgPw">Password</label>
-          <div class="pwrap"><input id="rgPw" name="new-password" type="password" autocomplete="new-password" placeholder="At least 8 characters, with letters and numbers"><button type="button" class="eye" data-eye="rgPw" aria-label="Show password" aria-pressed="false">Show</button></div>
+          <div class="pwrap"><input id="rgPw" name="new-password" type="password" autocomplete="new-password" placeholder="8+ characters, upper & lower case, digit, symbol"><button type="button" class="eye" data-eye="rgPw" aria-label="Show password" aria-pressed="false">Show</button></div>
+          <ul class="pw-checklist" id="pwChecklist" aria-label="Password requirements"><li data-rule="length">8 or more characters</li><li data-rule="lower">At least one lowercase letter</li><li data-rule="upper">At least one uppercase letter</li><li data-rule="digit">At least one digit</li><li data-rule="symbol">At least one special character</li></ul>
           <div class="meter" id="pwMeter" aria-hidden="true"><i></i><i></i><i></i><i></i></div><p class="hintline" id="pwHint">Password strength</p>
           <p class="ferr" id="rgPwE" role="alert"></p></div>
         <div class="fld"><label for="rgPw2">Confirm password</label><input id="rgPw2" name="confirm" type="password" autocomplete="new-password" placeholder="Confirm password"><p class="ferr" id="rgPw2E" role="alert"></p></div>

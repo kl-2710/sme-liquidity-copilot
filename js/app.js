@@ -988,6 +988,8 @@ const normEmail=e=>String(e||'').trim().toLowerCase();
 const EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const initials=n=>{const p=String(n||'?').replace(/[^\p{L}\s]/gu,'').trim().split(/\s+/);return ((p[0]?.[0]||'')+(p.length>1?p[p.length-1][0]:'')).toUpperCase()||'?'};
 function pwScore(pw){let s=0;if(pw.length>=8)s++;if(/[a-zA-Z]/.test(pw)&&/\d/.test(pw))s++;if(/[A-Z]/.test(pw)&&/[a-z]/.test(pw))s++;if(/[^\w\s]/.test(pw)||pw.length>=12)s++;return pw?Math.max(1,s):0}
+function pwRuleErrors(pw){const missing=[];if(String(pw).length<8)missing.push('length');if(!/[a-z]/.test(pw))missing.push('lowercase');if(!/[A-Z]/.test(pw))missing.push('uppercase');if(!/\d/.test(pw))missing.push('digit');if(!/[^\p{L}\p{N}\s]/u.test(pw))missing.push('special character');return missing}
+function updatePwChecklist(pw){const missing=pwRuleErrors(pw),rules={length:'length',lower:'lowercase',upper:'uppercase',digit:'digit',symbol:'special character'};$$('#pwChecklist [data-rule]').forEach(x=>{const ok=!missing.includes(rules[x.dataset.rule]);x.classList.toggle('met',ok);x.setAttribute('aria-label',`${x.textContent}: ${ok?'met':'not met'}`)})}
 function setErr(id,msg){const el=$('#'+id);if(!el)return;el.textContent=msg||'';const inp=el.previousElementSibling&&el.previousElementSibling.matches('input')?el.previousElementSibling:$('#'+id.replace(/E$/,''));inp&&inp.classList&&inp.classList.toggle('bad',!!msg)}
 function clearErrs(form){$$('.ferr',form).forEach(e=>e.textContent='');$$('input.bad',form).forEach(i=>i.classList.remove('bad'))}
 function showAuthTab(which){
@@ -1001,7 +1003,7 @@ function showAuthTab(which){
 $('#tabLogin').onclick=()=>showAuthTab('login');$('#tabReg').onclick=()=>showAuthTab('reg');
 $$('[data-goto]').forEach(b=>b.onclick=()=>showAuthTab(b.dataset.goto));
 $$('.eye').forEach(b=>b.onclick=()=>{const i=$('#'+b.dataset.eye),show=i.type==='password';i.type=show?'text':'password';b.textContent=show?'Hide':'Show';b.setAttribute('aria-pressed',show);b.setAttribute('aria-label',show?'Hide password':'Show password')});
-$('#rgPw').addEventListener('input',e=>{const s=pwScore(e.target.value);$('#pwMeter').dataset.s=s;$('#pwHint').textContent=['Password strength','Weak: add letters, digits or length','Fair: add upper/lower case','Good','Strong'][s]});
+$('#rgPw').addEventListener('input',e=>{const s=pwScore(e.target.value);$('#pwMeter').dataset.s=s;$('#pwHint').textContent=['Password strength','Weak: add letters, digits or length','Fair: add upper/lower case','Good','Strong'][s];updatePwChecklist(e.target.value)});
 
 let fails=0,lockUntil=0;
 async function doLogin(email,pw,remember){
@@ -1024,18 +1026,21 @@ const DEMO={email:'demo@smecopilot.vn',pw:'Demo@2026',name:'Minh Anh',company:'D
 
 $('#formReg').addEventListener('submit',async e=>{
   e.preventDefault();const f=e.target;clearErrs(f);$('#rgErr').textContent='';
-  const name=$('#rgName').value.trim(),company=$('#rgCompany').value.trim(),email=normEmail($('#rgEmail').value),pw=$('#rgPw').value,pw2=$('#rgPw2').value;
+  const name=$('#rgName').value.trim(),company=$('#rgCompany').value.trim(),taxCode=$('#rgTax').value.trim().replace(/\s/g,''),email=normEmail($('#rgEmail').value),pw=$('#rgPw').value,pw2=$('#rgPw2').value;
   let ok=true;
   if(name.length<2){setErr('rgNameE','Enter your full name (at least 2 characters)');ok=false}
+  if(company.length<2){setErr('rgCompanyE','Enter your company name');ok=false}
+  if(!/^(?:\d{10}|\d{13}|\d{10}-\d{3})$/.test(taxCode)){setErr('rgTaxE','Tax code must be 10 or 13 digits');ok=false}
   if(!EMAIL_RE.test(email)){setErr('rgEmailE','Enter a valid email, e.g. you@company.com');ok=false}
-  if(pw.length<8||!/[a-zA-Z]/.test(pw)||!/\d/.test(pw)){setErr('rgPwE','Password must be at least 8 characters with letters and digits');ok=false}
+  if(pwRuleErrors(pw).length){setErr('rgPwE','Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character');ok=false}
   if(pw2!==pw){setErr('rgPw2E','Passwords do not match');ok=false}
   if(!$('#rgTerms').checked){$('#rgTermsE').textContent='Please confirm to continue';ok=false}
   if(!ok){const bad=$('input.bad',f);bad&&bad.focus();return}
   if(users().some(u=>u.email===email)){setErr('rgEmailE','This email already has an account. Please sign in.');$('#rgEmail').focus();return}
+  const taxDigits=taxCode.replace(/\D/g,'');if(users().some(u=>String(u.taxCode||'').replace(/\D/g,'')===taxDigits)){setErr('rgTaxE','This tax code is already registered');$('#rgTax').focus();return}
   const btn=$('#rgSubmit');btn.disabled=true;btn.textContent='Creating…';
   try{
-    const sl=salt(),u={id:'u'+Date.now().toString(36),name,company,email,salt:sl,hash:await hashPw(pw,sl),created:new Date().toISOString()};
+    const sl=salt(),u={id:'u'+Date.now().toString(36),name,company,taxCode:taxDigits,email,salt:sl,hash:await hashPw(pw,sl),created:new Date().toISOString()};
     const all=users();all.push(u);saveUsers(all);persistSession(u,true);f.reset();$('#pwMeter').dataset.s=0;enterApp(u,{fresh:true});
   }finally{btn.disabled=false;btn.textContent='Create an account'}
 });
@@ -1043,14 +1048,15 @@ $('#formReg').addEventListener('submit',async e=>{
 $('#btnForgot').onclick=()=>{
   openModal(`<h3>Reset password</h3><p>The demo does not send email: enter your registered email and a new password to reset it right here in this browser.</p>
   <div class="fld"><label for="fgEmail">Email</label><input id="fgEmail" type="email" value="${esc($('#liEmail').value)}" autocomplete="email"></div>
-  <div class="fld"><label for="fgPw">New password</label><input id="fgPw" type="password" autocomplete="new-password" placeholder="At least 8 characters, with letters and numbers"></div>
+  <div class="fld"><label for="fgPw">New password</label><input id="fgPw" type="password" autocomplete="new-password" placeholder="8+ characters, upper & lower case, digit, symbol"></div>
   <p class="ferr" id="fgErr" role="alert"></p>
   <div class="acts"><button class="btn sec" type="button" id="fgCancel">Cancel</button><button class="btn primary" type="button" id="fgOk">Reset</button></div>`,m=>{
     $('#fgCancel',m).onclick=closeModal;
+    $('#fgPw',m).addEventListener('input',()=>{$('#fgErr',m).textContent=pwRuleErrors($('#fgPw',m).value).length?'Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character':''});
     $('#fgOk',m).onclick=async()=>{
       const em=normEmail($('#fgEmail',m).value),pw=$('#fgPw',m).value,all=users(),u=all.find(x=>x.email===em);
       if(!u){$('#fgErr',m).textContent='No account found for this email.';return}
-      if(pw.length<8||!/[a-zA-Z]/.test(pw)||!/\d/.test(pw)){$('#fgErr',m).textContent='Password must be at least 8 characters with letters and digits.';return}
+      if(pwRuleErrors(pw).length){$('#fgErr',m).textContent='Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character';return}
       u.salt=salt();u.hash=await hashPw(pw,u.salt);saveUsers(all);closeModal();$('#liEmail').value=em;$('#liPw').value='';$('#liPw').focus();fails=0;lockUntil=0;toast('Password reset. Please sign in.');
     };
   });
@@ -1069,7 +1075,7 @@ function enterApp(u,{fresh,restore}={}){
   S.user=u;syncUserFirms();
   $('#authRoot').hidden=true;$('#app').hidden=false;document.title='Lilact · SME Liquidity Copilot';
   $('#uAvatar').textContent=initials(u.name);$('#uName').textContent=u.name;$('#uSub').textContent=u.company||u.email;
-  $('#umName').textContent=u.name;$('#umEmail').textContent=u.email;
+  $('#umName').textContent=u.company||u.name;$('#umEmail').textContent=[u.taxCode&&`Tax code ${u.taxCode}`,u.email].filter(Boolean).join(' · ');
   if(!booted){booted=true;bootApp()}else{resetSession();switchContext('F01','base');updatePending()}
   setTask('tv1',{force:true});
   renderFlowSteps();
