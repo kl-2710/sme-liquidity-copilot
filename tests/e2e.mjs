@@ -78,6 +78,9 @@ await step("auth screens switch, validate and expose the demo without authentica
 await step("guest account menu opens settings, changes theme and returns to sign-in", async () => {
   await page.locator("#account-menu-toggle").click();
   assert.equal(await page.locator("#account-menu").isVisible(), true);
+  assert.equal(await page.locator("#account-menu-toggle").innerText(), "Guest user");
+  assert.doesNotMatch(await page.locator("#account-menu").innerText(), /Demo mode|Not signed in/);
+  assert.equal(await page.locator("#account-menu-toggle .la-account-chevron").count(), 0);
   await page.locator("[data-open-settings]").click();
   assert.equal(await page.locator("#settings-dialog").evaluate((el) => el.open), true);
   await page.locator('#settings-dialog [data-theme-set="dark"]').click();
