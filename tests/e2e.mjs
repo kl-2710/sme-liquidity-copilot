@@ -100,16 +100,17 @@ const SAMPLE_CSV = {
     assert.equal(await page.locator("#chatInput").isDisabled(), true);
     assert.match(await page.locator(".hero h1").innerText(), /Let’s set up Delta Textiles/);
     await page.click("[data-setup-data]");
-    await page.waitForSelector("#dataScreen:not([hidden]) #fName");
-    assert.equal(await page.locator("#fName").inputValue(), "Delta Textiles");
-    assert.equal(await page.locator("#fName").getAttribute("readonly"), "");
-    await page.locator("#dFile").setInputFiles(Object.entries(SAMPLE_CSV).map(([name, text]) => ({ name, mimeType: "text/csv", buffer: Buffer.from(text) })));
-    await page.waitForFunction(() => document.querySelectorAll("#dPrev .dd-file").length === 6);
-    assert.equal(await page.locator("#fName").inputValue(), "Delta Textiles", "files cannot rename the account company");
-    await page.click("#dSave"); await page.waitForSelector("#dataBusinesses .dfirm");
-    const list = await page.locator("#dataBusinesses").innerText();
-    assert.match(list, /Delta Textiles/); assert.doesNotMatch(list, /ABC Sample Upload Co\./); assert.match(list, /Version v1/);
-    assert.equal(await page.locator("#dNew").isVisible(), false, "one account has one company");
+    await page.waitForSelector("#dataScreen:not([hidden]) #dataFiles");
+    assert.equal(await page.locator(".data-page-tabs").isVisible(), false, "Company data is a single Files screen");
+    const csv = (n) => ({ name: n, mimeType: "text/csv", buffer: Buffer.from(SAMPLE_CSV[n]) });
+    await page.locator("#dataFileInput").setInputFiles([csv("sales_invoices.csv"), csv("purchase_invoices.csv")]);
+    await page.waitForFunction(() => /Waiting for financial statements/.test(document.querySelector("#dataFiles").innerText));
+    assert.equal(await page.locator("#chatInput").isDisabled(), true, "no analysis until the required files exist");
+    await page.locator("#dataFileInput").setInputFiles([csv("financials.csv"), csv("inventory.csv"), csv("planned_flows.csv"), csv("firms.csv")]);
+    await page.waitForFunction(() => document.querySelectorAll(".files-table tbody tr").length === 6 && [...document.querySelectorAll(".files-table tbody tr")].every(r => /Used in analysis/.test(r.innerText)));
+    const files = await page.locator("#dataFiles").innerText();
+    assert.doesNotMatch(files, /snapshot|Review/i, "reading and importing stays in the background");
+    assert.equal(await page.evaluate(() => FIRMS[S.firm].name), "Delta Textiles", "files cannot rename the account company");
     await page.click("#dataBack");
     assert.equal(await page.locator("#chatInput").isDisabled(), false);
     await page.fill("#chatInput", "Where is my working capital stuck?"); await page.click("#sendBtn"); await page.waitForTimeout(3800);
@@ -182,7 +183,7 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("html").getAttribute("data-theme"), theme);
     await page.locator('[data-section="Billing"]').click();
     assert.match(await page.locator("#modal").innerText(), /Current plan: Demo \(free\)/);
-    assert.equal(await page.locator("#modal input").count(), 0);
+    assert.equal(await page.locator("#modal .settings-body input").count(), 0);
     await page.locator('[data-section="Usage"]').click();
     assert.match(await page.locator("#modal").innerText(), /Conversations/);
     await page.keyboard.press("Escape");
@@ -237,7 +238,7 @@ for (const theme of ["light", "dark"]) {
     await page.click('[data-view="data"]');
     assert.equal(await page.locator("#dataScreen").isVisible(), true);
     assert.equal(await page.locator("#work").isVisible(), false);
-    assert.equal(await page.locator("#filesTab").getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator(".data-page-tabs").isVisible(), false);
     await shot(page, `${theme}-company-data`);
     await page.click("#dataBack");
     assert.equal(await page.locator("#work").isVisible(), true);
@@ -250,12 +251,12 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#uSub").innerText(), "Alpha Garment Subcontractor");
   });
   if (theme === "light") await step("file registry supports import, search, filters, sorting and safe deletion", async () => {
-    await page.click('[data-view="data"]'); await page.click("#businessesTab");
-    assert.equal(await page.locator("#dNew").isVisible(), false, "demo accounts cannot add another business");
-    await page.click("#filesTab");
+    await page.click('[data-view="data"]');
     await page.click("#dataAddSources");
     await page.locator("#dataFileInput").setInputFiles(Object.entries(SAMPLE_CSV).map(([name, text]) => ({ name, mimeType: "text/csv", buffer: Buffer.from(text) })));
     await page.waitForFunction(() => document.querySelectorAll(".files-table tbody tr").length === 6);
+    assert.match(await page.locator("#dataFiles").innerText(), /Not used: demo data is fixed/);
+    assert.equal(await page.evaluate(() => S.firm), "F01");
     await page.click("#dataAddSources");
     await page.locator("#dataFileInput").setInputFiles({ name: "extra.csv", mimeType: "text/csv", buffer: Buffer.from(SAMPLE_CSV["financials.csv"]) });
     await page.waitForFunction(() => document.querySelectorAll(".files-table tbody tr").length === 7);
@@ -274,7 +275,7 @@ for (const theme of ["light", "dark"]) {
     await page.locator("#filesSelectAll").check(); await page.waitForSelector("#fileSelection:not([hidden])");
     assert.match(await page.locator("#fileSelection").innerText(), /7 selected/);
     await page.click("#deleteSelected");
-    assert.match(await page.locator("#modal").innerText(), /Snapshots already created from these files are kept; you can roll back in History\./);
+    assert.match(await page.locator("#modal").innerText(), /Data already used in your analysis is kept\./);
     await page.click("#filesYes"); await page.waitForSelector("#dataFiles .files-empty");
     assert.match(await page.locator("#dataFiles").innerText(), /No files uploaded yet/);
     await page.click("#dataBack");
@@ -287,16 +288,14 @@ for (const theme of ["light", "dark"]) {
     ]);
     assert.equal(await page.locator(".upload-chip").count(), 3);
     await page.locator("#uploadChatFiles").evaluate(el => el.click());
-    await page.waitForFunction(() => document.querySelectorAll(".messages.on .msg.bot").length > 0 && document.querySelector(".messages.on .msg.bot:last-child .rcact button"));
+    await page.waitForFunction(() => /files? added/.test(document.querySelector(".messages.on .msg.bot:last-child")?.innerText || ""));
     const reply = await page.locator(".messages.on .msg.bot").last().innerText();
-    assert.match(reply, /1 recognised table file/); assert.match(reply, /1 reference document/); assert.match(reply, /1 unrecognised file/);
-    await page.locator(".messages.on .msg.bot .rcact button").last().evaluate(el => el.click());
-    await page.waitForTimeout(400);
-    assert.match(await page.locator(".toast").last().innerText(), /Demo accounts use fixed sample data/);
+    assert.match(reply, /3 files added\. Demo accounts keep their fixed sample data\./); assert.match(reply, /Word documents are kept for reference only/);
+    assert.equal(await page.locator(".messages.on .msg.bot .rcact button").count(), 0, "no review step");
     assert.equal(await page.evaluate(() => S.firm), "F01");
-    if (await page.locator("#dataScreen").isVisible()) await page.click("#dataBack");
   });
-  await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors, []));
+  // ERR_TUNNEL_CONNECTION_FAILED only comes from a sandbox proxy blocking the XLSX CDN script.
+  await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors.filter((e) => !/ERR_TUNNEL_CONNECTION_FAILED/.test(e)), []));
   await page.close();
 }
 
