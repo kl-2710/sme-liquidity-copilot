@@ -52,7 +52,7 @@ code { font: var(--lc-type-code); font-size: 12.5px; color: var(--lc-color-text-
 
 .la-sidebar-collapsed .la-app { grid-template-columns:76px minmax(0,1fr); }
 .la-sidebar-collapsed .la-sidebar { padding-inline:10px; }
-.la-sidebar-collapsed .la-firm-picker,.la-sidebar-collapsed .la-overline,.la-sidebar-collapsed .la-nav__text,.la-sidebar-collapsed .la-nav__state,.la-sidebar-collapsed .la-count,.la-sidebar-collapsed .la-user__details,.la-sidebar-collapsed .la-sidebar .lc-theme-switch { display:none; }
+.la-sidebar-collapsed .la-firm-picker,.la-sidebar-collapsed .la-overline,.la-sidebar-collapsed .la-nav__text,.la-sidebar-collapsed .la-nav__state,.la-sidebar-collapsed .la-count,.la-sidebar-collapsed #account-menu-toggle .la-user__details,.la-sidebar-collapsed .la-sidebar .lc-theme-switch { display:none; }
 .la-sidebar-collapsed .la-sidebar__head { display:grid; grid-template-columns:40px; grid-template-rows:40px; justify-content:center; gap:0; }
 .la-sidebar-collapsed .la-brand,.la-sidebar-collapsed .la-menu--sidebar { grid-area:1 / 1; }
 .la-sidebar-collapsed .la-brand { margin:0; }
@@ -264,7 +264,7 @@ code { font: var(--lc-type-code); font-size: 12.5px; color: var(--lc-color-text-
   .la-sidebar-collapsed .la-brand__symbol { display:none; }
   .la-sidebar-collapsed .la-menu--sidebar { display:inline-flex; }
   .la-sidebar-collapsed .la-sidebar { padding-inline: 20px; }
-  .la-sidebar-collapsed .la-firm-picker,.la-sidebar-collapsed .la-overline,.la-sidebar-collapsed .la-nav__state,.la-sidebar-collapsed .la-count,.la-sidebar-collapsed .la-user__details,.la-sidebar-collapsed .la-sidebar .lc-theme-switch { display: revert; }
+  .la-sidebar-collapsed .la-firm-picker,.la-sidebar-collapsed .la-overline,.la-sidebar-collapsed .la-nav__state,.la-sidebar-collapsed .la-count,.la-sidebar-collapsed #account-menu-toggle .la-user__details,.la-sidebar-collapsed .la-sidebar .lc-theme-switch { display: revert; }
   .la-sidebar-collapsed .la-nav__text { display:flex; }
   .la-sidebar-collapsed .lc-nav-item,.la-sidebar-collapsed .la-user { justify-content: initial; padding: initial; }
   .la-content { padding: 20px 16px 28px; }
