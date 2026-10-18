@@ -185,7 +185,7 @@ for (const theme of ["light", "dark"]) {
     assert.match(await page.locator("#modal").innerText(), /Current plan: Demo \(free\)/);
     assert.equal(await page.locator("#modal .settings-body input").count(), 0);
     await page.locator('[data-section="Usage"]').click();
-    assert.match(await page.locator("#modal").innerText(), /Conversations/);
+    await page.waitForFunction(() => /Conversations/.test(document.querySelector("#modal").innerText), null, { timeout: 5000 });
     await page.keyboard.press("Escape");
     await page.click("#userBtn"); await page.click("#btnHelp");
     assert.match(await page.locator("#modal").innerText(), /How Lilact works/);
@@ -288,7 +288,7 @@ for (const theme of ["light", "dark"]) {
     ]);
     assert.equal(await page.locator(".upload-chip").count(), 3);
     await page.locator("#uploadChatFiles").evaluate(el => el.click());
-    await page.waitForFunction(() => /files? added/.test(document.querySelector(".messages.on .msg.bot:last-child")?.innerText || ""));
+    await page.waitForFunction(() => /reference only/.test(document.querySelector(".messages.on .msg.bot:last-child")?.innerText || ""), null, { timeout: 10000 });
     const reply = await page.locator(".messages.on .msg.bot").last().innerText();
     assert.match(reply, /3 files added\. Demo accounts keep their fixed sample data\./); assert.match(reply, /Word documents are kept for reference only/);
     assert.equal(await page.locator(".messages.on .msg.bot .rcact button").count(), 0, "no review step");
