@@ -81,11 +81,16 @@ await step("desktop sidebar collapses and expands; mobile sidebar opens as a dra
   const drawerToggle = page.locator('.la-menu--drawer-open');
   assert.equal(await toggle.isVisible(), true);
   assert.equal(await drawerToggle.isVisible(), false);
+  assert.equal(await page.locator(".la-brand__name").isVisible(), true);
+  assert.equal(await page.locator(".la-brand__symbol--light").isVisible(), false);
   await toggle.click();
   assert.equal(await page.locator("body").evaluate((el) => el.classList.contains("la-sidebar-collapsed")), true);
   assert.equal(await toggle.getAttribute("aria-label"), "Expand sidebar");
+  assert.equal(await page.locator(".la-brand__name").isVisible(), false);
+  assert.equal(await page.locator(".la-brand__symbol--light").isVisible(), true);
   await toggle.click();
   assert.equal(await page.locator("body").evaluate((el) => el.classList.contains("la-sidebar-collapsed")), false);
+  assert.equal(await page.locator(".la-brand__name").isVisible(), true);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await drawerToggle.isVisible(), true);
   await drawerToggle.click();
