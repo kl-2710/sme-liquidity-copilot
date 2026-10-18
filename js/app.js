@@ -180,7 +180,7 @@ function switchContext(firm,cs,{silent}={}){
   $('#ctxLine').textContent=`${firm} · ${FIRMS[firm].short} · advice only, every action needs your approval`;
   const w=$('#work');w.classList.add('loading');setTimeout(()=>w.classList.remove('loading'),260);
   $('#panelSub').textContent=`${firm} · ${FIRMS[firm].name}`;renderDemoChips();refreshTab();
-  Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});S.done=new Set();resetFlow();
+  Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});S.done=new Set();resetFlow();renderFlowSteps();
   if(!silent)welcome(S.task);
 }
 $('#firmSel').addEventListener('change',e=>{const f=e.target.value;if(f==='__add'){$('#firmSel').value=S.firm;startImport(null);return}switchContext(f,defCase(f));addLog({tool:'get_firm_context',tier:0,args:{firm_id:f},status:'ok',summary:'Switched company, started a new session'});toast(`Switched to ${f} · ${FIRMS[f].short}`)});
@@ -623,6 +623,7 @@ function route(raw){
 let busy=false;
 async function sendChat(text){
   text=(text||'').trim();if(!text||busy)return;busy=true;$('#sendBtn').disabled=true;$('#chatInput').value='';
+  if(!msgs.querySelector('.msg.user'))addFlowDivider(1);
   {const ch=currentChips().find(x=>norm(x.ask)===norm(text));if(ch)S.done.add(ch.id)}userMsg(text);$('#demoChips').hidden=true;const ty=typingEl();await sleep(reduceMotion?0:420);ty.remove();
   try{await respond(route(text),text)}catch(err){console.error(err);await botNote('There was an error processing the request. Please try again.')}
   busy=false;$('#sendBtn').disabled=false;renderDemoChips();$('#chatInput').focus({preventScroll:true});
@@ -657,7 +658,7 @@ async function respond(r,text){
     const rk=c.tv3.ranked;
     await toolCall(bot,'rank_financing',1,{firm_id:S.firm,episode:EP.k},()=>{addLog({tool:'rank_financing',tier:1,args:{firm_id:S.firm,episode:EP.k},status:'ok',summary:`Rank 1: ${rk[0].product_id}, ${rk.length} options, ${c.tv3.rejected.length} rejected`});return {}},{ms:520});
     await say(bot,`${S.cause?`<p>Matching starts from the cause found in the last step: ${S.cause.txt}.</p>`:''}<p>For gap ${EP.k} (short ${mm(c.tv3.inputs.gap)}), top 3 options:</p><ul>${rk.slice(0,3).map(x=>`<li><b>${x.rank}. ${x.product_id}</b> (${esc(CAT.find(z=>z.id===x.product_id).provider)}): receives ${mm(x.cash)}, cost ${nf(x.cost/1e6,2)}M (${nf(x.cpg*100,2)}% of the shortfall), ${x.gap_rem>0?'still short '+mm(x.gap_rem):'fully covered'}.</li>`).join('')}</ul><p>Rejected: ${c.tv3.rejected.map(x=>x.product_id).join(', ')||'none'}. ${DISC}</p>`);
-    const a=document.createElement('div');a.className='rcact';a.innerHTML='<button class="btn sec sm" type="button">Open ranking</button>';$('button',a).onclick=()=>setTab('gap');bot.appendChild(a);advance(3);suggestRow(bot,nextSuggest());return;
+    const a=document.createElement('div');a.className='rcact';a.innerHTML='<button class="btn sec sm" type="button">Open ranking</button>';$('button',a).onclick=()=>setTab('gap');bot.appendChild(a);advance(3,bot);suggestRow(bot,nextSuggest());return;
   }
   await say(bot,`<p>I support <b>${S.firm}</b> one step at a time, each unlocking when you ask for it:</p><ul><li>Diagnose DSO, DIO, DPO and CCC.</li><li>Find cash-short weeks over 13 weeks.</li><li>Rank financing options in the synthetic catalogue.</li><li>Test levers (collect early, extend payment terms, cut inventory, finance one invoice) and draft proposals for your approval.</li></ul><p>Example: <i>“What if we collect from K1 10 days early?”</i></p>`);
   suggestRow(bot,nextSuggest());
@@ -672,7 +673,7 @@ async function runLevInChat(bot,L,sc,text){
   const out=await toolCall(bot,'simulate_scenario',1,{firm_id:S.firm,levers:leverArgs(L)},()=>{
     S.lev={...L};const res=runSim(L),run=commit(L,res,label);if(sc){run.scId=sc.id;S.done.add(sc.id)}return {run,bad:run.st.k==='bl'&&!res.l.some(Boolean)};
   });
-  const run=out.run,r=run.res,st=run.st;advance(4);renderDemoChips();
+  const run=out.run,r=run.res,st=run.st;advance(4,bot);renderDemoChips();
   if(S.tab==='whatif')renderWhatIf(true);if(S.tab==='dash')renderDash();
   const note=sc&&sc.note&&sc.note.startsWith('Note:')?sc.note.slice(5).trim():'';
   if(st.k==='bl'){
@@ -754,6 +755,32 @@ const THREADS={};
 (function(){const box=$('#threads');const d=document.createElement('div');d.className='messages on';d.id='thread-flow';d.dataset.init='0';box.appendChild(d);Object.keys(TASKS).forEach(t=>{THREADS[t]=d})})();
 msgs=THREADS.tv1;
 
+const FLOW_NAMES={1:'Working-capital diagnosis',2:'Cash-flow forecast',3:'Financing match',4:'What-if and drafts'};
+function addFlowDivider(n,before){
+  if(!msgs||msgs.querySelector(`.flow-divider[data-step="${n}"]`))return;
+  const divider=document.createElement('div');divider.className='flow-divider';divider.dataset.step=n;divider.setAttribute('role','separator');divider.textContent=`Step ${n} \u00b7 ${FLOW_NAMES[n]}`;
+  const hero=msgs.querySelector('.hero');
+  if(n===1&&hero)hero.after(divider);
+  else if(before&&before.parentElement===msgs)msgs.insertBefore(divider,before);
+  else msgs.appendChild(divider);
+}
+function renderFlowSteps(){
+  const current=Math.max(1,Math.min(4,S.stage|0));
+  $$('.flow-step').forEach(button=>{
+    const n=+button.dataset.step,locked=!unlockedTask(n),done=!locked&&n<current,isCurrent=!locked&&n===current;
+    button.disabled=locked;button.classList.toggle('locked',locked);button.classList.toggle('done',done);button.classList.toggle('current',isCurrent);
+    button.title=locked?'Opens as the conversation reaches this step':FLOW_NAMES[n];
+    button.setAttribute('aria-label',`Step ${n}: ${FLOW_NAMES[n]}${locked?', locked':done?', complete':isCurrent?', current':''}`);
+    if(isCurrent)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');
+    button.closest('li')?.classList.toggle('is-current',isCurrent);
+  });
+}
+$('#flowSteps').addEventListener('click',event=>{
+  const button=event.target.closest('.flow-step');if(!button||button.disabled)return;
+  const n=+button.dataset.step;setTab(TASKS['tv'+n].tab);
+  const target=msgs.querySelector(`.flow-divider[data-step="${n}"]`)||(n===1?msgs.querySelector('.hero'):null);
+  if(target)target.scrollIntoView({behavior:reduceMotion?'auto':'smooth',block:'start'});
+});
 function currentChips(){
   const st=S.stage|0;
   if(st>=3)return SCEN();
@@ -765,16 +792,16 @@ const unlockedTask=k=>k===1||(S.stage|0)>=(k===4?3:k);
 function applyStage(){
   const g=$('.tab[data-tab="gap"]'),w=$('.tab[data-tab="whatif"]');
   if(g)g.hidden=S.stage<2;if(w)w.hidden=S.stage<3;
-  $$('.tnav[data-task]').forEach(b=>{const lock=!unlockedTask(+b.dataset.task.slice(2));b.classList.toggle('locked',lock);b.title=lock?'Opens as the conversation reaches this step':''});
+  renderFlowSteps();
 }
-function advance(n){
-  S.stage=Math.max(S.stage,n);S.task='tv'+n;
-  $$('.tnav[data-task]').forEach(b=>{const on=b.dataset.task===S.task;b.classList.toggle('on',on);on?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current')});
+function advance(n,bot){
+  const previous=S.stage;S.stage=Math.max(S.stage,n);S.task='tv'+n;
+  if(S.stage>previous)addFlowDivider(n,bot);
   $('#taskTitle').textContent=TASKS[S.task].title;$('#chatInput').placeholder=TASKS[S.task].ph;
-  applyStage();
+  applyStage();renderFlowSteps();
   if(S.panel){if(S.tab!==TASKS[S.task].tab)setTab(TASKS[S.task].tab);else renderTab()}
 }
-function resetFlow(){S.stage=0;S.cause=null;S.task='tv1';$$('.tnav[data-task]').forEach(b=>{const on=b.dataset.task==='tv1';b.classList.toggle('on',on)});$('#taskTitle').textContent=TASKS.tv1.title;$('#chatInput').placeholder=TASKS.tv1.ph;applyStage();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
+function resetFlow(){S.stage=0;S.cause=null;S.task='tv1';if(msgs)msgs.querySelectorAll('.flow-divider').forEach(d=>d.remove());$('#taskTitle').textContent=TASKS.tv1.title;$('#chatInput').placeholder=TASKS.tv1.ph;applyStage();renderFlowSteps();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
 function userFirst(){const n=(S.user&&S.user.name||'you').trim().split(/\s+/);return n[n.length-1]}
 
 
@@ -809,16 +836,15 @@ function setTask(id,{force}={}){
   if(!TASKS[id])return;
   if(!unlockedTask(+id.slice(2))){toast('This step opens as the conversation reaches it. Ask the next question in the chat.');return}
   const same=S.task===id;S.task=id;
-  $$('.tnav[data-task]').forEach(b=>{const on=b.dataset.task===id;b.classList.toggle('on',on);on?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current')});
   Object.values(THREADS).forEach(el=>el.classList.add('on'));
   msgs=THREADS[id];
   $('#taskTitle').textContent=TASKS[id].title;$('#chatInput').placeholder=TASKS[id].ph;
   if(msgs.dataset.init!=='1'||force)welcome(id);
   renderDemoChips();
   if(S.panel&&!same)setTab(TASKS[id].tab);
+  renderFlowSteps();
   closeSide();scroll();
 }
-$$('.tnav[data-task]').forEach(b=>b.addEventListener('click',()=>setTask(b.dataset.task)));
 $('#newChat').addEventListener('click',()=>{S.done=new Set();resetFlow();welcome(S.task);renderDemoChips();$('#chatInput').focus();closeSide()});
 
 
@@ -874,7 +900,7 @@ async function respondLiq(bot,{focus}={}){
      <p class="liq-fn">CCC uses period-end balances, period ${c.N} days; goods held for subcontracting are excluded from owned inventory. The materiality threshold is an owner policy that is not set in the demo, so I do not label the bottleneck W0/W1/W2 yet. ${DISC}</p>`;
   bot.appendChild(card);scroll();
   $('[data-a=dash]',card).onclick=()=>setTab('dash');
-  advance(1);suggestRow(bot,nextSuggest());
+    advance(1,bot);suggestRow(bot,nextSuggest());
 }
 const CAUSE_LBL={payroll:'payroll',tax:'tax',debt_service:'loan repayments',supplier_payment:'supplier payments',new_materials:'new materials',rent:'rent',utilities:'utilities',capex:'capex'};
 function causeOf(){
@@ -892,7 +918,7 @@ async function respondCause(bot){
   await toolCall(bot,'forecast_liquidity',1,{firm_id:S.firm,horizon_weeks:13},()=>{addLog({tool:'get_cash_forecast',tier:1,args:{firm_id:S.firm,horizon_weeks:13},status:'ok',summary:EPS.length?`${EPS.length} gaps; largest ${mm(Math.max(...EPS.map(e=>e.peak)))}`:'No shortfall in 13 weeks'});return {}},{ms:500});
   if(!EPS.length){
     await say(bot,`The lowest balance over 13 weeks is <b>${money(Math.min(...c.days.map(d=>d[1])))}</b>, always above the buffer ${money(c.buffer)}. There is no shortfall to explain, so there is nothing to match funding against.`);
-    advance(2);suggestRow(bot,nextSuggest());return;
+    advance(2,bot);suggestRow(bot,nextSuggest());return;
   }
   await say(bot,`<p>There are <b>${EPS.length} gap${EPS.length>1?'s':''}</b> below the buffer ${money(c.buffer)}:</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}</li>`).join('')}</ul>`);
   await toolCall(bot,'explain_liquidity_case',0,{firm_id:S.firm,gap:EP.k},()=>{addLog({tool:'explain_liquidity_case',tier:0,args:{firm_id:S.firm,gap:EP.k},status:'ok',summary:`Cash bridge for gap ${EP.k}`});return {}},{ms:420});
@@ -909,7 +935,7 @@ async function respondCause(bot){
   ${k.late?`<div class="liq-note"><span>◷</span><div><b>Largest receipt after the low point</b>: ${lateTxt}.${same?` This is the same customer that holds ${nf(tb.v/openAR(c).tot*100,1)}% of receivables in the diagnosis.`:''} This is timing evidence, not proof that the customer caused the gap; the what-if step tests it.</div></div>`:''}
   <div class="liq-act"><button class="btn primary sm" type="button">⚠ Open Shortfall tab</button></div>`;
   bot.appendChild(card);scroll();
-  advance(2);$('button',card).onclick=()=>setTab('gap');
+  advance(2,bot);$('button',card).onclick=()=>setTab('gap');
   suggestRow(bot,nextSuggest());
 }
 async function gateMsg(bot){
@@ -926,7 +952,7 @@ async function respondConc(bot){
   ${top[0].v/tot>.4?`<div class="liq-note"><span>⚠</span><div>One customer holds over 40% of receivables: if they pay late, the cash line is hit immediately. Try the <b>early collection</b> lever in the What-if task.</div></div>`:''}
   <div class="liq-act"><button class="btn primary sm" type="button">▦ View detailed dashboard</button></div>`;
   bot.appendChild(card);scroll();$('button',card).onclick=()=>setTab('dash');
-  advance(1);suggestRow(bot,nextSuggest());
+  advance(1,bot);suggestRow(bot,nextSuggest());
 }
 
 
@@ -1046,6 +1072,7 @@ function enterApp(u,{fresh,restore}={}){
   $('#umName').textContent=u.name;$('#umEmail').textContent=u.email;
   if(!booted){booted=true;bootApp()}else{resetSession();switchContext('F01','base');updatePending()}
   setTask('tv1',{force:true});
+  renderFlowSteps();
   if(!restore)toast(fresh?`Welcome ${userFirst()}! Your account has been created.`:`Hello ${userFirst()}, you are signed in.`);
 }
 function resetSession(){
@@ -1694,7 +1721,7 @@ document.addEventListener('pointerdown',e=>{
 
 
 const _setTask=setTask;
-setTask=function(...a){const r=_setTask.apply(this,a);const t=THREADS[S.task];if(t&&PREF.motion){t.classList.remove('swap');void t.offsetWidth;t.classList.add('swap')}return r};
+setTask=function(...a){const r=_setTask.apply(this,a);renderFlowSteps();const t=THREADS[S.task];if(t&&PREF.motion){t.classList.remove('swap');void t.offsetWidth;t.classList.add('swap')}return r};
 
 
 const PINS={firms:[],prompts:[],widgets:[]};
