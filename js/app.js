@@ -1504,7 +1504,7 @@ function saveImport(ev){
   syncUserFirms();DW.view='list';
   switchContext(id,'base');
   addLog({tool:upd?'update_company_data':'create_company_data',tier:1,args:{firm_id:id,snapshot:snap.id,mode},status:'ok',summary:`${name}: saved version ${snap.id}, cut-off ${fd(snap.asOf)}`});
-  toast(`Saved version ${snap.id} cho ${name}`);
+  toast(`Saved version ${snap.id} for ${name}`);
   renderData();
 }
 
@@ -1599,7 +1599,7 @@ function exportFlowCSV(c,M){
   add('Cash in',M.W.map(x=>x.inn));M.groups.filter(g=>g.dir==='IN').forEach(g=>add('  '+lblCat(g.cat),g.wk));
   add('Cash out',M.W.map(x=>x.out));M.groups.filter(g=>g.dir==='OUT').forEach(g=>add('  '+lblCat(g.cat),g.wk));
   rows.push(['Week-end balance',...M.W.map(x=>Math.round(x.bal)),'']);
-  dlFile(`${S.firm}_dong_tien_13_tuan.csv`,csvOf(hdr,rows));
+  dlFile(`${S.firm}_cash_flow_13_weeks.csv`,csvOf(hdr,rows));
 }
 function renderDash(){
   renderDashOld();
