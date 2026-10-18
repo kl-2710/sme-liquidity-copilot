@@ -153,8 +153,8 @@
   </div>
   <section class="data-screen" id="dataScreen" aria-label="Company data" hidden>
     <input type="file" id="dataFileInput" multiple accept=".csv,.xlsx,.xls,.docx" hidden>
-    <header class="data-page-head"><div><button type="button" class="data-back" id="dataBack">← Back to chat</button><h1>Company data</h1><p>Manage uploaded files, businesses and saved snapshots.</p></div><button type="button" class="btn primary" id="dataAddSources">Add sources</button></header>
-    <div class="data-page-tabs" role="tablist" aria-label="Company data sections"><button type="button" role="tab" id="filesTab" aria-selected="true" class="on">Files</button><button type="button" role="tab" id="businessesTab" aria-selected="false">Businesses &amp; snapshots</button></div>
+    <header class="data-page-head"><div><button type="button" class="data-back" id="dataBack">← Back to chat</button><h1>Company data</h1><p>Upload your company’s files: sales and purchase invoices, inventory, the 13-week plan and financial statements. Copilot reads them and keeps your analysis up to date.</p></div><button type="button" class="btn primary" id="dataAddSources">Add sources</button></header>
+    <div class="data-page-tabs" role="tablist" hidden aria-label="Company data sections"><button type="button" role="tab" id="filesTab" aria-selected="true" class="on">Files</button><button type="button" role="tab" id="businessesTab" aria-selected="false">Businesses &amp; snapshots</button></div>
     <section id="dataFiles" role="tabpanel" aria-labelledby="filesTab"></section>
     <section id="dataBusinesses" role="tabpanel" aria-labelledby="businessesTab" hidden></section>
   </section>
