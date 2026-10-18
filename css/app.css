@@ -822,3 +822,7 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 .composer .attach-btn{order:0;margin:0 0 2px}
 .composer .upload-chips{margin:2px 2px 0}
 .composer textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Composer sits above the conversation: messages fade out before its soft focus glow. */
+.composer-wrap{position:relative;z-index:2}
+.chatcol:not(.is-empty) .composer-wrap{padding-top:28px;margin-top:-28px;background:linear-gradient(180deg,color-mix(in srgb,var(--paper) 0%,transparent),var(--paper) 26px)}
+.composer:focus-within{border-color:var(--lc-color-border-focus);box-shadow:0 0 0 1px color-mix(in srgb,var(--lc-color-border-focus) 35%,transparent),0 0 18px 2px color-mix(in srgb,var(--lc-color-action-primary) 16%,transparent),0 10px 28px -6px color-mix(in srgb,var(--lc-color-action-primary) 22%,transparent)}
