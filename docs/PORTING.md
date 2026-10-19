@@ -122,3 +122,7 @@ The workbook is the reference; where the earlier engine differed, the engine fol
 ## Liquidity-state banner on Shortfall
 - The banner ("Cash shortfall ahead" / "Liquidity Shortfall Alert", and the TH02, TH03 and unknown states) moved from the Dashboard to the top of the Shortfall view (`renderGap`). It is shown only when `S.stage ≥ 2`, i.e. after a forecast question has been answered.
 - Content, tiles and states are unchanged; the UC01 tiles (capital above the normal level from `money_at_risk`) still read the cached UC01 run. Its "Find financing to cover the gap" button is bound in `bindGapHeader`.
+
+## Confirmation dialogs
+- `confirmAction` (delete chat, log out, clear data, delete account) marks the modal with `confirm-dialog`; `openModal` clears it for every other dialog.
+- `.modal.confirm-dialog` is `min(400px, 100vw − 32px)` wide, takes its height from the content (the shared `.modal-layout` would otherwise let the dialog grow across the scrim's flex row), has no footer rule and keeps Cancel / the action on the right. Settings and the dialogs with forms or text areas keep their layout.

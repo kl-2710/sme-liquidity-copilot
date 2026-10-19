@@ -1063,6 +1063,15 @@ html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
 .modal-f{flex:0 0 auto;padding-top:12px;margin-top:8px;border-top:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface)}
 .modal .modal-f.acts,.modal .modal-f .acts{margin-top:0}
 .modal:has(.settings-shell){display:block}
+/* Confirmation dialogs (delete chat, log out, clear data, delete account): as wide as their text needs, never stretched by the
+   scrim's flex row, height from the content, buttons on the right. */
+.modal.confirm-dialog{flex:0 0 auto;width:min(400px,calc(100vw - 32px));height:auto;padding:18px 20px 16px}
+.modal.confirm-dialog .modal-layout,.modal.confirm-dialog.modal-layout{flex:0 0 auto}
+.modal.confirm-dialog h3{overflow-wrap:anywhere}
+.modal.confirm-dialog .modal-b{flex:0 0 auto;overflow:visible}
+.modal.confirm-dialog .modal-b p{margin:4px 0 0;overflow-wrap:anywhere}
+.modal.confirm-dialog .modal-f{border-top:0;padding-top:0;margin-top:16px}
+.modal.confirm-dialog .acts{justify-content:flex-end;flex-wrap:wrap}
 
 /* Detail panel header: one view at a time, its title and a close button (no tabs) */
 .detail-head{padding:14px 12px 12px 20px;border-bottom:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface)}

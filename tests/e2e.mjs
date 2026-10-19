@@ -838,6 +838,28 @@ for (const theme of ["light", "dark"]) {
     await page.fill("#chatName", "Cash review"); await page.click("#chatSaveName");
     assert.equal(await page.locator(".chat-row .chat-open").first().innerText(), "Cash review");
   });
+  if (theme === "light") await step("Delete chat asks in a compact dialog sized to its text (1440, 768 and 375 px)", async () => {
+    for (const [w, h] of [[1440, 900], [768, 900], [375, 812]]) {
+      await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(300);
+      if (w < 900) await page.evaluate(() => openSide());
+      const row = page.locator(".chat-row").first();
+      await row.hover(); await row.locator(".chat-more").click(); await page.click('[data-chat-act="delete"]'); await page.waitForTimeout(400);
+      const r = await page.evaluate(() => { const m = document.querySelector("#modal"), b = m.getBoundingClientRect(), f = m.querySelector(".acts").getBoundingClientRect(),
+        btns = [...m.querySelectorAll(".acts button")].map((x) => x.getBoundingClientRect()), h3 = m.querySelector("h3"), p = m.querySelector("p");
+        return { w: b.width, h: b.height, inside: b.left >= 0 && b.right <= innerWidth, right: Math.round(b.right - btns[btns.length - 1].right), fill: Math.round(f.right - f.left), cls: m.classList.contains("confirm-dialog"),
+          clipped: [h3, p].some((e) => e.scrollWidth > e.clientWidth + 1), labels: [...m.querySelectorAll(".acts button")].map((x) => x.textContent) }; });
+      assert.equal(r.cls, true); assert.deepEqual(r.labels, ["Cancel", "Delete"]); assert.equal(r.clipped, false); assert.ok(r.inside, "inside the viewport");
+      if (w >= 768) assert.ok(r.w >= 360 && r.w <= 420, `width ${r.w} at ${w}px`); else assert.ok(Math.abs(r.w - (w - 32)) <= 1, `width ${r.w} at ${w}px`);
+      assert.ok(r.h < 200, `height ${r.h} follows the content`); assert.ok(r.right <= 24, "buttons on the right");
+      if (w === 1440 || w === 375) await shot(page, `confirm-delete-${w}`);
+      await page.click("#cfNo"); await page.waitForTimeout(200);
+      if (w < 900) await page.evaluate(() => closeSide());
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => openSettings("General")); await page.waitForTimeout(300);
+    assert.ok(await page.evaluate(() => document.querySelector("#modal").getBoundingClientRect().width > 700), "Settings keeps its own wide layout");
+    await page.keyboard.press("Escape");
+  });
   // ERR_TUNNEL_CONNECTION_FAILED only comes from a sandbox proxy blocking the XLSX CDN script.
   await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors.filter((e) => !/ERR_TUNNEL_CONNECTION_FAILED/.test(e)), []));
   await page.close();

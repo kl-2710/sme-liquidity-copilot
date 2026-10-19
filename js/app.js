@@ -237,7 +237,7 @@ function layoutModal(m){
   const wrap=(cls,els)=>{const d=document.createElement('div');d.className=cls;els.forEach(e=>d.appendChild(e));return d};
   box.classList.add('modal-layout');box.replaceChildren(...[head.length?wrap('modal-h',head):null,wrap('modal-b',body),foot.length?wrap('modal-f',foot):null].filter(Boolean));
 }
-function openModal(html,onMount){const m=$('#modal');modalReturnFocus=document.activeElement;m.innerHTML=html;layoutModal(m);m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');$('#scrim').classList.add('show');document.documentElement.classList.add('modal-open');onMount&&onMount(m);const f=m.querySelector('input,textarea,button.primary,button.ok,button:not([disabled])');f&&setTimeout(()=>f.focus(),30)}
+function openModal(html,onMount){const m=$('#modal');modalReturnFocus=document.activeElement;m.classList.remove('confirm-dialog');m.innerHTML=html;layoutModal(m);m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');$('#scrim').classList.add('show');document.documentElement.classList.add('modal-open');onMount&&onMount(m);const f=m.querySelector('input,textarea,button.primary,button.ok,button:not([disabled])');f&&setTimeout(()=>f.focus(),30)}
 function closeModal(){$('#scrim').classList.remove('show');document.documentElement.classList.remove('modal-open');modalReturnFocus?.focus?.();modalReturnFocus=null}
 $('#scrim').addEventListener('mousedown',e=>{if(e.target.id==='scrim')closeModal()});
 document.addEventListener('keydown',e=>{
@@ -2904,6 +2904,7 @@ function renameChatDialog(c){
 // It was called before but never defined, so Delete chat threw a ReferenceError and nothing was deleted.
 function confirmAction(title,msg,onOk,{okLabel='Confirm',danger=true}={}){
   openModal(`<h3>${esc(title)}</h3><p>${esc(msg)}</p><div class="acts"><button type="button" class="btn sec" id="cfNo">Cancel</button><button type="button" class="btn ${danger?'danger':'primary'}" id="cfYes">${esc(okLabel)}</button></div>`,m=>{
+    m.classList.add('confirm-dialog'); // compact size, see .modal.confirm-dialog
     $('#cfNo',m).onclick=closeModal;
     $('#cfYes',m).onclick=async()=>{closeModal();await onOk()};
   });
