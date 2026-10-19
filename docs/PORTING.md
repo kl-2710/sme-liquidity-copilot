@@ -74,3 +74,7 @@ The interface hides the audit log while keeping `addLog` and its in-memory event
 - The "Expert mode" checkbox (dashboard data line and Shortfall bar, remembered per browser in `lilact.expert.v1`) adds formulas, rule ids, W/BN/TH/M codes, c_i and shapes, threshold sources and versions, snapshot and run ids, raw VND, the cut-off pickers and the threshold policy.
 - Plain wording comes from `tx(key)` in `js/i18n.js`, which uses `<key>.s` when it exists and Expert mode is off; chat answers use the same switch.
 - Item status follows the signal level c_i (0 Normal, 1 Watch, 2 Severe).
+
+## Modals
+- Every dialog opened with `openModal` gets the shared layout from `layoutModal`: a fixed header (close button and title), a body that scrolls on its own (`overflow-y:auto; min-height:0; overscroll-behavior:contain`) and a fixed footer with the `.acts` buttons. The modal is at most `calc(100dvh - 2rem)` high (100vh fallback), so Save and Cancel stay reachable on short screens.
+- While a modal is open the page behind is locked; Esc closes it, Tab stays inside it and focus returns to the element that opened it. The Settings window keeps its own two-pane layout.

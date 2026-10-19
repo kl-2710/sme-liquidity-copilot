@@ -192,11 +192,24 @@ function animNum(el,to,fmt,dur=650){
   el._raf=requestAnimationFrame(step);
 }
 let modalReturnFocus=null;
-function openModal(html,onMount){const m=$('#modal');modalReturnFocus=document.activeElement;m.innerHTML=html;m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');$('#scrim').classList.add('show');onMount&&onMount(m);const f=m.querySelector('input,textarea,button.primary,button.ok,button:not([disabled])');f&&setTimeout(()=>f.focus(),30)}
-function closeModal(){$('#scrim').classList.remove('show');modalReturnFocus?.focus?.();modalReturnFocus=null}
+/* Shared modal layout: a fixed header (close button and title), a body that scrolls on its own and a fixed footer with the actions
+   (.acts), so Save / Cancel stay reachable on short screens. The page behind is locked while a modal is open; Esc closes it,
+   Tab stays inside it and focus returns to where it was. The settings window keeps its own two-pane layout. */
+function layoutModal(m){
+  m.classList.remove('modal-layout');if(m.querySelector('.settings-shell'))return;
+  const box=m.children.length===1&&!/^H[1-6]$/.test(m.firstElementChild.tagName)?m.firstElementChild:m,kids=[...box.children];
+  const head=[],foot=[];
+  for(const k of kids){if(k.classList.contains('settings-close')||(/^H[1-6]$/.test(k.tagName)&&!head.some(h=>/^H[1-6]$/.test(h.tagName))))head.push(k);else break}
+  const last=kids[kids.length-1];if(last&&!head.includes(last)&&last.classList.contains('acts'))foot.push(last);
+  const body=kids.filter(k=>!head.includes(k)&&!foot.includes(k));if(!body.length&&!foot.length)return;
+  const wrap=(cls,els)=>{const d=document.createElement('div');d.className=cls;els.forEach(e=>d.appendChild(e));return d};
+  box.classList.add('modal-layout');box.replaceChildren(...[head.length?wrap('modal-h',head):null,wrap('modal-b',body),foot.length?wrap('modal-f',foot):null].filter(Boolean));
+}
+function openModal(html,onMount){const m=$('#modal');modalReturnFocus=document.activeElement;m.innerHTML=html;layoutModal(m);m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');$('#scrim').classList.add('show');document.documentElement.classList.add('modal-open');onMount&&onMount(m);const f=m.querySelector('input,textarea,button.primary,button.ok,button:not([disabled])');f&&setTimeout(()=>f.focus(),30)}
+function closeModal(){$('#scrim').classList.remove('show');document.documentElement.classList.remove('modal-open');modalReturnFocus?.focus?.();modalReturnFocus=null}
 $('#scrim').addEventListener('mousedown',e=>{if(e.target.id==='scrim')closeModal()});
 document.addEventListener('keydown',e=>{
-  if($('#scrim').classList.contains('show')){const m=$('#modal'),f=[...m.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter(x=>!x.hidden);if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeModal();return}if(e.key==='Tab'&&f.length){if(e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===f.at(-1)){e.preventDefault();f[0].focus()}}return}
+  if($('#scrim').classList.contains('show')){const m=$('#modal'),f=[...m.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])')].filter(x=>!x.hidden&&x.getClientRects().length);if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeModal();return}if(e.key==='Tab'&&f.length){if(e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===f.at(-1)){e.preventDefault();f[0].focus()}}return}
   const tag=(e.target.tagName||'').toLowerCase();
   if(['input','textarea','select'].includes(tag)||e.metaKey||e.ctrlKey)return;
   const map={'1':'dash','2':'gap','3':'whatif','4':'appr'};

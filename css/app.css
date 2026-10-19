@@ -1060,3 +1060,14 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .dtable td .status{white-space:nowrap;vertical-align:middle}
 .dtable td:has(> .status){white-space:nowrap;width:1%}
 .dtables.simple .dtable td:last-child,.dtables.simple .dtable th:last-child{width:1%;white-space:nowrap}
+
+/* Shared modal layout: header and footer stay put, the body scrolls (short screens, long forms such as Cash0 and reserve levels) */
+html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
+.modal{max-height:calc(100vh - 2rem);max-height:calc(100dvh - 2rem);display:flex;flex-direction:column;overflow:hidden}
+.modal-layout{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;max-height:100%}
+.modal-h{flex:0 0 auto;position:relative;padding-right:36px}
+.modal-h .settings-close{top:0;right:0}
+.modal-b{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 -4px;padding:2px 4px}
+.modal-f{flex:0 0 auto;padding-top:12px;margin-top:8px;border-top:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface)}
+.modal .modal-f.acts,.modal .modal-f .acts{margin-top:0}
+.modal:has(.settings-shell){display:block}

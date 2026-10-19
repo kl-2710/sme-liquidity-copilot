@@ -957,6 +957,27 @@ for (const theme of ["light", "dark"]) {
     assert.match(b, /With no new sales and an estimated opening cash, the alert level is Red/);
     assert.doesNotMatch(plain(b), TECH);
   });
+  await step("Modals · at a short viewport the Cash0 form scrolls inside, Save stays reachable, the page is locked, Esc restores focus", async () => {
+    await page.setViewportSize({ width: 1280, height: 420 });
+    await page.evaluate(() => { setWide(true); setTab("gap"); }); await page.waitForTimeout(700);
+    await page.focus("#cash0Btn"); await page.click("#cash0Btn"); await page.waitForTimeout(400);
+    const r = await page.evaluate(() => { const b = document.querySelector("#modal .modal-b"), m = document.querySelector("#modal").getBoundingClientRect();
+      return { scrollable: b.scrollHeight > b.clientHeight, overflow: getComputedStyle(b).overflowY, modalFits: m.top >= 0 && m.bottom <= innerHeight, locked: getComputedStyle(document.documentElement).overflow }; });
+    assert.ok(r.scrollable, "the form body scrolls"); assert.equal(r.overflow, "auto"); assert.ok(r.modalFits, "the modal fits the viewport"); assert.equal(r.locked, "hidden");
+    await page.locator("#c0Save").scrollIntoViewIfNeeded();
+    const save = await page.locator("#c0Save").boundingBox();
+    assert.ok(save && save.y >= 0 && save.y + save.height <= 420, "Save is inside the viewport");
+    await page.locator("#c0Reason").scrollIntoViewIfNeeded();
+    const reason = await page.locator("#c0Reason").boundingBox();
+    assert.ok(reason && reason.y + reason.height <= 420, "the last field can be scrolled into view");
+    await page.keyboard.press("Shift+Tab"); await page.keyboard.press("Shift+Tab");
+    assert.ok(await page.evaluate(() => document.querySelector("#modal").contains(document.activeElement)), "focus stays inside the modal");
+    await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+    assert.equal(await page.locator("#scrim.show").count(), 0);
+    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), "cash0Btn");
+    assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).overflow), "visible");
+    await page.setViewportSize({ width: 1440, height: 900 });
+  });
   await step("Simple · no JavaScript errors", async () => assert.deepEqual(errors, []));
   await page.close();
 }
