@@ -799,8 +799,6 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 @media(max-width:860px){.chatcol.is-empty .threads,.chatcol.is-empty .composer-wrap{width:calc(100% - 24px)}.chatcol.is-empty .hero{margin-top:0}}
 
 /* ---------- One account = one company ---------- */
-.demo-more{margin:10px 0 0;text-align:center;font-size:12px;color:var(--lc-color-text-muted)}
-.demo-more .linkbtn{font-size:12px}
 .hero-setup{margin:8px 0 14px;color:var(--lc-color-text-secondary);font-size:14px}
 .no-company-data #panelBtn,.no-company-data #pendChip,.no-company-data #demoChips{display:none!important}
 .no-company-data #chatInput:disabled{cursor:not-allowed}
@@ -1069,3 +1067,7 @@ html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
 .detail-close{font-size:22px;line-height:1;color:var(--lc-color-text-secondary)}
 .detail-close:hover{color:var(--lc-color-text-primary);background:var(--lc-color-bg-hover)}
 .detail-pane[hidden]{display:none!important}
+/* UC03 funding plan (workbook v9) */
+.uc03-rank{min-width:720px}.uc03-rank td:nth-child(2){min-width:230px}.uc03-rank td{vertical-align:top}
+.u3-flag{display:block;margin-top:2px;font-size:11px;line-height:1.35;color:var(--lc-color-text-secondary)}
+.u3-round,.u3-factors,.u3-pkg{margin:8px 0;font-size:13px;line-height:1.5;color:var(--lc-color-text-primary)}.u3-factors{color:var(--lc-color-text-secondary)}

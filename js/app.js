@@ -9,14 +9,23 @@ function simulate(C,ep,lev,CAT){
  const purBy=b=>C.pur.filter(s=>s[0]===b&&s[2]===1).reduce((a,s)=>a+s[1],0);
  const vLine=l=>C.inv.filter(x=>x.name===l).reduce((a,x)=>a+x.own,0);
  const revC=revBy(lev.cust),purS=purBy(lev.supp),vL=vLine(lev.line);
- const l1=!!lev.l1_on&&lev.X>=0&&lev.X<=30&&revC>0,l2=!!lev.l2_on&&lev.Y>=0&&lev.Y<=30&&purS>0,l3=!!lev.l3_on&&lev.Z>=0&&lev.Z<=50&&vL>0;
+ const l1v=!!lev.l1_on&&lev.X>=-30&&lev.X<=30&&revC>0,l2v=!!lev.l2_on&&lev.Y>=0&&lev.Y<=30&&purS>0,l3v=!!lev.l3_on&&lev.Z>=0&&lev.Z<=50&&vL>0;
  const delta=new Map(),add=(d,x)=>delta.set(d,(delta.get(d)||0)+x);
  const recv=new Map();
+ // Workbook v9 UC04 (U4-04 … U4-13): companies with a UC04 setup move only a share of the receipts / payments, with the discount, fee,
+ // recovery and sale cost of that setup; the levers keep their meaning (customer and days, supplier and days, lot and %).
+ const U=uc04Applies(C)?uc04For(lev):null;
+ let l1=l1v,l2=l2v,l3=l3v,freed=0,rel=0,uCost=0;
+ if(U&&U.status==='rejected'){l3=l3&&!U.errors.some(x=>/^LOT_|SALE_/.test(x));l2=l2&&!U.errors.includes('ESSENTIAL_SUPPLIER_NOT_CONFIRMED');C.ev.forEach(e=>recv.set(e[0],dn(e[5])))}
+ if(U&&U.status!=='rejected'){let prev=0;U.path.forEach(x=>{const inc=x.delta-prev;prev=x.delta;if(Math.abs(inc)>1e-9)add(dn(x.d),inc)});
+  const moved=new Map(U.affected.filter(a=>a.lever==='AR').map(a=>[a.id,dn(a.new)]));C.ev.forEach(e=>recv.set(e[0],moved.get(e[0])??dn(e[5])));
+  freed=U.sale.released_book;rel=U.sale.net;uCost=U.costs.cash}
+ else if(!U){
  C.ev.forEach(e=>{const [id,dir,cat,partner,amt,date]=e;let nd=dn(date);const od=nd;
   if(l1&&cat==='invoice_receipt'&&partner===lev.cust){nd=Math.max(asOf+1,od-lev.X);if(nd!==od){add(nd,amt);add(od,-amt)}}
   if(l2&&cat==='supplier_payment'&&partner===lev.supp){nd=od+lev.Y;if(nd!==od){add(od,amt);add(nd,-amt)}}
   recv.set(id,nd)});
- const freed=l3?vL*lev.Z/100:0,rel=freed*(1-lev.hair/100);if(l3)add(asOf+lev.lag,rel);
+ freed=l3?vL*lev.Z/100:0;rel=freed*(1-lev.hair/100);if(l3)add(asOf+lev.lag,rel)}
  let l4=false,cost=0,Iu=0,Cc=0,status='OFF',reason='';
  const need=dn(ep.start);
  if(lev.l4_on){status='BLOCKED';const cat=CAT.find(c=>c.id===lev.prod),e=C.ev.find(x=>x[0]===lev.inv_id&&x[1]==='IN');
@@ -35,11 +44,12 @@ function simulate(C,ep,lev,CAT){
  let cum=0;const path=C.days.map(([d,c])=>{cum+=delta.get(dn(d))||0;return {d,c,s:c+cum}});
  const gap0=p=>Math.max(0,buf-p.c),gap1=p=>Math.max(0,buf-p.s);
  const epi=path.filter(p=>dn(p.d)>=need&&dn(p.d)<=dn(ep.end));
- const AR=C.ar-(l1?revC/N*lev.X:0)-(l4?Iu*1:0),INV=C.invv-freed,AP=C.ap+(l2?purS/N*lev.Y:0);
+ // UC04 keeps DSO/DIO/DPO/CCC at the cut-off unchanged (U4-26); the cash moved is reported as cash days instead.
+ const AR=C.ar-(!U&&l1?revC/N*lev.X:0)-(l4?Iu*1:0),INV=C.invv-(U?0:freed),AP=C.ap+(!U&&l2?purS/N*lev.Y:0);
  const dso=AR/C.rev*N,dio=INV/C.cogs*N,dpo=AP/C.cogs*N;
  const pk=epi.reduce((a,p)=>p.c<a.c?p:a,epi[0]);
- return {ccc:dso+dio-dpo,dso,dio,dpo,gap_epi:Math.max(...epi.map(gap1)),newDays:path.filter(p=>gap0(p)===0&&gap1(p)>0).length,cost:cost+freed*lev.hair/100,cashPeak:pk.s,l:[l1,l2,l3,l4],status4:status,reason,path,financed:l4?{Iu,Cc,fin:cost}:null,
-  valid:{l1:!lev.l1_on||l1,l2:!lev.l2_on||l2,l3:!lev.l3_on||l3},freed,rel};
+ return {ccc:dso+dio-dpo,dso,dio,dpo,gap_epi:Math.max(...epi.map(gap1)),newDays:path.filter(p=>gap0(p)===0&&gap1(p)>0).length,cost:cost+(U?uCost:freed*lev.hair/100),cashPeak:pk.s,l:[l1,l2,l3,l4],status4:status,reason,path,financed:l4?{Iu,Cc,fin:cost}:null,
+  valid:{l1:!lev.l1_on||l1,l2:!lev.l2_on||l2,l3:!lev.l3_on||l3},freed,rel,uc04:U&&U.status!=='rejected'?U:null,uc04_errors:U&&U.status==='rejected'?U.errors:null};
 }
 
 
@@ -51,7 +61,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // nf, mm, money, vnd, enM, pct, days, fd, fds, enDate: js/formatters.js (shared number and date formatting).
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const FIRMS={F01:{name:'Alpha Garment Subcontractor',short:'Alpha Garment'},F02:{name:'Beta Fabric Distributor',short:'Beta Fabric'},F03:{name:'Gamma Packaging & Trims',short:'Gamma Trims'}};
+const FIRMS={F01:{name:'Alpha Garment Subcontractor',short:'Alpha Garment'}};
+const SAMPLE_FIRMS=Object.keys(FIRMS); // the fixed sample company (workbook v9 has only F01)
 const LV_NAME={l1:'Early collection',l2:'Extend payables',l3:'Cut inventory',l4:'Finance one invoice'};
 const REJ={INVOICE_TOO_SMALL:'Invoice is below the product minimum',NO_OPEN_INVOICE:'No suitable open invoice',NOT_ELIGIBLE:'Not eligible'};
 const TYPE_VN={invoice_factoring:'Invoice factoring',reverse_factoring:'Reverse factoring',inventory_loan:'Inventory-backed loan',credit_line:'Credit line',dynamic_discounting:'Dynamic discounting'};
@@ -88,6 +99,24 @@ function uc02(firm=S.firm){
   const key=['uc02',snap.snapshot_id,CFG.versions.formula,vid,S.weeks,d.snapshot_id,fr].join('|');
   if(!RUNS.has(key)){RUNS.set(key,ENGINE.runUC02(snap,p,{weeks:S.weeks,uc01:d,config_version:vid,freshness:fr,model:d.model.model}));if(typeof FEEDBACK!=='undefined')FEEDBACK.log(firm,RUNS.get(key))}
   return RUNS.get(key);
+}
+// UC03 (workbook v9): the funding plan for the shortfall of the same UC01/UC02 runs. Only companies with a D_UC03 product table (the
+// sample company); uploaded companies keep the per-gap catalogue ranking (rankFor).
+function uc03(firm=S.firm){
+  const tb=(DATA.uc03||{})[firm];if(!tb)return null;const u=uc02(firm),d=uc01(firm);if(!u||!d)return null;
+  const key='uc03|'+u.run_id+'|'+d.run_id;if(!RUNS.has(key))RUNS.set(key,ENGINE.matchFinancing(DATA.snaps[firm],d,u,tb));return RUNS.get(key);
+}
+// UC04 (workbook v9) applies on the Base case of a company with a UC04 setup; the lever object maps onto that setup.
+const uc04Applies=c=>!!(DATA.uc04||{})[c.firm]&&S.case==='base'&&c.firm===S.firm&&!(S.weeks<CFG.tv2.horizonWeeks);
+function uc04Setup(lev,firm=S.firm){
+  const d=DATA.uc04[firm],late=lev.l1_on&&lev.X<0;
+  return {...d,case:late?6:1,customer:lev.l1_on?lev.cust:'',ar_share:lev.l1_on?(lev.ar_share??d.ar_share):0,early_days:lev.l1_on&&lev.X>0?lev.X:0,late_days:late?-lev.X:d.late_days,
+    discount:lev.discount??d.discount,supplier:lev.l2_on?lev.supp:'',ap_share:lev.l2_on?(lev.ap_share??d.ap_share):0,extend_days:lev.l2_on?lev.Y:0,ap_fee:lev.ap_fee??d.ap_fee,
+    lot:lev.l3_on?lev.line:'',sale_share:lev.l3_on?lev.Z/100:0,recovery:1-lev.hair/100,sale_lag:lev.lag,sale_cost:lev.sale_cost??d.sale_cost};
+}
+function uc04For(lev){
+  const u=uc02(),d=uc01(),setup=uc04Setup(lev),key='uc04|'+u.run_id+'|'+JSON.stringify(setup);
+  if(!RUNS.has(key))RUNS.set(key,ENGINE.simulateUC04(DATA.snaps[S.firm],u,d,setup));return RUNS.get(key);
 }
 // Rmin of the current configuration for the daily colours (alertLevel falls back to 50 % of Rtarget when it is missing).
 const RMIN=()=>{const u=uc02();return u&&u.reserves.rmin!=null?u.reserves.rmin:undefined};
@@ -174,7 +203,10 @@ function alertLegendHTML({surplus}={}){
 function offLev(){
   const c=C(),buyers=topBy(c.sales.filter(s=>s[3]===1),s=>s[1],s=>s[2]),sup=topBy(c.pur.filter(s=>s[2]===1),s=>s[0],s=>s[1]);
   const own=c.inv.filter(x=>x.own>0),slow=own.find(x=>x.slow===1)||own[0];
-  return {l1_on:0,cust:buyers[0]?.k||'',X:7,l2_on:0,supp:sup[0]?.k||'',Y:7,l3_on:0,line:slow?.name||'',Z:25,lag:14,hair:10,l4_on:0,inv_id:'',prod:'RF-001'};
+  const lev={l1_on:0,cust:buyers[0]?.k||'',X:7,l2_on:0,supp:sup[0]?.k||'',Y:7,l3_on:0,line:slow?.name||'',Z:25,lag:14,hair:10,l4_on:0,inv_id:'',prod:'RF-001'};
+  // Companies with a workbook UC04 setup start from it (customer, supplier, lot, days, sale share, recovery and sale lag).
+  const u4=(DATA.uc04||{})[c.firm];if(u4)Object.assign(lev,{cust:u4.customer,X:u4.early_days,supp:u4.supplier,Y:u4.extend_days,line:u4.lot,Z:Math.round(u4.sale_share*100),hair:Math.round((1-u4.recovery)*100),lag:u4.sale_lag});
+  return lev;
 }
 function topBy(arr,kf,vf){const m=new Map();arr.forEach(a=>m.set(kf(a),(m.get(kf(a))||0)+vf(a)));return [...m].map(([k,v])=>({k,v})).sort((a,b)=>b.v-a.v)}
 function candInvoices(){const c=C(),need=dn(EP.start);return c.ev.filter(e=>e[1]==='IN'&&e[2]==='invoice_receipt'&&dn(e[5])>=need).sort((a,b)=>dn(a[5])-dn(b[5]))}
@@ -551,7 +583,8 @@ function renderGap(){
     <div class="card kpi k3"><div class="t">Lowest balance</div><div class="v num">${money(EP.cashMin)}</div><div class="f">on ${fds(EP.peakDay)}</div></div>
     <div class="card kpi k4"><div class="t">Gap ends</div><div class="v num">${fds(EP.end)}</div><div class="f">${EP.censored?'not recovered within the period':'recovered'}</div></div>
   </div><div class="card cfcard" data-wid="factors"><div class="card-head"><div><h3>${t('cf.title',{k:EP.k})}</h3><p>${tx('cf.sub')}</p></div></div>${factorsHTML(gapFactors(EP))}</div>${blocksHTML(u)}${stuck}`);
-    const rank=dashSec(4,'var(--lc-color-action-primary)',t('gap.h.rank',{k:EP.k}),XP()?'Tier (fully covers and funds in time), then cost relative to the shortfall':tx('gap.h.sub.rank'),
+    const m3=S.stage>=3?uc03():null;
+    const rank=m3&&m3.status!=='not_applicable'?dashSec(4,'var(--lc-color-action-primary)',t('uc03.title'),t('uc03.sub',{n:m3.rounds[0]?m3.rounds[0].products.length:0}),`<div class="card uc03">${uc03HTML(m3)}</div>`):dashSec(4,'var(--lc-color-action-primary)',t('gap.h.rank',{k:EP.k}),XP()?'Tier (fully covers and funds in time), then cost relative to the shortfall':tx('gap.h.sub.rank'),
       !t3?`<div class="callout"><span>ℹ</span><div>The ranking appears after the financing step of the conversation.<div style="margin-top:8px"><button class="btn primary sm" type="button" data-ask="${esc(rq)}">${esc(rq)} →</button></div></div></div>`
       :`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`);
     p.innerHTML=head+forecast+daily+gaps+rank+foot;
@@ -637,16 +670,17 @@ function rankTable(t3){
 const shortN=s=>String(s||'').replace(/^Large Exporter /,'').replace(/^Garment Factory (subcontract )?/,'').replace(/^Beta Fabric Distributor.*/,'Beta').replace(/^Overseas fabric mill /,'').slice(0,30);
 function describeLev(l){
   const a=[];
-  if(l.l1_on)a.push(`Collect early ${shortN(l.cust)} ${l.X} days`);
-  if(l.l2_on)a.push(`Extend ${shortN(l.supp)} ${l.Y} days`);
-  if(l.l3_on)a.push(`Cut inventory ${String(l.line).slice(0,22)} ${l.Z}%`);
+  const u4=(DATA.uc04||{})[S.firm],sh=(v,d)=>u4?`${nf((v??d)*100,0)}% of `:'';
+  if(l.l1_on)a.push(l.X<0?`${sh(l.ar_share,u4&&u4.ar_share)}${shortN(l.cust)} receipts ${-l.X} days late`:`Collect ${sh(l.ar_share,u4&&u4.ar_share)}${shortN(l.cust)} ${l.X} days early`);
+  if(l.l2_on)a.push(`Extend ${sh(l.ap_share,u4&&u4.ap_share)}${shortN(l.supp)} ${l.Y} days`);
+  if(l.l3_on)a.push(u4?`Sell ${l.Z}% of ${String(l.line).slice(0,28)}`:`Cut inventory ${String(l.line).slice(0,22)} ${l.Z}%`);
   if(l.l4_on)a.push(`Finance ${l.inv_id} via ${l.prod}`);
   return a.join(' + ')||'No lever switched on';
 }
 const anyOn=l=>l.l1_on||l.l2_on||l.l3_on||l.l4_on;
 function leverArgs(l){
   const a={};
-  if(l.l1_on)a.early_collection={customer:l.cust,days:l.X};
+  if(l.l1_on)a[l.X<0?'late_collection':'early_collection']={customer:l.cust,days:Math.abs(l.X),...(l.ar_share!=null?{share:l.ar_share}:{})};
   if(l.l2_on)a.extend_payables={supplier:l.supp,days:l.Y};
   if(l.l3_on)a.reduce_inventory={product_line:l.line,pct:l.Z};
   if(l.l4_on)a.finance_invoice={invoice_id:l.inv_id,product_id:l.prod};
@@ -991,7 +1025,7 @@ let pendingChatFiles=[];
 function renderChatFiles(){const box=$('#chatFileChips');box.hidden=!pendingChatFiles.length;if(!pendingChatFiles.length){box.innerHTML='';return}box.innerHTML=`<div class="upload-chip-list">${pendingChatFiles.map((f,i)=>`<span class="upload-chip">${esc(f.name)} <button type="button" data-remove-chat-file="${i}" aria-label="Remove ${esc(f.name)}">×</button></span>`).join('')}<button type="button" class="btn sec sm" id="uploadChatFiles">Upload</button></div>`;$$('[data-remove-chat-file]',box).forEach(b=>b.onclick=()=>{pendingChatFiles.splice(+b.dataset.removeChatFile,1);renderChatFiles()});$('#uploadChatFiles').onclick=uploadComposerFiles}
 $('#attachBtn').onclick=()=>$('#chatFile').click();
 $('#chatFile').onchange=e=>{pendingChatFiles.push(...e.target.files);renderChatFiles();e.target.value=''};
-async function uploadComposerFiles(){if(!pendingChatFiles.length)return;const files=pendingChatFiles.slice(),added=await acceptFiles(files),recognized=[],documents=[];for(const rec of added){if(rec.kind==='document'){documents.push(rec);continue}try{const text=await fileText(rec.blob);if(detectedFileType(text))recognized.push(rec)}catch(e){toast(e.message||`Could not read ${rec.name}`)}}pendingChatFiles=[];renderChatFiles();const unknown=added.filter(x=>x.kind==='table'&&!recognized.some(y=>y.id===x.id)).length;const sample=['F01','F02','F03'].includes(S.firm);addLog({tool:'upload_files',tier:1,args:{files:added.map(x=>x.name)},status:'ok',summary:`Received ${recognized.length} recognised table file${recognized.length===1?'':'s'}, ${documents.length} reference document${documents.length===1?'':'s'}, ${unknown} unrecognised`});const b=newBot();await say(b,`<p>Received <b>${recognized.length}</b> recognised table file${recognized.length===1?'':'s'}, <b>${documents.length}</b> reference document${documents.length===1?'':'s'} and <b>${unknown}</b> unrecognised file${unknown===1?'':'s'}.</p><p>Files are only used after you review them and save a snapshot. ${sample?'The selected company is sample data, so review will create a new business instead of changing it.':''}</p>`);const a=document.createElement('div');a.className='rcact';a.innerHTML='<button type="button" class="btn primary sm">Review and import</button>';a.querySelector('button').onclick=()=>openReviewImport(recognized.map(x=>x.id));b.appendChild(a);scroll()}
+async function uploadComposerFiles(){if(!pendingChatFiles.length)return;const files=pendingChatFiles.slice(),added=await acceptFiles(files),recognized=[],documents=[];for(const rec of added){if(rec.kind==='document'){documents.push(rec);continue}try{const text=await fileText(rec.blob);if(detectedFileType(text))recognized.push(rec)}catch(e){toast(e.message||`Could not read ${rec.name}`)}}pendingChatFiles=[];renderChatFiles();const unknown=added.filter(x=>x.kind==='table'&&!recognized.some(y=>y.id===x.id)).length;const sample=SAMPLE_FIRMS.includes(S.firm);addLog({tool:'upload_files',tier:1,args:{files:added.map(x=>x.name)},status:'ok',summary:`Received ${recognized.length} recognised table file${recognized.length===1?'':'s'}, ${documents.length} reference document${documents.length===1?'':'s'}, ${unknown} unrecognised`});const b=newBot();await say(b,`<p>Received <b>${recognized.length}</b> recognised table file${recognized.length===1?'':'s'}, <b>${documents.length}</b> reference document${documents.length===1?'':'s'} and <b>${unknown}</b> unrecognised file${unknown===1?'':'s'}.</p><p>Files are only used after you review them and save a snapshot. ${sample?'The selected company is sample data, so review will create a new business instead of changing it.':''}</p>`);const a=document.createElement('div');a.className='rcact';a.innerHTML='<button type="button" class="btn primary sm">Review and import</button>';a.querySelector('button').onclick=()=>openReviewImport(recognized.map(x=>x.id));b.appendChild(a);scroll()}
 $('#chatForm').addEventListener('submit',async e=>{e.preventDefault();const text=$('#chatInput').value.trim();if(pendingChatFiles.length)await uploadComposerFiles();if(text)sendChat(text)});
 
 async function respond(r,text){
@@ -1046,6 +1080,12 @@ async function runLevInChat(bot,L,sc,text){
   const note=sc&&sc.note&&sc.note.startsWith('Note:')?sc.note.slice(5).trim():'';
   if(st.k==='bl'){
     await say(bot,`<p><b class="k">A lever is blocked.</b> ${st.all.map(esc).join('; ')}.</p>${r.l.some(Boolean)?`<p>The remaining levers are still calculated: CCC ${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}, shortfall now ${mm(r.gap_epi)}.</p>`:'<p>I do not calculate figures for this combination.</p>'}${r.status4==='BLOCKED'?'<p>You can drop one of the two levers and try again.</p>':''}`,'warn');
+  }else if(r.uc04){
+    const U=r.uc04,b=U.before,a=U.after,C4=U.costs;
+    await say(bot,`<p>${esc(label)}: ${t('u4.what',{ar:mm(U.moved.ar),ap:mm(U.moved.ap),sale:mm(U.sale.net)})}</p>
+      <p>${t('u4.cash',{m0:mm(b.min),m1:mm(a.min),d:fd(a.min_date),g0:b.gap_days,g1:a.gap_days,n0:b.negative_days,n1:a.negative_days})}</p>
+      <p>${t('u4.cost',{c:mm(C4.cash),disc:mm(C4.discount),fee:mm(C4.extension_fee),sale:mm(C4.sale_cash),book:mm(C4.book_shortfall)})} ${U.worse_gap_days?t('u4.worse',{w:U.worse_gap_days,n:U.new_gap_days}):''}${U.tail.pay>0?' '+t('u4.tail',{x:mm(U.tail.pay)}):''}</p>
+      <p><b>${t('u4.c.'+U.conclusion)}</b> ${t('u4.limit',{d:fd(uc02().as_of)})}</p>${note?`<p>${esc(note)}</p>`:''}`);
   }else{
     const cover=r.gap_epi<1;
     await say(bot,`<p>${esc(label)}: CCC <b>${nf(BASE.ccc,1)} → ${nf(r.ccc,1)} days</b>, peak shortfall <b>${mm(BASE.gap_epi)} → ${mm(r.gap_epi)}</b>, cost <b>${nf(r.cost/1e6,2)} million VND</b>${r.cost===0?' (assumes no fees)':''}. ${cover?'<b>Covers</b> of the shortfall.':'<b>Not enough</b>, still short '+mm(r.gap_epi)+'.'}</p>${r.newDays>0?`<p>Note: this creates ${r.newDays} new shortfall days outside this gap.</p>`:''}${note?`<p>${esc(note)}</p>`:''}`);
@@ -1053,7 +1093,7 @@ async function runLevInChat(bot,L,sc,text){
   if(st.k!=='bl'||r.l.some(Boolean)){
     const card=document.createElement('div');card.className='rescard';
     card.innerHTML=`<div class="rt"><h4>${esc(label)}</h4><span class="status ${st.k==='yes'?'green':st.k==='no'?'amber':'red'}"><i></i>${st.k==='yes'?'Covers':st.k==='no'?'Not enough':'Partially blocked'}</span></div>
-    <div class="rgrid"><div class="rg"><span>CCC</span><strong class="num">${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}</strong><small>days</small></div><div class="rg"><span>Remaining gap</span><strong class="num ${r.gap_epi<1?'pos':'neg'}">${mm(r.gap_epi)}</strong><small>before ${mm(BASE.gap_epi)}</small></div><div class="rg"><span>Cost</span><strong class="num">${nf(r.cost/1e6,2)}M</strong><small>${r.newDays} new shortfall days</small></div></div>
+    <div class="rgrid">${r.uc04?`<div class="rg"><span>Lowest balance</span><strong class="num">${mm(r.uc04.after.min)}</strong><small>before ${mm(r.uc04.before.min)}</small></div>`:`<div class="rg"><span>CCC</span><strong class="num">${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}</strong><small>days</small></div>`}<div class="rg"><span>Remaining gap</span><strong class="num ${r.gap_epi<1?'pos':'neg'}">${mm(r.gap_epi)}</strong><small>before ${mm(BASE.gap_epi)}</small></div><div class="rg"><span>Cost</span><strong class="num">${nf(r.cost/1e6,2)}M</strong><small>${r.newDays} new shortfall days</small></div></div>
     <div class="rcact"><button class="btn sec sm" data-a="wi" type="button">Open in What-if</button><button class="btn primary sm" data-a="dr" type="button">✎ Create draft</button></div>`;
     bot.appendChild(card);scroll();
     $('[data-a=wi]',card).onclick=()=>openDetail('whatif');
@@ -1087,9 +1127,8 @@ function suggestAlternative(d){
 }
 
 
-SC=SC.map(s=>s.id==='F02-D'?{...s,ask:'What about financing S-F02-0094 via DD-001?'}:s);
 function bootApp(){
-  addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of 30 Sep 2026'});
+  addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of '+fd(DATA.raw.F01.snapshot.as_of)});
   switchContext('F01','base',{silent:true});
   updatePending();
 }
@@ -1300,6 +1339,24 @@ async function respondCause(bot,{focus}={}){
   $$('[data-gap-open]',wrap).forEach(b=>b.onclick=()=>{selectGap(+b.dataset.gapOpen);openDetail('gap');renderDemoChips()});
   suggestRow(bot,nextSuggest());
 }
+// UC03 funding plan card (workbook v9): rounds, contributing-factor shares, ranked options, the package and the excluded options.
+const U3_REASON={PLEDGED:'already pledged',STRATEGIC_OR_CRITICAL:'strategic customer or essential supplier',NO_PRODUCT_DATA:'no product data',NO_NET_CASH:'no cash available',
+  OUT_OF_SCENARIO:'outside this shortfall scenario',OBJECT_USED_IN_EARLIER_ROUND:'already used in an earlier round'};
+const U3_SKIP={TOO_SLOW:'funds after the need date',OBJECT_USED:'same invoices already used',GAP_COVERED:'gap already covered',BELOW_MIN_DRAW:'too small',OPTION_LIMIT:'two sources of this kind already',MAX_SOURCES:'four sources already'};
+const U3_CERT=['','High','Medium','Low'],U3_SHAPE={uniform:'even',step_up:'steps up once',step_down:'steps down once',unclassifiable:'changes several times'};
+function uc03HTML(m){
+  const r=m.rounds[0];if(!r)return '<div class="empty">No shortfall day below the safe level, so there is no funding round.</div>';
+  const ROLE={main:'main',secondary:'secondary',ignored:'minor'},share=k=>`${t('uc03.f.'+k)} ${pct(r.shares[k])} (${ROLE[r.roles[k]]})`;
+  const rows=r.products.filter(x=>x.eligible).sort((a,b)=>a.rank-b.rank).map(x=>{const inPkg=r.package.find(y=>y.id===x.id);
+    return `<tr class="${inPkg?'top1':''}" data-prod="${x.id}"><td><span class="rank">${x.rank}</span></td><td><b>${x.id}</b> · ${esc(x.name)}${x.flags.includes('NOT_COVERING_DURATION')?`<small class="u3-flag">${t('uc03.nc',{h:x.hold,d:r.duration})}</small>`:''}</td><td class="num">${mm(x.C)}</td><td class="num">${nf(x.cost/1e6,2)}M</td><td class="num">${x.cpg==null?'–':pct(x.cpg,2)}</td><td class="num">${x.dtf} d</td><td>${U3_CERT[x.certainty]}</td><td>${inPkg?`<span class="status green">${t('uc03.in')} · ${mm(inPkg.draw)}</span>`:x.skip?`<span class="status gray">${U3_SKIP[x.skip]||x.skip}</span>`:''}</td></tr>`}).join('');
+  const pk=r.package.map(y=>`<b>${y.id}</b> ${esc(y.name)} ${mm(y.draw)}`).join(' + ');
+  const exc=r.excluded.map(x=>`${x.id} (${x.reasons.map(c=>U3_REASON[c]||c).join(', ')})`).join('; ');
+  return `<p class="u3-round">${t('uc03.round',{d:fd(r.need_date),l:r.days_left,g:money(r.G),n:r.duration,s:U3_SHAPE[m.shape]||m.shape})}${m.review_manual?' '+t('uc03.review'):''}${XP()?` · scenario ${r.scenario}${m.persistent?' (persistent shortfall)':''}`:''}</p>
+   <p class="u3-factors">${t('uc03.factors')} ${['AR','INV','AP'].map(share).join(' · ')}.</p>
+   <div class="table-wrap"><table class="dtable uc03-rank"><thead><tr><th>#</th><th>Option</th><th>Can bring</th><th>Cost</th><th>Cost / gap</th><th>Cash in</th><th>Certainty</th><th>Package</th></tr></thead><tbody>${rows}</tbody></table></div>
+   <p class="u3-pkg">${t('uc03.pkg',{p:pk,c:money(r.covered),cost:mm(r.cost),cpg:pct(r.cost_per_gap,1)})}${r.remaining_gap>0?' '+t('uc03.rem',{x:money(r.remaining_gap)}):''}</p>
+   ${exc?`<p class="rej">${t('uc03.excl')} ${exc}.</p>`:''}${m.requires_human_decision?`<div class="liq-note"><span>⚠</span><div>${t('uc03.human')}</div></div>`:''}`;
+}
 // Financing for every gap (or one named gap): a summary table, then the top 3 per gap, collapsed.
 async function respondRank(bot,{focus}={}){
   if(!EPS.length){await say(bot,'No shortfall, so there is nothing to match against the catalogue yet.');suggestRow(bot,nextSuggest());return}
@@ -1308,13 +1365,25 @@ async function respondRank(bot,{focus}={}){
   if(!S.gapRequest){const {u,d,chk}=gapRequestState();
     if(!chk.ok){await say(bot,`<p>${chk.label==='idle_cash'?tx('gr.idle')+': ':''}${tx('gr.block.'+chk.reason)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
     S.gapRequest=ENGINE.buildGapRequest(u,d,{scenario:S.case,health:modelHealthNow(),createdAt:new Date().toISOString()})}
-  const gr=S.gapRequest,list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
+  const gr=S.gapRequest,m3=uc03();
+  // Workbook v9 UC03: one funding plan for the shortfall of this run (rounds, ranking and package) instead of a ranking per gap.
+  if(m3&&m3.status!=='not_applicable'&&!focus){
+    await toolCall(bot,'match_financing',1,{firm_id:S.firm,gap_request:gr.request_id,run_id:m3.run_id},()=>{addLog({tool:'match_financing',tier:1,args:{firm_id:S.firm,gap_request:gr.request_id},status:'ok',
+      summary:`round 1: ${m3.rounds.map(r=>r.package.map(y=>y.id).join(' + ')).join('; ')}`});return {}},{ms:520});
+    await say(bot,`<p>${tx('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p><p>${t('uc03.lead')}</p>`);
+    const card=document.createElement('div');card.className='liq rank-all uc03';
+    card.innerHTML=`<div class="liq-h"><div><h4>${t('uc03.title')}</h4><p>${t('uc03.sub',{n:m3.rounds[0]?m3.rounds[0].products.length:0})}</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>${uc03HTML(m3)}
+      <p class="liq-fn">${DISC}</p>${toolLine(['match_financing'])}<div class="liq-act"><button class="btn sec sm" type="button" data-a="open">Open Shortfall →</button></div>`;
+    bot.appendChild(card);scroll();$('[data-a=open]',card).onclick=()=>openDetail('gap');
+    advance(3,bot);suggestRow(bot,nextSuggest());return;
+  }
+  const list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
   await toolCall(bot,'match_financing',1,{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},()=>{addLog({tool:'match_financing',tier:1,args:{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},status:'ok',summary:res.map(({e,t3})=>`gap ${e.k}: ${t3.ranked[0]?t3.ranked[0].product_id:'none'}`).join('; ')});return {}},{ms:520});
   const use=new Map();
   res.forEach(({e,t3})=>t3.ranked.slice(0,3).forEach(x=>{if(x.invoice_id&&x.invoice_id!=='–'){if(!use.has(x.invoice_id))use.set(x.invoice_id,new Set());use.get(x.invoice_id).add(e.k)}}));
   const dups=[...use].filter(([,g])=>g.size>1);
   const cause=focus?(S.causes||{})[focus]:S.cause;
-  await say(bot,`<p>${tx('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p>${cause?`<p>${t('cf.from',{k:focus||''})} ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
+  await say(bot,`<p>${tx('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p>${cause?`<p>${t('cf.from',{k:focus?` (gap ${focus})`:''})} ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
   const rows=res.map(({e,t3})=>{const b=t3.ranked[0];return `<tr data-gap="${e.k}"><td><b>Gap ${e.k}</b></td><td class="num">${mm(e.peak)}</td><td class="num">${fd(e.start)}</td><td>${b?`<b>${b.product_id}</b>${b.invoice_id!=='–'?' · '+b.invoice_id:''}`:'—'}</td><td class="num">${b?nf(b.cost/1e6,2)+'M':'—'}</td><td>${!b?'—':b.gap_rem>0?`<span class="status amber">Partly · short ${mm(b.gap_rem)}</span>`:'<span class="status green">Yes</span>'}</td></tr>`}).join('');
   const card=document.createElement('div');card.className='liq rank-all';
   card.innerHTML=`<div class="liq-h"><div><h4>Financing summary</h4><p>Best option per gap · ${CAT.length} products in the synthetic catalogue</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>
@@ -1420,8 +1489,8 @@ $('#formLogin').addEventListener('submit',e=>{e.preventDefault();doLogin($('#liE
 $('#btnDemo').onclick=()=>{$('#liEmail').value=DEMO.email;$('#liPw').value=DEMO.pw;doLogin(DEMO.email,DEMO.pw,true)};
 const DEMO={email:'demo@smecopilot.vn',pw:'Demo@2026',name:'Minh Anh',company:'Alpha Garment Subcontractor',firmId:'F01'};
 // One account = one company. Each demo account is tied to one sample company.
-const DEMOS=[DEMO,{email:'beta.demo@smecopilot.vn',pw:'Demo@2026',name:'Pham Thi Lan',company:'Beta Fabric Distributor',firmId:'F02'},{email:'gamma.demo@smecopilot.vn',pw:'Demo@2026',name:'Tran Van Quang',company:'Gamma Packaging & Trims',firmId:'F03'}];
-$$('[data-demo]').forEach(b=>b.onclick=()=>{const d=DEMOS.find(x=>x.firmId===b.dataset.demo);$('#liEmail').value=d.email;$('#liPw').value=d.pw;doLogin(d.email,d.pw,true)});
+const DEMOS=[DEMO];
+const RETIRED_DEMOS=['beta.demo@smecopilot.vn','gamma.demo@smecopilot.vn']; // demo accounts of the removed sample companies F02/F03
 
 $('#formReg').addEventListener('submit',async e=>{
   e.preventDefault();const f=e.target;clearErrs(f);$('#rgErr').textContent='';
@@ -1481,7 +1550,7 @@ if(!restore)toast(fresh?`Welcome ${userFirst()}! Your account has been created.`
 }
 function resetSession(){
   S.drafts=[];S.log=[];S.draftN=0;S.cmp=[];S.last=null;S.done=new Set();S.seq=0;S.runN=0;closePanel();
-  addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of 30 Sep 2026'});
+  addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of '+fd(DATA.raw.F01.snapshot.as_of)});
 }
 function leaveApp(){
   store.del(KS);sess.del(KS);S.user=null;syncUserFirms(true);$('#userMenu').hidden=true;$('#userBtn').setAttribute('aria-expanded','false');
@@ -1712,7 +1781,7 @@ function syncUserFirms(clear){
 function renderFirmSel(){
   const sel=$('#firmSel'),cur=S.firm;
   const mine=Object.keys(FIRMS).filter(isUserFirm);
-  sel.innerHTML=['F01','F02','F03'].map(f=>`<option value="${f}">${f} · ${esc(FIRMS[f].name)}</option>`).join('')+
+  sel.innerHTML=SAMPLE_FIRMS.map(f=>`<option value="${f}">${f} · ${esc(FIRMS[f].name)}</option>`).join('')+
     (mine.length?`<optgroup label="My data">${mine.map(f=>`<option value="${f}">${f} · ${esc(FIRMS[f].name)}</option>`).join('')}</optgroup>`:'');
   sel.innerHTML+=`<option value="__add">＋ Add business…</option>`;
   sel.value=FIRMS[cur]?cur:'F01';
@@ -1779,7 +1848,7 @@ function startImport(firmId){
     :{name:'',industry:'',buffer:'',asOf:'',rev:'',cogs:'',cash0:'',touched:{}};
   openDataScreen('businesses');
 }
-async function openReviewImport(ids){const firmId=['F01','F02','F03'].includes(S.firm)?null:S.firm;startImport(firmId);for(const id of ids){const rec=await FILES.get(id);if(!rec||!rec.blob)continue;try{const text=await fileText(rec.blob),rows=text&&parseCSV(text);if(rows&&rows.length>1&&detectedFileType(text)){addRaw(rec.name,text);DW.registryIds.push(id)}}catch(e){toast(e.message||`Could not read ${rec.name}`)}}DW._refresh&&DW._refresh()}
+async function openReviewImport(ids){const firmId=SAMPLE_FIRMS.includes(S.firm)?null:S.firm;startImport(firmId);for(const id of ids){const rec=await FILES.get(id);if(!rec||!rec.blob)continue;try{const text=await fileText(rec.blob),rows=text&&parseCSV(text);if(rows&&rows.length>1&&detectedFileType(text)){addRaw(rec.name,text);DW.registryIds.push(id)}}catch(e){toast(e.message||`Could not read ${rec.name}`)}}DW._refresh&&DW._refresh()}
 function addRaw(name,text){
   const rows=parseCSV(text);if(rows.length<2){toast(`${name}: file is empty or has only a header`);return}
   const hdr=rows[0].map(canon),type=detectType(hdr);
@@ -1842,7 +1911,7 @@ function renderData(){
      <div class="dfk"><span>Version <b>${s.id}</b> · as of <b>${fd(s.asOf)}</b></span><span>${s.tables.sales.length} sales inv. · ${s.tables.purchases.length} purchase inv. · ${s.tables.inventory.length} stock lines · ${s.tables.planned.length} plan lines</span><span>Save ${new Date(s.ts).toLocaleString('en-GB')} · ${f.snaps.length} snapshot</span></div>
      <div class="dfa"><button class="btn primary sm" data-use="${f.id}">Open in Copilot</button><button class="btn sec sm" data-upd="${f.id}">Update data</button><button class="btn sec sm" data-hist="${f.id}">History</button><button class="btn sec sm" data-exp="${f.id}">Export CSV</button><button class="btn sec sm danger" data-del="${f.id}">Delete</button></div></div>`}).join('')}</div>`
   :`<div class="card"><div class="empty"><div class="big">⇪</div><b>You have no businesses yet</b><br>Add a business, then upload 3–6 CSV files: (sales invoices, purchase invoices, inventory, 13-week plan, financial statements). No files? Use the sample set to try it.<br><br><button class="btn primary" id="dNew2">＋ Add business</button></div></div>`}
-  <div class="foot-note">Data is stored in this browser, per signed-in account; not synced across devices. A production version needs a server-side database, per-business permissions and encryption. The three businesses F01–F03 are fixed sample data and cannot be edited. Figures from your files are <b>estimates</b> based on the synthetic catalogue. ${DISC}</div>`;
+  <div class="foot-note">Data is stored in this browser, per signed-in account; not synced across devices. A production version needs a server-side database, per-business permissions and encryption. The sample business F01 is fixed sample data and cannot be edited. Figures from your files are <b>estimates</b> based on the synthetic catalogue. ${DISC}</div>`;
   $('#dNew')&&($('#dNew').onclick=()=>startImport(null));$('#dNew2')&&($('#dNew2').onclick=()=>startImport(null));
   $$('[data-use]',p).forEach(b=>b.onclick=()=>{switchContext(b.dataset.use,'base');addLog({tool:'get_firm_context',tier:0,args:{firm_id:b.dataset.use},status:'ok',summary:'Open uploaded data'});toast('In use '+FIRMS[b.dataset.use].short);renderData()});
   $$('[data-upd]',p).forEach(b=>b.onclick=()=>startImport(b.dataset.upd));
@@ -2255,7 +2324,7 @@ function marTilesSimpleHTML(d){
   if(d.bn_pattern==='BN0')return `<div class="card mtile bn0" data-wid="mar"><span>✓ ${t('s.bn0')}</span></div>`+ob;
   const parts=['AR','INV'].filter(k=>(d.item_states.find(i=>i.item===k)||{}).c>0).map(k=>t('s.part.'+k)).join(' + ');
   return `<div class="card mtile hl" data-wid="mar"><span>${t('s.mar')}</span><b class="num">${money(d.money_at_risk)}</b>${parts?`<small>${parts}</small>`:''}</div>
-   <div class="card mtile"><span>${t('s.impact')}</span><b class="num">${pct(d.materiality_share||0,0)}</b><small>${t('s.impact.sub',{l:t('s.lvl.'+d.wc_class)})}</small></div>`+ob;
+   <div class="card mtile"><span>${t('s.impact')}</span><b class="num">${pct(d.materiality_share||0,1)}</b><small>${t('s.impact.sub',{l:t('s.lvl.'+d.wc_class)})}</small></div>`+ob;
 }
 function wCardHTML(d){
   if(!XP())return wCardSimpleHTML(d);
@@ -2734,7 +2803,8 @@ function lockAccountName(u=S.user){
   Object.defineProperty(DW.form,'name',{get:()=>company,set:()=>{},enumerable:true,configurable:true});
 }
 async function ensureDemoAccounts(){
-  const all=users();let changed=false;
+  let all=users(),changed=false;
+  if(all.some(x=>RETIRED_DEMOS.includes(x.email))){all=all.filter(x=>!RETIRED_DEMOS.includes(x.email));changed=true}
   for(const d of DEMOS){const u=all.find(x=>x.email===d.email);
     if(!u){const sl=salt();all.push({id:d.firmId==='F01'?'u-demo':'u-demo-'+d.firmId.toLowerCase(),name:d.name,company:d.company,firmId:d.firmId,email:d.email,salt:sl,hash:await hashPw(d.pw,sl),created:new Date().toISOString()});changed=true}
     else if(u.firmId!==d.firmId||u.company!==d.company){u.firmId=d.firmId;u.company=d.company;changed=true}}
