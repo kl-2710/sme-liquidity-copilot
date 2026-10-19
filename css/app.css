@@ -938,7 +938,15 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .mtile{padding:12px 14px;display:flex;flex-direction:column;gap:3px}
 .mtile span{font-size:12px;color:var(--lc-color-text-secondary);font-weight:700}.mtile b{font-size:20px}.mtile small{font-size:11px;color:var(--lc-color-text-muted)}
 .mtile.hl{border-color:var(--lc-color-alert-orange-mark)}.mtile.bn0 span{color:var(--lc-color-status-success)}
-.icards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.icards{display:flex;flex-direction:column;gap:12px}             /* Receivables, Inventory, Payables stacked, each full width */
+.iblock{display:flex;flex-direction:column;gap:8px;min-width:0}
+.ic-foot{display:flex;justify-content:flex-end;margin-top:2px}
+.ic-more span{font-size:10px;margin-left:2px}
+.ic-det{padding:10px 12px}.ic-det[hidden]{display:none}
+.ic-det .table-wrap{overflow-x:auto}
+.ic-det .dtable td:first-child small{display:block;font-size:11px;color:var(--lc-color-text-secondary);font-weight:400;margin-top:2px}
+.ic-det .dtable td:last-child,.ic-det .dtable th:last-child{width:1%;white-space:nowrap}
+.ic-det .dt-h{margin:0 0 8px}
 .icard{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
 .ic-h{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .ic-v{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}.ic-v .big{font-size:22px;font-weight:800}.ic-d{color:var(--lc-color-text-secondary)}
@@ -955,7 +963,6 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .tb-lbl span.r1{top:15px}.tb-lbl span.r2{top:28px}.tb-lbl span.r3{top:41px}
 .icard .ic-h,.mtile>span:first-child{padding-right:58px}
 .tb-lbl span{position:absolute;transform:translateX(-50%);white-space:nowrap;top:2px;line-height:12px}.tb-lbl b{color:var(--lc-color-text-secondary);margin-right:3px}
-.dtables{padding:12px 14px}
 .dt-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:12px 0 6px;flex-wrap:wrap}.dt-h:first-child{margin-top:0}.dt-h h3{margin:0;font-size:13.5px}
 .seg2{display:inline-flex;border:1px solid var(--lc-color-border-default);border-radius:8px;overflow:hidden}
 .seg2 button{font:inherit;font-size:11.5px;padding:5px 10px;border:0;background:transparent;color:var(--lc-color-text-secondary);cursor:pointer}
@@ -979,8 +986,8 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .ev-more,.ev-src{font-size:11.5px;color:var(--lc-color-text-muted);margin:8px 0 0}
 .pol-form{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.pol-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600}.pol-form .wide{grid-column:1/-1}
 .pol-prev{font-size:12.5px;padding:8px 10px;border-radius:8px;background:var(--lc-color-bg-subtle)}
-@media (max-width:900px){.wgrid,.icards{grid-template-columns:1fr}}
-@media (max-width:600px){.wc-dl div{grid-template-columns:1fr}.pol-form{grid-template-columns:1fr}.uc-ctl{flex-direction:column;align-items:flex-start}.dtables .table-wrap{overflow-x:auto}}
+@media (max-width:900px){.wgrid{grid-template-columns:1fr}}
+@media (max-width:600px){.wc-dl div{grid-template-columns:1fr}.pol-form{grid-template-columns:1fr}.uc-ctl{flex-direction:column;align-items:flex-start}}
 
 /* ===== UC02 Shortfall tab (information bar, overview, scenario table, blocks, gap levels, Cash0 form) ===== */
 .uc2-bar select{font:inherit;padding:4px 6px;border:1px solid var(--lc-color-border-control);border-radius:8px;background:var(--lc-color-bg-input);color:var(--lc-color-text-primary)}
@@ -989,7 +996,7 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .runst.st-missing_data,.runst.st-invalid_data,.runst.st-rejected{background:var(--lc-color-status-error-bg);color:var(--lc-color-status-error)}
 .uc-note.warn{color:var(--lc-color-status-warning);font-weight:700}
 .c0b{margin:0 0 12px}
-.uc2-tiles{grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:6px}
+.uc2-tiles{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:6px}
 .uc2-tiles .lv-pill{font-size:13px}
 .uc2-res{font-size:12px;color:var(--lc-color-text-secondary);margin:4px 0 0}
 .sub-h{margin:16px 0 8px;font-size:13px}
@@ -997,16 +1004,10 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .sc-cmp .lv-tag{--lvc:var(--lc-color-status-neutral)}
 .legend .band-sw{display:inline-block;width:18px;height:10px;border-radius:3px;background:color-mix(in srgb,var(--lc-color-data-cash) 14%,transparent);border:1px dashed var(--lc-color-data-historical)}
 .legend .ds.rmin{border-top-color:var(--lc-color-status-error)!important;border-top-style:dotted!important}.legend .ds.rup{border-top-color:var(--lc-color-status-info)!important;border-top-style:dotted!important}
-.blks{margin-top:14px;padding:12px 14px}
-.blk-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
-.blk{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 10px;border:1px solid var(--lc-color-border-default);border-radius:10px;font-size:12px}
-.blk-k{font-weight:800;color:var(--lc-color-text-muted)}.blk.b-shortage{border-left:3px solid var(--lc-color-alert-orange-mark)}.blk.b-surplus{border-left:3px solid var(--lc-color-status-info)}
-.blk .lv-tag{--lvc:var(--lc-color-status-neutral)}
 .stuck{font-size:12px;color:var(--lc-color-text-secondary);margin:10px 0 0}
 .ep.gap-lv{border-color:color-mix(in srgb,var(--epc,var(--lc-color-status-error)) 55%,transparent);background:color-mix(in srgb,var(--epc,var(--lc-color-status-error)) 7%,var(--lc-color-bg-surface))}
 .ep.gap-lv.lv-red{--epc:var(--lc-color-status-error)}.ep.gap-lv.lv-orange{--epc:var(--lc-color-alert-orange)}.ep.gap-lv.lv-yellow{--epc:var(--lc-color-alert-yellow)}
 .ep.gap-lv .lv-tag{--lvc:var(--epc)}
-.dt-daily{max-height:340px;overflow:auto;margin-top:8px}
 .c0f fieldset{border:1px solid var(--lc-color-border-default);border-radius:10px;padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px 14px}
 .c0f fieldset label{flex-direction:row;align-items:center;gap:6px;font-weight:500}
 .c0f input:not([type]),.c0f input[inputmode]{font:inherit;padding:5px 7px;border:1px solid var(--lc-color-border-control);border-radius:8px;background:var(--lc-color-bg-input);color:var(--lc-color-text-primary)}
@@ -1030,9 +1031,6 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 /* ===== Chat answers, tool line and forecast reliability ===== */
 .ans p{margin:0 0 8px}.ans p:last-child{margin-bottom:0}
 .tools-used{margin:8px 0 0;font-size:11px;color:var(--lc-color-text-muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
-.fbcard{margin:10px 0 0;padding:10px 14px;border-left:4px solid var(--lc-color-status-neutral)}
-.fbcard h3{font-size:13px;margin:0}.fbcard p{margin:4px 0 0;font-size:12px;color:var(--lc-color-text-secondary)}
-.fbcard.mh-ok{border-left-color:var(--lc-color-status-success)}.fbcard.mh-watch{border-left-color:var(--lc-color-alert-yellow)}.fbcard.mh-degraded{border-left-color:var(--lc-color-status-error)}
 
 /* Simple view (default) — Estimate badge, three-colour status bar, one-line alert legend, simple tables */
 .est{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--lc-color-status-warning-bg);color:var(--lc-color-status-warning);cursor:help}
@@ -1043,10 +1041,8 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .sbar .sz span{height:100%}.sbar .g{background:var(--lc-color-status-success-bg)}.sbar .a{background:var(--lc-color-alert-yellow-bg)}.sbar .r{background:var(--lc-color-alert-red-bg)}
 .sbar .sv{position:absolute;top:-4px;width:3px;height:18px;margin-left:-1.5px;border-radius:2px;background:var(--lc-color-text-primary)}
 .lv-one{display:block;line-height:1.5}.lv-one .lv-dots{display:inline-flex;gap:3px;margin-right:6px;vertical-align:middle}
-.dtables .table-wrap{overflow-x:auto}
 .dtable td .status{white-space:nowrap;vertical-align:middle}
 .dtable td:has(> .status){white-space:nowrap;width:1%}
-.dtables.simple .dtable td:last-child,.dtables.simple .dtable th:last-child{width:1%;white-space:nowrap}
 
 /* Shared modal layout: header and footer stay put, the body scrolls (short screens, long forms such as Cash0 and reserve levels) */
 html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
@@ -1058,6 +1054,15 @@ html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
 .modal-f{flex:0 0 auto;padding-top:12px;margin-top:8px;border-top:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface)}
 .modal .modal-f.acts,.modal .modal-f .acts{margin-top:0}
 .modal:has(.settings-shell){display:block}
+/* Confirmation dialogs (delete chat, log out, clear data, delete account): as wide as their text needs, never stretched by the
+   scrim's flex row, height from the content, buttons on the right. */
+.modal.confirm-dialog{flex:0 0 auto;width:min(400px,calc(100vw - 32px));height:auto;padding:18px 20px 16px}
+.modal.confirm-dialog .modal-layout,.modal.confirm-dialog.modal-layout{flex:0 0 auto}
+.modal.confirm-dialog h3{overflow-wrap:anywhere}
+.modal.confirm-dialog .modal-b{flex:0 0 auto;overflow:visible}
+.modal.confirm-dialog .modal-b p{margin:4px 0 0;overflow-wrap:anywhere}
+.modal.confirm-dialog .modal-f{border-top:0;padding-top:0;margin-top:16px}
+.modal.confirm-dialog .acts{justify-content:flex-end;flex-wrap:wrap}
 
 /* Detail panel header: one view at a time, its title and a close button (no tabs) */
 .detail-head{padding:14px 12px 12px 20px;border-bottom:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface)}

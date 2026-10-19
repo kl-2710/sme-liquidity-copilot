@@ -25,7 +25,7 @@
 ## Navigation, formatting and SRS v1.3 states
 - Numbers use the Vietnamese convention `1.234.567,89`, money is shown in `M` (million VND) / `B` (billion VND, e.g. `11,85B`), dates in `dd/mm/yyyy`; the shared helpers are in `js/formatters.js` (loaded before `js/app.js`).
 - Navigation uses an explicit `S.view` (`chat` / `data`) through `showView()`, so New chat, Approval queue and chat history switch screens directly.
-- The dashboard opens with a liquidity-state banner (SRS v1.3: W axis, TH01/TH02/TH03, M1–M9). It always uses the Base case; Rmin = 50% and Rupper = 200% of Rtarget, the FOB thresholds and a 30-day invoice term are demo assumptions, so the result is labelled provisional.
+- The liquidity-state banner (SRS v1.3: W axis, TH01/TH02/TH03, M1–M9) leads the Shortfall view once step 2 has run (see below). It always uses the Base case; Rmin = 50% and Rupper = 200% of Rtarget, the FOB thresholds and a 30-day invoice term are demo assumptions, so the result is labelled provisional.
 
 ## Every gap, chips and alert colours
 - Cause and ranking cover every gap, not only `c.defk`. `tv3For(ep)` wraps `rankFor` with a cache per firm|case|gap; the default gap reuses `c.tv3`. `simulate`, `episodes`, `rankFor` and `data.js` are unchanged.
@@ -105,3 +105,31 @@ The workbook is the reference; where the earlier engine differed, the engine fol
 - **UC03:** `ENGINE.matchFinancing` (two-week blocks, material changes, shape, rounds, DaysLeft, factor shares and roles, scenario A1–A4 / B1 / B2, per-product capacity, cost, timeliness, hard filters, ranking key and package). It drives the chat card and the Shortfall section for the sample company; uploaded companies keep `rankFor`.
 - **UC04:** `ENGINE.simulateUC04` (cases 0–6: early / late collection, supplier extension, stock sale with recovery and sale cost) drives the what-if card when the levers match the workbook (sample company, Base, 13 weeks).
 - The reconciliation test `V9 · UC01–UC04 of F01 match the workbook v9 results` in `tests/e2e.mjs` checks the Excel values of F01_UC1, F01_UC2, F01_UC03, F01_UC4 and Kiem_thu.
+
+## Dashboard: Receivables, Inventory and Payables
+- Section 2 is titled "Receivables, Inventory and Payables". Its three item cards are stacked, each at full width (`.icards` is a column; the 900 px media query no longer touches it).
+- Each card has a **Details** button (`data-det`, `aria-expanded`, `aria-controls`) that opens a table right under that card: customers for Receivables, stock lots for Owned inventory, suppliers for Payables. Each card opens and closes on its own; the open set is kept in `S.dash.open`, so sorting or re-rendering keeps it.
+- `itemDetailsHTML(d, item)` replaces `detailTablesHTML` / `detailTablesSimpleHTML` and reuses their rows, priorities and sort keys (`scust` / `slot` / `ssup`); no figure is recomputed. Both modes use the same six columns: Name | Amount | Share | Overdue | Longest Overdue (Days) | Priority. Expert mode puts the former extra columns (labels, debt status, tier, average lateness; lot type, status, collateral; dependency, essential, extension) under the name and keeps the exposure / intervention order of the customers.
+- Lots have no due date: their Overdue and Longest Overdue cells show "—" and the days in stock appear under the lot name.
+- The "Who holds the money" section (widget `tables`) is removed; later sections are renumbered. A saved pin of the old widget is dropped on load (`RETIRED_WIDGETS`). Rows still open the evidence panel, and the "View detailed dashboard" button of the receivables answer opens the Receivables details.
+
+## Suggested questions
+- On an empty chat the suggested questions stay by the composer (`#demoChips`), as before. From the first message on, `#demoChips` is never shown again in that chat.
+- From then on there is a single suggestion row, under the latest answer only (`placeSuggest`). It merges the answer's own items (`suggestRow`, kept on the element as `_sug`), the flow chips (`chipList`) and the next steps (`nextSuggest`), drops duplicates and the question just asked, and holds at most four questions. When a new answer arrives, the row of the previous answer is removed.
+- New chat goes back to the empty state with the chips by the composer. A chat reopened from history gets a fresh row under its last answer; the stored rows are dropped.
+- Fixed with it: reopening a chat from history threw `applyStage is not defined` (the function was removed with the tab bar).
+
+## Liquidity-state banner on Shortfall
+- The banner ("Cash shortfall ahead" / "Liquidity Shortfall Alert", and the TH02, TH03 and unknown states) moved from the Dashboard to the top of the Shortfall view (`renderGap`). It is shown only when `S.stage ≥ 2`, i.e. after a forecast question has been answered.
+- Content, tiles and states are unchanged; the UC01 tiles (capital above the normal level from `money_at_risk`) still read the cached UC01 run. Its "Find financing to cover the gap" button is bound in `bindGapHeader`.
+
+## Confirmation dialogs
+- `confirmAction` (delete chat, log out, clear data, delete account) marks the modal with `confirm-dialog`; `openModal` clears it for every other dialog.
+- `.modal.confirm-dialog` is `min(400px, 100vw − 32px)` wide, takes its height from the content (the shared `.modal-layout` would otherwise let the dialog grow across the scrim's flex row), has no footer rule and keeps Cancel / the action on the right. Settings and the dialogs with forms or text areas keep their layout.
+
+## Shortfall cleanup
+- The weekly forecast no longer has the "Show the daily table" button or the daily table (`dailyTableHTML`, `S.showDaily`, `gap.daily.*` removed). The "Daily balance and gaps" chart stays.
+- The overview keeps four tiles (lowest balance, first day below the safe level, cash needed, largest shortfall) in a 4-column grid; the "Overall alert" and "Cash outlook" / "Cash state (Base)" tiles were removed. The banner at the top already shows the alert level and the cash state. `gap.base.note` now refers to the banner.
+- The "Forecast confidence" / "Forecast reliability" card and the "Two-week view" / "Two-week blocks" card are no longer shown (`reliabilityHTML`, `blocksHTML`, `fb.*`, `blk.*` removed). `FEEDBACK` (forecast logs, reconciliation, model health in the gap_request) and the engine's blocks are unchanged.
+- The financing match (task 3) is not shown in Shortfall until the financing question has been answered (`S.stage ≥ 3`); the answer to task 2 carries that question in its suggestion row. Then the match appears under Cash gaps (`#finMatch`), and the "Open Shortfall →" / "Open ranking" buttons of the task 3 answer, and the hand-off of "Find financing" from step 3, open Shortfall scrolled to it (`openDetail(view, {scroll})`).
+- Saved pins of the removed widgets (`reliability`, `blocks`) are dropped on load.

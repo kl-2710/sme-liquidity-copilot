@@ -579,6 +579,8 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#uSub").innerText(), "Alpha Garment Subcontractor");
     assert.equal(await page.locator(".firmbox").isVisible(), false);
     await page.waitForTimeout(400);
+    assert.equal(await page.locator("#demoChips").isVisible(), true, "an empty chat shows the suggested questions by the composer");
+    assert.equal(await page.locator(".messages.on .suggest").count(), 0);
     await shot(page, `${theme}-flow`);
   });
   await step(`[${theme}] one sidebar toggle moves between sidebar and chat header`, async () => {
@@ -617,15 +619,18 @@ for (const theme of ["light", "dark"]) {
     assert.match(t, /diagnose_working_capital/); assert.match(t, /41[.,]1/);
     assert.equal(await last().locator(".ans5 > p").count(), 5); assert.match(t, /1\. Overall conclusion\..*5\. What to check and the limits\./s); assert.match(t, /Tools used: diagnose_working_capital/);
   });
-  await step(`[${theme}] Task 2 explains every gap; chips stay visible after the 2nd message`, async () => {
+  await step(`[${theme}] Task 2 explains every gap; suggestions sit only under the latest answer`, async () => {
     await ask("Why am I short of cash? Show me the contributing factors.");
     const acc = last().locator(".gap-acc");
     assert.equal(await acc.count(), 4, "one contributing-factors card per gap");
     assert.equal(await last().locator(".ans4 > p").count(), 4); assert.match(await last().innerText(), /Tools used: forecast_cash/); assert.match(await last().innerText(), /forecast_cash/);
     assert.deepEqual(await acc.evaluateAll((els) => els.filter((e) => e.open).map((e) => e.dataset.gap)), ["4"], "largest gap open");
-    assert.equal(await page.locator("#demoChips").isVisible(), true);
-    const chips = await page.locator("#demoChips button").count();
-    assert.ok(chips > 0 && chips <= 4, `chips: ${chips}`);
+    assert.equal(await page.locator("#demoChips").isVisible(), false, "no chips by the composer after the first message");
+    assert.equal(await page.locator(".messages.on .suggest").count(), 1, "one suggestion row in the whole chat");
+    const chips = await last().locator(".suggest button").allInnerTexts();
+    assert.ok(chips.length > 0 && chips.length <= 4, `chips: ${chips}`);
+    assert.equal(new Set(chips.map((c) => c.toLowerCase())).size, chips.length, "no duplicate suggestions");
+    assert.ok(!chips.includes("Why am I short of cash? Show me the contributing factors."), "the question just asked is not suggested again");
   });
   await step(`[${theme}] Open on the UC02 answer shows only Shortfall, on the gap clicked`, async () => {
     const btn = last().locator("[data-gap-open]").last();
@@ -637,8 +642,19 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator('#panelWrap [role="tab"], #panelWrap .tab, #panelWrap [data-tab]').count(), 0, "no way to switch views inside the panel");
     await page.click("#panelClose");
   });
+  await step(`[${theme}] Shortfall after task 2: no daily table, overview alert/outlook tiles, Forecast confidence, Two-week view or Financing match`, async () => {
+    await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(700);
+    const txt = await page.locator("#pane-gap").innerText();
+    assert.equal(await page.locator('#pane-gap :is(#dailyBtn, .fbcard, [data-wid="reliability"], [data-wid="blocks"], #finMatch)').count(), 0);
+    assert.doesNotMatch(txt, /Show the daily table|Overall alert|Cash state \(Base\)|Forecast reliability|Forecast confidence|Two-week|Funding plan|Financing ranking/);
+    assert.equal(await page.locator("#pane-gap .uc2-tiles .ls-tile").count(), 4, "four overview tiles");
+    assert.deepEqual(await page.locator("#pane-gap .dsec h2").allInnerTexts(), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
+    assert.equal(await page.locator("#pane-gap #gapChart").count(), 1, "the daily chart stays");
+    assert.equal(await last().locator(".suggest button", { hasText: "Rank the financing options that fit these factors." }).count(), 1, "the task 3 question is suggested under the last answer");
+    await page.click("#panelClose");
+  });
   await step(`[${theme}] Task 3 ranks financing for the whole shortfall (workbook v9 UC03)`, async () => {
-    await ask("Rank the financing options that fit these factors.");
+    await last().locator(".suggest button", { hasText: "Rank the financing options that fit these factors." }).click(); await page.waitForTimeout(3800);
     const card = last().locator(".liq.rank-all.uc03");
     assert.equal(await card.count(), 1);
     assert.deepEqual(await card.locator("tbody tr[data-prod]").evaluateAll((els) => els.map((e) => e.dataset.prod)),
@@ -647,7 +663,16 @@ for (const theme of ["light", "dark"]) {
     assert.match(await card.innerText(), /scenario B2/);
     assert.match(await last().innerText(), /match_financing/);
     assert.doesNotMatch(await page.locator(".messages.on").innerText(), /forecast_liquidity|rank_financing|explain_liquidity_case|get_receivables/);
-    assert.equal(await page.locator("#demoChips").isVisible(), true);
+    assert.equal(await page.locator("#demoChips").isVisible(), false);
+    assert.equal(await page.locator(".messages.on .suggest").count(), 1); assert.equal(await last().locator(".suggest").count(), 1);
+    await last().locator(".liq-act [data-a=open]").click(); await page.waitForTimeout(1200);
+    assert.equal(await page.locator("#detailTitle").innerText(), "Shortfall");
+    assert.match(await page.locator("#finMatch").innerText(), /Funding plan for the shortfall/);
+    assert.ok(await page.evaluate(() => { const f = document.querySelector("#finMatch"), g = [...document.querySelectorAll("#pane-gap .dsec h2")].find((h) => h.textContent === "Cash gaps");
+      return !!g && (g.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) > 0; }), "Financing match sits under Cash gaps");
+    assert.ok(await page.evaluate(() => Math.abs(document.querySelector("#finMatch").getBoundingClientRect().top - document.querySelector("#pane-gap").getBoundingClientRect().top) < 80), "Open scrolls to the financing match");
+    await shot(page, `${theme}-shortfall-financing`);
+    await page.click("#panelClose");
   });
   await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
     await ask("Explain gap 3");
@@ -705,8 +730,12 @@ for (const theme of ["light", "dark"]) {
     await page.evaluate(() => openDetail("dash")); await page.waitForTimeout(500);
     assert.equal(await page.locator('#pane-dash :is([data-wid="flow"], [data-wid="daily"], .fch, #gapChart, #dashChart)').count(), 0);
     assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /13-week cash forecast/);
-    assert.match(await page.locator("#pane-dash .lstate .lv-pill").innerText(), /Highest alert: Red/);
+    assert.equal(await page.locator("#pane-dash .lstate").count(), 0, "the liquidity-state banner is no longer on the Dashboard");
+    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /Liquidity Shortfall Alert|Cash shortfall ahead/);
     await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(700);
+    assert.equal(await page.evaluate(() => document.querySelector("#pane-gap").firstElementChild.classList.contains("lstate")), true, "the banner leads the Shortfall view");
+    assert.match(await page.locator("#pane-gap .lstate .lv-pill").innerText(), /Highest alert: Red/);
+    assert.equal(await page.evaluate(() => { const s = S.stage; S.stage = 1; renderGap(); const n = document.querySelectorAll("#pane-gap .lstate").length; S.stage = s; renderGap(); return n; }), 0, "no banner before step 2");
     const h2 = await page.locator("#pane-gap .dsec h2").allInnerTexts();
     assert.deepEqual(h2.slice(0, 3), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
     assert.match(h2[3], /^Funding plan for the shortfall/);
@@ -734,8 +763,9 @@ for (const theme of ["light", "dark"]) {
     await loadLegacy(page);
     for (const fm of ["X02", "X03"]) {
       await page.evaluate((f) => { switchContext(f, "base", { silent: true }); advance(3); openDetail("dash"); }, fm); await page.waitForTimeout(500);
-      assert.match(await page.locator("#pane-dash .lv-pill").innerText(), /Blue/);
+      assert.equal(await page.locator("#pane-dash .lstate").count(), 0);
       await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(500);
+      assert.match(await page.locator("#pane-gap .lstate .lv-pill").innerText(), /Blue/);   // TH03 banner leads Shortfall
       assert.match(await page.locator("#pane-gap").innerText(), /No cash shortfall/);
     }
     await page.evaluate(() => switchContext("F01", defCase("F01"), { silent: true }));
@@ -756,6 +786,15 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator(".messages.on .flow-divider").count(), 0);
     assert.equal(await page.evaluate(() => S.firm), "F01");
     assert.equal(await page.locator("#uSub").innerText(), "Alpha Garment Subcontractor");
+    assert.equal(await page.locator("#demoChips").isVisible(), true, "New chat brings the chips back by the composer");
+    assert.equal(await page.locator(".messages.on .suggest").count(), 0);
+  });
+  await step(`[${theme}] a chat reopened from history has its suggestions under the last answer`, async () => {
+    await page.locator(".chat-row .chat-open").nth(1).click(); await page.waitForTimeout(600);
+    assert.equal(await page.locator("#demoChips").isVisible(), false);
+    assert.equal(await page.locator(".messages.on .suggest").count(), 1);
+    assert.equal(await page.evaluate(() => { const b = [...document.querySelectorAll(".messages.on .msg.bot")].pop(); return !!b.querySelector(".suggest") && !b.querySelector(".suggest button:disabled"); }), true);
+    await page.click("#newChat"); await page.waitForTimeout(500);
   });
   if (theme === "light") await step("file registry supports import, search, filters, sorting and safe deletion", async () => {
     await page.click('[data-view="data"]');
@@ -818,6 +857,28 @@ for (const theme of ["light", "dark"]) {
     await page.fill("#chatName", "Cash review"); await page.click("#chatSaveName");
     assert.equal(await page.locator(".chat-row .chat-open").first().innerText(), "Cash review");
   });
+  if (theme === "light") await step("Delete chat asks in a compact dialog sized to its text (1440, 768 and 375 px)", async () => {
+    for (const [w, h] of [[1440, 900], [768, 900], [375, 812]]) {
+      await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(300);
+      if (w < 900) await page.evaluate(() => openSide());
+      const row = page.locator(".chat-row").first();
+      await row.hover(); await row.locator(".chat-more").click(); await page.click('[data-chat-act="delete"]'); await page.waitForTimeout(400);
+      const r = await page.evaluate(() => { const m = document.querySelector("#modal"), b = m.getBoundingClientRect(), f = m.querySelector(".acts").getBoundingClientRect(),
+        btns = [...m.querySelectorAll(".acts button")].map((x) => x.getBoundingClientRect()), h3 = m.querySelector("h3"), p = m.querySelector("p");
+        return { w: b.width, h: b.height, inside: b.left >= 0 && b.right <= innerWidth, right: Math.round(b.right - btns[btns.length - 1].right), fill: Math.round(f.right - f.left), cls: m.classList.contains("confirm-dialog"),
+          clipped: [h3, p].some((e) => e.scrollWidth > e.clientWidth + 1), labels: [...m.querySelectorAll(".acts button")].map((x) => x.textContent) }; });
+      assert.equal(r.cls, true); assert.deepEqual(r.labels, ["Cancel", "Delete"]); assert.equal(r.clipped, false); assert.ok(r.inside, "inside the viewport");
+      if (w >= 768) assert.ok(r.w >= 360 && r.w <= 420, `width ${r.w} at ${w}px`); else assert.ok(Math.abs(r.w - (w - 32)) <= 1, `width ${r.w} at ${w}px`);
+      assert.ok(r.h < 200, `height ${r.h} follows the content`); assert.ok(r.right <= 24, "buttons on the right");
+      if (w === 1440 || w === 375) await shot(page, `confirm-delete-${w}`);
+      await page.click("#cfNo"); await page.waitForTimeout(200);
+      if (w < 900) await page.evaluate(() => closeSide());
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => openSettings("General")); await page.waitForTimeout(300);
+    assert.ok(await page.evaluate(() => document.querySelector("#modal").getBoundingClientRect().width > 700), "Settings keeps its own wide layout");
+    await page.keyboard.press("Escape");
+  });
   // ERR_TUNNEL_CONNECTION_FAILED only comes from a sandbox proxy blocking the XLSX CDN script.
   await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors.filter((e) => !/ERR_TUNNEL_CONNECTION_FAILED/.test(e)), []));
   await page.close();
@@ -837,12 +898,34 @@ for (const theme of ["light", "dark"]) {
     const r = await page.evaluate(() => { const p = document.querySelector("#pane-dash"), kids = [...p.children].map((e) => e.className.split(" ")[0]);
       return { order: kids, secs: [...p.querySelectorAll(".dsec h2")].map((h) => h.textContent), w: p.querySelector(".wcard .ls-w").textContent,
         src: p.querySelector(".uc-src").textContent, chip: document.querySelector(".chipdate b").textContent, gaugeMax: [...p.querySelectorAll(".gcard")].map((g) => g.querySelectorAll(".gl")[1].textContent) }; });
-    assert.deepEqual(r.secs.slice(0, 4), ["Working-capital diagnosis", "Receivables, inventory and payables", "Who holds the money", "Cash conversion cycle"]);
+    assert.deepEqual(r.secs.slice(0, 3), ["Working-capital diagnosis", "Receivables, Inventory and Payables", "Cash conversion cycle"]);
     assert.ok(r.order.indexOf("uc-src") < r.order.indexOf("dsec"));
     assert.equal(r.w, "W1 – Watch");
     assert.match(r.src, /sample:F01 · snapshot F01-20260620-SYN171-v1 · as of 20 Jun 2026 · period 1 Jan 2026–20 Jun 2026 \(171 days\)/); assert.match(r.src, /fresh/);
     assert.equal(r.chip, "20 Jun 2026");
     assert.ok(r.gaugeMax.length === 4 && !r.gaugeMax.includes("90"), "gauge scales follow the thresholds: " + r.gaugeMax.join(","));
+  });
+  await step("D · item cards are stacked; Details opens a six-column table under its own card; no 'Who holds the money' section", async () => {
+    const boxes = await page.evaluate(() => [...document.querySelectorAll("#pane-dash .icards > .iblock > .icard")].map((e) => { const r = e.getBoundingClientRect(); return [e.dataset.wid, Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }));
+    assert.deepEqual(boxes.map((b) => b[0]), ["ar", "inv", "ap"]);
+    assert.ok(boxes[0][1] === boxes[1][1] && boxes[1][1] === boxes[2][1] && boxes[0][2] < boxes[1][2] && boxes[1][2] < boxes[2][2], "one card under the other: " + JSON.stringify(boxes));
+    assert.ok(boxes.every((b) => b[3] === boxes[0][3]), "same full width");
+    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /Who holds the money/);
+    assert.equal(await page.locator('#pane-dash [data-wid="tables"]').count(), 0);
+    const btn = page.locator('#pane-dash [data-det="AR"]');
+    assert.equal(await btn.getAttribute("aria-expanded"), "false"); assert.equal(await btn.getAttribute("aria-controls"), "icd-ar");
+    assert.equal(await page.locator("#icd-ar").isVisible(), false);
+    await btn.click(); await page.waitForTimeout(200);
+    assert.equal(await btn.getAttribute("aria-expanded"), "true");
+    assert.equal(await page.evaluate(() => document.querySelector("#icd-ar").previousElementSibling.dataset.wid), "ar", "the table sits right under the Receivables card");
+    assert.deepEqual(await page.locator("#icd-ar thead th").evaluateAll((els) => els.map((e) => e.textContent.replace(/[▲▼]/g, "").trim())), ["Name", "Amount", "Share", "Overdue", "Longest Overdue (Days)", "Priority"]);
+    assert.equal(await page.locator("#icd-ar tbody tr").count(), 9);
+    await page.click('#pane-dash [data-det="INV"]'); await page.waitForTimeout(200);
+    assert.deepEqual(await page.locator("#icd-inv thead th").count(), 6);
+    assert.deepEqual(await page.locator("#icd-inv tbody tr").first().locator("td").evaluateAll((els) => els.slice(3, 5).map((e) => e.textContent)), ["—", "—"], "lots have no due date");
+    assert.equal(await page.locator("#icd-ar").isVisible(), true, "opening Inventory keeps Receivables open");
+    await page.click('#pane-dash [data-det="INV"]'); await page.waitForTimeout(200);
+    assert.equal(await page.locator("#icd-inv").isVisible(), false); assert.equal(await page.locator("#icd-ar").isVisible(), true);
   });
   await step("D · expert mode shows rule ids, versions and raw VND; tables sort and switch order", async () => {
     const t = await page.locator("#pane-dash .wcard .expert").innerText();
@@ -853,10 +936,10 @@ for (const theme of ["light", "dark"]) {
     assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /R-AR-1|tv1\.threshold|money_at_risk|\d{1,3}(\.\d{3}){2,} VND/);
     await page.click("#ucExpert"); await page.waitForTimeout(300);                 // back on (remembered)
     assert.equal(await page.evaluate(() => localStorage.getItem("lilact.expert.v1")), "1");
-    const exposure = await page.locator("#pane-dash .t-cust tbody tr td:first-child b").allInnerTexts();
+    const exposure = await page.locator("#icd-ar .t-cust tbody tr td:first-child > b").allInnerTexts();
     assert.equal(exposure[0], "Large Exporter K1");
     await page.click('[data-corder="intervention"]'); await page.waitForTimeout(200);
-    const tiers = await page.locator("#pane-dash .t-cust tbody tr td:last-child").allInnerTexts();
+    const tiers = await page.locator("#icd-ar .t-cust tbody tr td:first-child small b").allInnerTexts();   // Expert: tier under the name
     assert.deepEqual(tiers, ["1", "2", "2", "2", "2", "2", "3", "3", "5"]);
   });
   await step("D · evidence panel lists the invoices; an empty filter says no records match", async () => {
@@ -873,10 +956,16 @@ for (const theme of ["light", "dark"]) {
   });
   await step("D · an earlier cut-off re-runs UC01 only; the matrix cell is not routed across snapshots", async () => {
     await page.fill("#ucAsOf", "2026-05-31"); await page.dispatchEvent("#ucAsOf", "change"); await page.waitForTimeout(500);
-    const r = await page.evaluate(() => ({ src: document.querySelector("#pane-dash .uc-src").textContent, chips: document.querySelector("#pane-dash .lstate .ls-chips").textContent, n: uc01().N }));
-    assert.match(r.src, /as of 31 May 2026 · period 30 Nov 2025–31 May 2026 \(183 days\)/); assert.match(r.chips, /Not routed · W and TH use different snapshots/);
+    const src = await page.locator("#pane-dash .uc-src").textContent();
+    assert.match(src, /as of 31 May 2026 · period 30 Nov 2025–31 May 2026 \(183 days\)/);
+    // The liquidity-state banner now leads the Shortfall view (from step 2).
+    await page.evaluate(() => { advance(2); openDetail("gap"); }); await page.waitForTimeout(600);
+    assert.match(await page.locator("#pane-gap .lstate .ls-chips").innerText(), /Not routed · W and TH use different snapshots/);
+    await page.evaluate(() => openDetail("dash")); await page.waitForTimeout(400);
     await page.click("#ucReset"); await page.waitForTimeout(400);
-    assert.match(await page.locator("#pane-dash .lstate .ls-chips").innerText(), /Cell M4/);
+    await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(600);
+    assert.match(await page.locator("#pane-gap .lstate .ls-chips").innerText(), /Cell M4/);
+    await page.evaluate(() => { openDetail("dash"); setWide(true); }); await page.waitForTimeout(500);
   });
   await step("D · threshold policy needs a reason, previews the impact and creates a new configuration version", async () => {
     await page.click("#ucPolicy"); await page.waitForTimeout(300);
@@ -917,7 +1006,7 @@ for (const theme of ["light", "dark"]) {
     assert.match(await page.locator("#pane-gap .c0b").innerText(), /Cash0 is provisional/);
     await page.selectOption("#scSel", "conservative"); await page.waitForTimeout(500);
     assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /-3,06B\s+18 Sep 2026 · Conservative/);
-    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /TH01 – Cash shortfall/);    // TH stays on Base
+    assert.match(await page.locator("#pane-gap .lstate").innerText(), /TH01 – Cash shortfall/);    // TH stays on Base (banner at the top)
     await page.selectOption("#scSel", "base"); await page.waitForTimeout(300);
     await page.selectOption("#wkSel", "4"); await page.waitForTimeout(500);
     assert.equal(await page.locator("#pane-gap .dsec h2").first().innerText(), "4-week cash forecast");
@@ -989,6 +1078,7 @@ for (const theme of ["light", "dark"]) {
     assert.deepEqual(await page.locator("#pane-dash .icard .ic-h .status").allInnerTexts(), ["Watch", "Watch", "Normal"]);   // from c_i: AR 1, INV 1, AP 0
     assert.match(await page.locator("#pane-dash .icard").first().innerText(), /About 3 days above normal/);
     assert.equal(await page.locator("#pane-dash .tb-lbl").count(), 0, "no numeric threshold labels");
+    await page.click('#pane-dash [data-det="AR"]'); await page.waitForTimeout(200);
     assert.deepEqual((await page.locator("#pane-dash .t-cust thead th").allInnerTexts()).map((x) => x.replace(/[▲▼]/g, "").trim().toLowerCase()), ["name", "amount", "share", "overdue", "longest overdue (days)", "priority"]);
     assert.equal(await page.locator("#pane-dash .foot-note").innerText(), "Sample data. Estimates only, not financial advice.");
     assert.doesNotMatch(await page.locator("#pane-dash .gcard .info").first().getAttribute("data-tip"), /[=÷×]/);
@@ -1017,7 +1107,8 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#pane-gap .uc2-bar .est").count(), 1);
     assert.ok((await page.locator("#pane-gap .uc2-bar .est").getAttribute("title")).length > 10, "the Estimate badge explains why (Cash0 not confirmed)");
     assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /Cash needed at the start\s+4,76B\s+Largest shortfall\s+3,56B/);
-    assert.match(await page.locator("#pane-gap .fbcard").innerText(), /Forecast confidence\s+There are not enough past forecasts/);
+    assert.equal(await page.locator("#pane-gap .fbcard, #pane-gap [data-wid=\"reliability\"]").count(), 0, "no Forecast confidence card");
+    assert.doesNotMatch(txt, /Forecast confidence|Overall alert|Cash outlook\n|Two-week view|Show the daily table/);
     assert.equal(await page.locator("#pane-gap .lv-legend").first().evaluate((e) => e.tagName), "P");
   });
   await step("Simple · chat answers use plain words, no rule codes or formulas", async () => {
