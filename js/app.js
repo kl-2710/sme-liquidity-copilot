@@ -49,12 +49,7 @@ const CAT=DATA.cat;
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const nf=(n,d=1)=>Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const mm=n=>nf(n/1e6,1)+'M';                       // million VND
-const money=n=>Math.abs(n)>=1e9?nf(n/1e9,2)+'bn':nf(n/1e6,1)+'M';
-const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];const fd=iso=>{const [y,m,d]=iso.split('-');return (+d)+' '+MON[+m-1]+' '+y};
-const fds=iso=>{const [y,m,d]=iso.split('-');return (+d)+' '+MON[+m-1]};
-const enM=n=>'VND '+Number(n/1e6).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})+' million';
+// nf, mm, money, vnd, enM, pct, days, fd, fds, enDate: js/formatters.js (shared number and date formatting).
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const FIRMS={F01:{name:'Alpha Garment Subcontractor',short:'Alpha Garment'},F02:{name:'Beta Fabric Distributor',short:'Beta Fabric'},F03:{name:'Gamma Packaging & Trims',short:'Gamma Trims'}};
 const LV_NAME={l1:'Early collection',l2:'Extend payables',l3:'Cut inventory',l4:'Finance one invoice'};
@@ -71,6 +66,32 @@ function derive(){
   S.epIdx=Math.min(S.epIdx,Math.max(0,EPS.length-1));
   EP=EPS[S.epIdx]||{start:c.days[0][0],end:c.days.at(-1)[0],k:0,peak:0,none:true};
   BASE=simulate(c,EP,offLev(),CAT);
+}
+// TV3 ranking for any gap: the stored ranking for c.defk, otherwise rankFor(); cached per firm|case|gap.
+const TV3_CACHE={};
+function tv3For(ep){
+  const c=C();if(!ep||ep.none)return null;
+  if(c.defk===ep.k&&c.tv3)return c.tv3;
+  const key=`${S.firm}|${S.case}|${ep.k}`;
+  return TV3_CACHE[key]||(TV3_CACHE[key]=rankFor(c,ep,EPS.length));
+}
+const largestGap=()=>EPS.length?EPS.reduce((a,e)=>e.peak>a.peak?e:a,EPS[0]):null;
+function selectGap(k){const i=EPS.findIndex(e=>e.k===k);if(i<0)return false;S.epIdx=i;derive();S.lev=freshLev();return true}
+// Daily alert level (SRS 2.8.11.3), checked in this order on unrounded values:
+// red: below 0, below Rmin or more than 50% short of Rtarget · orange: 20–50% short · yellow: up to 20% short · green: at or above Rtarget.
+function alertLevel(cashEnd,Rt,Rmin=0.5*Rt){
+  if(!(Rt>0))return 'na';
+  const gr=Math.max(0,Rt-cashEnd)/Rt;
+  if(cashEnd<0||cashEnd<Rmin||gr>0.5)return 'red';
+  if(gr>0.2)return 'orange';
+  if(gr>0)return 'yellow';
+  return 'green';
+}
+const LV={red:{n:3,label:'Red',color:'var(--lc-color-status-error)'},orange:{n:2,label:'Orange',color:'var(--lc-color-alert-orange)'},yellow:{n:1,label:'Yellow',color:'var(--lc-color-alert-yellow)'},green:{n:0,label:'Green',color:'var(--lc-color-status-success)'},blue:{n:-1,label:'Surplus',color:'var(--lc-color-status-info)'},na:{n:-2,label:'Not available',color:'var(--lc-color-status-neutral)'}};
+const worstLevel=levels=>levels.reduce((a,l)=>LV[l].n>LV[a].n?l:a,'green');
+const LV_RULE={red:'below 0, below Rmin or more than 50% short of Rtarget',orange:'20–50% short of Rtarget',yellow:'up to 20% short of Rtarget',green:'at or above Rtarget'};
+function alertLegendHTML({surplus}={}){
+  return `<div class="legend lv-legend" role="list" aria-label="Alert colours">${['red','orange','yellow','green'].map(l=>`<span role="listitem"><i class="lv-sw lv-${l}" aria-hidden="true"></i><b>${LV[l].label}</b>&nbsp;· ${LV_RULE[l]}</span>`).join('')}${surplus?`<span role="listitem"><i class="lv-sw lv-blue" aria-hidden="true"></i><b>Blue</b>&nbsp;· surplus, above Rupper for ≥ 14 days</span>`:''}</div>`;
 }
 function offLev(){
   const c=C(),buyers=topBy(c.sales.filter(s=>s[3]===1),s=>s[1],s=>s[2]),sup=topBy(c.pur.filter(s=>s[2]===1),s=>s[0],s=>s[1]);
@@ -130,7 +151,8 @@ function drawChart(box,svg,o,sv,first){
   let g='';const steps=4;
   for(let i=0;i<=steps;i++){const v=mn+(mx-mn)*i/steps,y=Y(v);g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y}" y2="${y}" stroke="var(--lc-color-border-default)" stroke-dasharray="3 4"/><text x="${m.l-8}" y="${y+3.5}" text-anchor="end" font-size="10" fill="var(--lc-color-text-muted)" class="num">${Math.round(v)}</text>`}
   let xl='';for(let i=0;i<n;i+=7){xl+=`<text x="${X(i)}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--lc-color-text-muted)">${i%14===0?fds(o.path[i].d):''}</text>`}
-  let band='';if(o.ep&&!o.ep.none){const i0=o.path.findIndex(p=>p.d===o.ep.start),i1=o.path.findIndex(p=>p.d===o.ep.end);if(i0>=0){band=`<rect x="${X(i0)-3}" y="${m.t}" width="${Math.max(6,X(i1)-X(i0)+6)}" height="${H-m.t-m.b}" rx="5" fill="color-mix(in srgb,var(--lc-color-alert-orange-mark) 8%,transparent)" stroke="color-mix(in srgb,var(--lc-color-alert-orange-mark) 33%,transparent)" stroke-dasharray="4 3"/><text x="${X(i0)}" y="${m.t+11}" font-size="10" font-weight="700" fill="var(--lc-color-alert-orange)">Gap ${o.ep.k||''}</text>`}}
+  let band='';(o.eps||(o.ep&&!o.ep.none?[o.ep]:[])).forEach(e=>{const i0=o.path.findIndex(p=>p.d===e.start),i1=o.path.findIndex(p=>p.d===e.end);if(i0<0)return;const on=o.ep&&!o.ep.none&&e.k===o.ep.k;
+    band+=`<rect class="gapband${on?' on':''}" x="${X(i0)-3}" y="${m.t}" width="${Math.max(6,X(i1)-X(i0)+6)}" height="${H-m.t-m.b}" rx="5" fill="color-mix(in srgb,var(--lc-color-alert-red-mark) ${on?15:7}%,transparent)" stroke="color-mix(in srgb,var(--lc-color-status-error) ${on?70:30}%,transparent)" stroke-width="${on?1.6:1}" stroke-dasharray="4 3"/><text x="${X(i0)}" y="${m.t+11}" font-size="10" font-weight="700" fill="var(--lc-color-status-error)">Gap ${e.k}</text>`});
   const dim=sc?'var(--lc-color-data-historical)':'var(--lc-color-data-cash)';
   const len=Math.round(W*1.6);
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('height',H);
@@ -140,6 +162,7 @@ function drawChart(box,svg,o,sv,first){
   <line x1="${m.l}" x2="${W-m.r}" y1="${yb}" y2="${yb}" stroke="var(--lc-color-alert-orange-mark)" stroke-width="1.5" stroke-dasharray="6 4"/>
   <text x="${W-m.r}" y="${yb-5}" text-anchor="end" font-size="10" font-weight="700" fill="var(--lc-color-alert-orange)">Buffer ${Math.round(buf)}</text>
   <path d="${line(base)}" fill="none" stroke="${dim}" stroke-width="${sc?2:2.6}" stroke-linecap="round" stroke-linejoin="round" ${first?`style="--len:${len};stroke-dasharray:${len};animation:lineDraw 1.1s var(--ease) both"`:''} ${sc?'opacity=".75"':''}/>
+  ${o.path.map((p,i)=>`<circle class="dpt" cx="${X(i).toFixed(1)}" cy="${Y(base[i]).toFixed(1)}" r="2.4" fill="${LV[alertLevel(p.c,o.buf)].color}"><title>${fd(p.d)} · ${LV[alertLevel(p.c,o.buf)].label}</title></circle>`).join('')}
   ${sc?`<path d="${line(sc)}" fill="none" stroke="var(--lc-color-status-success)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>`:''}
   <line class="cross" x1="0" x2="0" y1="${m.t}" y2="${H-m.b}" stroke="var(--lc-color-text-primary)" stroke-opacity=".35" stroke-dasharray="3 3" style="display:none"/>
   <circle class="dot1" r="4.5" fill="var(--lc-color-bg-surface)" stroke="${dim}" stroke-width="2.5" style="display:none"/>${sc?'<circle class="dot2" r="4.5" fill="var(--lc-color-bg-surface)" stroke="var(--lc-color-status-success)" stroke-width="2.5" style="display:none"/>':''}`;
@@ -162,7 +185,9 @@ function bindHover(box){
   });
   hv.addEventListener('mouseleave',()=>{tip.classList.remove('show');$$('.cross,.dot1,.dot2',box).forEach(e=>e.style.display='none')});
 }
-let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{$$('.chartbox').forEach(b=>{if(b._o){const o=b._o;b._prev=null;b._drawn=1;cashChart(b,o)}});placeInk()},120)});
+// Daily charts size themselves to their box, so redraw them after a resize or once a panel transition has settled.
+function redrawCharts(){$$('.chartbox').forEach(b=>{if(b._o){const o=b._o;b._prev=null;b._drawn=1;cashChart(b,o)}})}
+let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{redrawCharts();placeInk()},120)});
 
 
 function placeInk(){const t=$(`.tab[data-tab="${S.tab}"]`),ink=$('#ink');if(!t)return;ink.style.left=t.offsetLeft+'px';ink.style.width=t.offsetWidth+'px'}
@@ -171,6 +196,7 @@ $('#tabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)se
 
 
 function switchContext(firm,cs,{silent}={}){
+  for(const k in TV3_CACHE)delete TV3_CACHE[k];S.causes={};
   S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;
   const c=C();const eps=episodes(c);if(c.defk)S.epIdx=c.defk-1;else if(eps.length)S.epIdx=eps.reduce((a,e,i)=>e.peak>eps[a].peak?i:a,0);
   derive();S.lev=freshLev();$('#firmSel').value=firm;
@@ -182,64 +208,50 @@ function switchContext(firm,cs,{silent}={}){
 $('#firmSel').addEventListener('change',e=>{const f=e.target.value;if(f==='__add'){$('#firmSel').value=S.firm;startImport(null);return}switchContext(f,defCase(f));addLog({tool:'get_firm_context',tier:0,args:{firm_id:f},status:'ok',summary:'Switched company, started a new session'});toast(`Switched to ${f} · ${FIRMS[f].short}`)});
 
 
-function renderDashOld(){
-  const c=C(),p=$('#pane-dash'),dso=c.ar/c.rev*c.N,dio=c.invv/c.cogs*c.N,dpo=c.ap/c.cogs*c.N,ccc=dso+dio-dpo;
-  const open=c.sales.filter(s=>s[4]===1),tot=open.reduce((a,s)=>a+s[2],0),tb=topBy(open,s=>s[1],s=>s[2])[0];
-  const minPt=c.days.reduce((a,x)=>x[1]<a[1]?x:a,c.days[0]);
-  const kp=(cls,t,tip,id,u,f)=>`<div class="card kpi ${cls}"><div class="t"><span>${t}</span><span class="info" tabindex="0" data-tip="${tip}">i</span></div><div class="v num"><span id="${id}">0</span><small>${u}</small></div><div class="f">${f}</div></div>`;
-  p.innerHTML=`
-  <div class="grid kpis">
-    ${kp('k1','DSO · Days sales outstanding','Average days from sale to cash collection = Receivables ÷ Revenue × 90 days.','kDSO','days','Receivables '+money(c.ar))}
-    ${kp('k2','DIO · Days inventory','Average days goods sit in stock = Owned inventory ÷ COGS × 90 days.','kDIO','days','Inventory '+money(c.invv))}
-    ${kp('k3','DPO · Days payable outstanding','Average days before paying suppliers = Payables ÷ COGS × 90 days.','kDPO','days','Payables '+money(c.ap))}
-    ${kp('k4 hl','CCC · Cash conversion cycle','CCC = DSO + DIO − DPO. Lower means less working capital tied up.','kCCC','days','Net trade capital '+money(c.ar+c.invv-c.ap))}
-  </div>
-  <div class="card hov" style="margin-top:14px">
-    <div class="card-head"><div><h3>Daily cash line over 13 weeks</h3><p>VND million · as of 30 Sep 2026 · ${S.case==='s7'?'assuming customers pay 7 days later':'base forecast'}</p></div>
-      <label class="legend" style="cursor:pointer;user-select:none;${S.last?'':'display:none'}" id="ovLbl"><input type="checkbox" id="ovChk" ${S.overlay?'checked':''} style="accent-color:var(--lc-color-status-success)"> Show latest scenario</label></div>
-    <div class="chartbox" id="dashChart"></div>
-    <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Base balance</span><span id="lgScen" style="display:none"><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span><span><i class="ds"></i>Minimum buffer ${money(c.buffer)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 33%,transparent)"></i>Below buffer</span></div>
-  </div>
-  <div class="grid" style="grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);margin-top:14px" id="dashLow">
-    <div class="card hov"><div class="card-head"><div><h3>Weeks to watch</h3><p>${EPS.length?EPS.length+' gaps below the buffer in 13 weeks':'No cash gaps'}</p></div></div>
-      ${EPS.length?EPS.slice().sort((a,b)=>b.peak-a.peak).slice(0,3).map(e=>`<button class="ep ${EP.k===e.k?'on':''}" style="width:100%;margin-bottom:8px;display:flex;align-items:center;gap:12px" data-ep="${e.k}"><div style="flex:1"><div class="k">Gap ${e.k} · ${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''}${e.censored?' · not yet ended':''}</div><div class="a num">${mm(e.peak)}</div><div class="d">Peak shortfall vs buffer · cash needed ${fd(e.start)}</div></div><span class="btn sec sm">See options →</span></button>`).join(''):`<div class="empty"><div class="big">✓</div>Balance stays ≥ ${money(c.buffer)} throughout 13 weeks.${(S.firm==='F02'||S.firm==='F03')?'<br>No cash shortfall in the 13-week forecast, so there is nothing to simulate.':''}</div>`}
-    </div>
-    <div class="card hov"><div class="card-head"><div><h3>Copilot insights</h3><p>Drawn from synthetic data</p></div></div>
-      <div class="callout amber" style="margin-bottom:9px"><span>⚠</span><div><b>Concentrated receivables</b><br>${tb?esc(tb.k)+' makes up '+nf(tb.v/tot*100,1)+'% of open receivables ('+money(tb.v)+').':'No data yet.'}</div></div>
-      <div class="callout ${EPS.length?'':'green'}" style="margin-bottom:9px"><span>${EPS.length?'◷':'✓'}</span><div><b>Lowest point</b><br>Lowest balance ${money(minPt[1])} on ${fd(minPt[0])}${minPt[1]<c.buffer?', below the buffer '+money(c.buffer)+'.':', not below the buffer.'}</div></div>
-      <div class="callout green"><span>✦</span><div><b>No self-execution</b><br>Every draft needs your approval in the Approvals tab.</div></div>
-    </div>
-  </div>
-  <div class="foot-note">CCC uses period-end balances, 90-day period (3 Jul–30 Sep 2026); goods held for subcontracting are excluded from owned inventory. Collection date forecast = due date + historical delay, excluding new sales. Synthetic data.</div>`;
-  animNum($('#kDSO'),dso,v=>nf(v,1));animNum($('#kDIO'),dio,v=>nf(v,1));animNum($('#kDPO'),dpo,v=>nf(v,1));animNum($('#kCCC'),ccc,v=>nf(v,1),900);
-  const ov=S.last&&S.overlay;
-  cashChart($('#dashChart'),{path:(ov?S.last.res:BASE).path,buf:c.buffer,ep:EP,scen:!!ov});
-  if(ov)$('#lgScen').style.display='';
-  const chk=$('#ovChk');chk&&chk.addEventListener('change',e=>{S.overlay=e.target.checked;renderDash()});
-  $$('[data-ep]',p).forEach(b=>b.addEventListener('click',()=>{S.epIdx=EPS.findIndex(e=>e.k===+b.dataset.ep);derive();S.lev=freshLev();setTab('gap')}));
-}
-
-
+// Numbered section used by the Dashboard and Shortfall tabs.
+const dashSec=(n,col,h,pp,inner)=>`<section class="dsec" style="--sc:${col};--i:${n-1}"><header class="dsh"><span class="dsn">${n}</span><div><h2>${h}</h2><p>${pp}</p></div></header>${inner}</section>`;
 function renderGap(){
-  const c=C(),p=$('#pane-gap'),t3=c.tv3;
-  if(!EPS.length){p.innerHTML=`<div class="card"><div class="empty"><b>No cash shortfall in the 13-week forecast, so there is nothing to simulate.</b></div></div>`;return}
-  const asOf=dn(c.as_of),need=dn(EP.start),dl=need-asOf;
-  const isDef=c.defk&&EP.k===c.defk&&t3;
-  p.innerHTML=`
-  <div class="card-head"><div><h3>Cash gaps</h3><p>Gap = a run of consecutive days with balance below the buffer ${money(c.buffer)}. Pick a gap to see options.</p></div></div>
-  <div class="eps">${EPS.map(e=>`<button class="ep ${EP.k===e.k?'on':''}" data-ep="${e.k}"><div class="k">Gap ${e.k}</div><div class="a num">${mm(e.peak)}</div><div class="d">${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''} · lowest ${money(e.cashMin)}</div>${c.defk===e.k?'<span class="tag status blue">Target gap</span>':''}${e.censored?'<span class="tag status gray">not yet ended</span>':''}</button>`).join('')}</div>
+  const c=C(),p=$('#pane-gap'),M=weeklyModel(c),big=largestGap(),asOf=dn(c.as_of);
+  const sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
+  const ov=!!(S.last&&S.overlay&&!EP.none);
+  const forecast=dashSec(1,'var(--lc-color-data-cash)','13-week cash forecast','Cash in, cash out and week-end balance vs buffer',`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${S.case==='s7'?'Assuming customers pay 7 days later · ':''}VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
+   <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(openingCash(c))}</b><small>Cash at cut-off</small></div>
+    <div class="fst"><b class="num pos">+${money(sumIn)}</b><small>Expected cash in</small><b class="num neg" style="margin-top:8px">−${money(sumOut)}</b><small>Expected cash out</small></div>
+    <div class="fst"><b class="num ${minB<c.buffer?'neg':''}">${money(minB)}</b><small>Lowest week-end, week ${minW.w}</small></div></div>
+    <div class="chartbox fch">${flowChartSVG(c,M,EP)}</div></div>
+   <div class="legend"><span><i style="background:var(--lc-color-status-success-bg);border:1px solid var(--lc-color-status-success)"></i>Cash in</span><span><i style="background:var(--lc-color-status-error-bg);border:1px solid var(--lc-color-status-error)"></i>Cash out</span><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Week-end balance (dot = alert level)</span><span><i class="ds"></i>Buffer ${money(c.buffer)}</span>${EP.none?'':`<span><i class="gapwk-sw"></i>Weeks of gap ${EP.k}</span>`}</div>
+   ${alertLegendHTML()}
+   ${flowTableHTML(c,M,EP)}
+   <p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.</p></div>`);
+  const daily=dashSec(2,'var(--lc-color-status-error)','Daily cash balance','Every gap below the buffer is shaded; each dot shows that day’s alert level',`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${S.case==='s7'?'assuming customers pay 7 days later':'base forecast'}</p></div>
+      <label class="legend" style="cursor:pointer;user-select:none;${S.last&&!EP.none?'':'display:none'}" id="ovLbl"><input type="checkbox" id="ovChk" ${S.overlay?'checked':''} style="accent-color:var(--lc-color-status-success)"> Show latest scenario</label></div>
+    <div class="chartbox" id="gapChart"></div>
+    <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Base balance</span>${ov?'<span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span>':''}<span><i class="ds"></i>Buffer ${money(c.buffer)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 30%,transparent);border:1px dashed var(--lc-color-status-error)"></i>Gap (selected gap is darker)</span></div>
+    ${alertLegendHTML()}</div>`);
+  const foot=`<div class="foot-note">Aged stock and goods held for subcontracting are excluded from collateral; financed receivables are not counted as receivables. Interest, fees and advance rates come from the synthetic finance_catalogue; EAC is indicative only. ${DISC}</div>`;
+  if(!EPS.length){
+    p.innerHTML=forecast+daily+`<div class="card" style="margin-top:14px"><div class="empty"><b>No cash shortfall in the 13-week forecast, so there is nothing to simulate.</b></div></div>`+foot;
+  }else{
+    const dl=dn(EP.start)-asOf,rq='Rank the financing options that fit this cause.',t3=S.stage>=3?tv3For(EP):null;
+    const gaps=dashSec(3,'var(--lc-color-status-error)','Cash gaps',`Gap = a run of consecutive days with balance below the buffer ${money(c.buffer)}. Every gap is a red alert. Pick a gap to see its weeks, KPIs and financing ranking.`,`<div class="eps">${EPS.map(e=>`<button class="ep gap-red ${EP.k===e.k?'on':''}" data-ep="${e.k}" aria-pressed="${EP.k===e.k}"><div class="ep-tags"><span class="lv-tag"><i class="lv-sw lv-red" aria-hidden="true"></i>Red alert</span>${big&&big.k===e.k?'<span class="status blue">Largest gap</span>':''}${e.censored?'<span class="status gray">not yet ended</span>':''}</div><div class="k">Gap ${e.k}</div><div class="a num">${mm(e.peak)}</div><div class="d">${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''} · lowest ${money(e.cashMin)}</div></button>`).join('')}</div>
   <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px">
-    <div class="card kpi k2"><div class="t">Peak shortfall</div><div class="v num">${mm(EP.peak)}</div><div class="f">vs buffer</div></div>
+    <div class="card kpi k2"><div class="t">Peak shortfall · gap ${EP.k}</div><div class="v num">${mm(EP.peak)}</div><div class="f">vs buffer</div></div>
     <div class="card kpi"><div class="t">Cash needed on</div><div class="v num">${fds(EP.start)}</div><div class="f">${dl} days from the cut-off</div></div>
     <div class="card kpi k3"><div class="t">Lowest balance</div><div class="v num">${money(EP.cashMin)}</div><div class="f">on ${fds(EP.peakDay)}</div></div>
     <div class="card kpi k4"><div class="t">Gap ends</div><div class="v num">${fds(EP.end)}</div><div class="f">${EP.censored?'not recovered within the period':'recovered'}</div></div>
-  </div>
-  ${S.stage<3?`<div class="callout" style="margin-top:14px"><span>ℹ</span><div>Next step: ask in the chat <b>“Rank the financing options that fit this cause.”</b> and the ranking appears here.</div></div>`:`  <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>${isDef?'Financing ranking':'Financing options'}</h3><p>${isDef?`Tier (fully covers and funds in time) then cost relative to the shortfall · ${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}`:'The demo only runs TV3 for the target gap.'}</p></div>${isDef?'<span class="status amber"><i></i>provisional</span>':''}</div>
-  ${isDef?rankTable(t3):`<div class="callout"><span>ℹ</span><div>No TV3 result yet for gap ${EP.k}. Choose <b>Gap ${c.defk||'target'}</b> to see the ranking table, or use the <b>What-if</b> tab to test each lever for this gap.</div></div>`}
-  </div>`}
-  <div class="foot-note">Aged stock and goods held for subcontracting are excluded from collateral; financed receivables are not counted as receivables. Interest, fees and advance rates come from the synthetic finance_catalogue; EAC is indicative only. ${DISC}</div>`;
-  $$('[data-ep]',p).forEach(b=>b.addEventListener('click',()=>{S.epIdx=EPS.findIndex(e=>e.k===+b.dataset.ep);derive();S.lev=freshLev();renderGap()}));
-  $$('[data-try]',p).forEach(b=>b.addEventListener('click',()=>{const [inv,prod]=b.dataset.try.split('|');S.lev=freshLev();S.lev.l4_on=1;S.lev.inv_id=inv;S.lev.prod=prod;setTab('whatif');runNow('Finance '+inv+' qua '+prod)}));
+  </div>`);
+    const rank=dashSec(4,'var(--lc-color-action-primary)',`Financing ranking · gap ${EP.k}`,'Tier (fully covers and funds in time), then cost relative to the shortfall',
+      !t3?`<div class="callout"><span>ℹ</span><div>The ranking appears after the financing step of the conversation.<div style="margin-top:8px"><button class="btn primary sm" type="button" data-ask="${esc(rq)}">${esc(rq)} →</button></div></div></div>`
+      :`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div><span class="status amber"><i></i>provisional</span></div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`);
+    p.innerHTML=forecast+daily+gaps+rank+foot;
+  }
+  cashChart($('#gapChart',p),{path:(ov?S.last.res:BASE).path,buf:c.buffer,ep:EP,eps:EPS,scen:ov});
+  const chk=$('#ovChk',p);chk&&chk.addEventListener('change',e=>{S.overlay=e.target.checked;renderGap()});
+  $$('[data-csv]',p).forEach(b=>b.onclick=()=>exportFlowCSV(c,M));window._csvCtx=()=>exportFlowCSV(c,M);
+  $$('[data-ask]',p).forEach(b=>b.onclick=()=>sendChat(b.dataset.ask));
+  setTimeout(redrawCharts,480);
+  $$('[data-ep]',p).forEach(b=>b.addEventListener('click',()=>{selectGap(+b.dataset.ep);renderGap();renderDemoChips()}));
+  $$('[data-try]',p).forEach(b=>b.addEventListener('click',()=>{const [inv,prod]=b.dataset.try.split('|');S.lev=freshLev();S.lev.l4_on=1;S.lev.inv_id=inv;S.lev.prod=prod;setTab('whatif');runNow('Finance '+inv+' via '+prod)}));
 }
 function rankTable(t3){
   const G=t3.inputs.gap,maxC=Math.max(...t3.ranked.map(r=>r.cpg));
@@ -414,7 +426,6 @@ function renderCmp(){
 }
 
 
-const enDate=iso=>new Date(iso+'T00:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
 function mkDrafts(run){
   const c=C(),l=run.lev,res=run.res,asOf=dn(c.as_of),firm=FIRMS[S.firm].short,out=[];
   const impact={ccc0:BASE.ccc,ccc1:res.ccc,gap0:BASE.gap_epi,gap1:res.gap_epi,cost:res.cost};
@@ -574,7 +585,7 @@ function parseLev(t){
   if(!t1&&!t2&&!t3&&!t4)return null;
   return {lev:L,miss};
 }
-function route(raw){
+function routeBase(raw){
   const t=raw.trim(),low=t.toLowerCase();
   const ex=SCEN().find(s=>norm(s.ask)===norm(t));if(ex)return {type:'sc',sc:ex};
   const noInv=t.replace(/\b[SP]-F0\d-\d+/g,'');
@@ -593,11 +604,13 @@ function route(raw){
   if(/rank|catalogue|option|compar|financ|reject/.test(low))return {type:'rank'};
   return {type:'help'};
 }
+// "gap N" anywhere in the question selects that gap first, then the question is answered for it.
+function route(raw){const r=routeBase(raw),m=String(raw).match(/gap\s*(\d+)/i);if(m)r.gap=+m[1];return r}
 let busy=false;
 async function sendChat(text){
   text=(text||'').trim();if(!text||busy)return;busy=true;$('#sendBtn').disabled=true;$('#chatInput').value='';
 
-  {const ch=currentChips().find(x=>norm(x.ask)===norm(text));if(ch)S.done.add(ch.id)}userMsg(text);$('#demoChips').hidden=true;const ty=typingEl();await sleep(reduceMotion?0:420);ty.remove();
+  {const ch=chipList().find(x=>norm(x.ask)===norm(text));if(ch)S.done.add(ch.id)}userMsg(text);$('#demoChips').hidden=true;const ty=typingEl();await sleep(reduceMotion?0:420);ty.remove();
   try{await respond(route(text),text)}catch(err){console.error(err);await botNote('There was an error processing the request. Please try again.')}
   busy=false;$('#sendBtn').disabled=false;renderDemoChips();$('#chatInput').focus({preventScroll:true});
 }
@@ -622,22 +635,20 @@ async function respond(r,text){
     await say(bot,`Which <b>${r.miss.what}</b> do you want to apply this to? I did not recognise a name in your question.`);
     suggestRow(bot,r.miss.opts.slice(0,4).map(n=>({t:n,f:()=>sendChat((text+' '+n))})));return;
   }
+  if(r.gap!=null&&r.type!=='block'){
+    if(!EPS.some(e=>e.k===r.gap)){await say(bot,EPS.length?`There is no gap ${r.gap}. The 13-week forecast has ${EPS.length} gap${EPS.length>1?'s':''}: ${EPS.map(e=>'gap '+e.k).join(', ')}.`:'The 13-week forecast has no cash gaps.');suggestRow(bot,nextSuggest());return}
+    selectGap(r.gap);if(S.panel)renderTab();
+  }
   {const need=r.type==='gap'?1:r.type==='rank'?2:['sc','custom','draft','clarify'].includes(r.type)?3:0;
    if(S.stage<need){await gateMsg(bot);return}}
   if(r.type==='sc'){await runScenarioInChat(bot,r.sc);return}
   if(r.type==='custom'){await runLevInChat(bot,r.lev,null,text);return}
   if(r.type==='draft'){await draftInChat(bot);return}
-  if(r.type==='gap'){await respondCause(bot);return}
+  if(r.type==='gap'){await respondCause(bot,{focus:r.gap});return}
   if(r.type==='ccc'){await respondLiq(bot,{focus:'ccc'});return}
   if(r.type==='liq'){await respondLiq(bot,{focus:r.focus});return}
   if(r.type==='conc'){await respondConc(bot);return}
-  if(r.type==='rank'){
-    if(!c.tv3||!(c.defk&&EP.k===c.defk)){await say(bot,EPS.length?`The demo only ranks the catalogue for the target gap (gap ${c.defk||'—'}). Choose that gap in the Shortfall tab.`:`No shortfall, so there is nothing to match against the catalogue yet.`);suggestRow(bot,nextSuggest());return}
-    const rk=c.tv3.ranked;
-    await toolCall(bot,'rank_financing',1,{firm_id:S.firm,episode:EP.k},()=>{addLog({tool:'rank_financing',tier:1,args:{firm_id:S.firm,episode:EP.k},status:'ok',summary:`Rank 1: ${rk[0].product_id}, ${rk.length} options, ${c.tv3.rejected.length} rejected`});return {}},{ms:520});
-    await say(bot,`${S.cause?`<p>Matching starts from the cause found in the last step: ${S.cause.txt}.</p>`:''}<p>For gap ${EP.k} (short ${mm(c.tv3.inputs.gap)}), top 3 options:</p><ul>${rk.slice(0,3).map(x=>`<li><b>${x.rank}. ${x.product_id}</b> (${esc(CAT.find(z=>z.id===x.product_id).provider)}): receives ${mm(x.cash)}, cost ${nf(x.cost/1e6,2)}M (${nf(x.cpg*100,2)}% of the shortfall), ${x.gap_rem>0?'still short '+mm(x.gap_rem):'fully covered'}.</li>`).join('')}</ul><p>Rejected: ${c.tv3.rejected.map(x=>x.product_id).join(', ')||'none'}. ${DISC}</p>`);
-    const a=document.createElement('div');a.className='rcact';a.innerHTML='<button class="btn sec sm" type="button">Open ranking</button>';$('button',a).onclick=()=>setTab('gap');bot.appendChild(a);advance(3,bot);suggestRow(bot,nextSuggest());return;
-  }
+  if(r.type==='rank'){await respondRank(bot,{focus:r.gap});return}
   await say(bot,`<p>I support <b>${S.firm}</b> one step at a time, each unlocking when you ask for it:</p><ul><li>Diagnose DSO, DIO, DPO and CCC.</li><li>Find cash-short weeks over 13 weeks.</li><li>Rank financing options in the synthetic catalogue.</li><li>Test levers (collect early, extend payment terms, cut inventory, finance one invoice) and draft proposals for your approval.</li></ul><p>Example: <i>“What if we collect from K1 10 days early?”</i></p>`);
   suggestRow(bot,nextSuggest());
 }
@@ -652,7 +663,7 @@ async function runLevInChat(bot,L,sc,text){
     S.lev={...L};const res=runSim(L),run=commit(L,res,label);if(sc){run.scId=sc.id;S.done.add(sc.id)}return {run,bad:run.st.k==='bl'&&!res.l.some(Boolean)};
   });
   const run=out.run,r=run.res,st=run.st;advance(4,bot);renderDemoChips();
-  if(S.tab==='whatif')renderWhatIf(true);if(S.tab==='dash')renderDash();
+  if(S.tab==='whatif')renderWhatIf(true);if(S.tab==='gap')renderGap();
   const note=sc&&sc.note&&sc.note.startsWith('Note:')?sc.note.slice(5).trim():'';
   if(st.k==='bl'){
     await say(bot,`<p><b class="k">A lever is blocked.</b> ${st.all.map(esc).join('; ')}.</p>${r.l.some(Boolean)?`<p>The remaining levers are still calculated: CCC ${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}, shortfall now ${mm(r.gap_epi)}.</p>`:'<p>I do not calculate figures for this combination.</p>'}${r.status4==='BLOCKED'?'<p>You can drop one of the two levers and try again.</p>':''}`,'warn');
@@ -748,7 +759,7 @@ function advance(n,bot){
   applyStage();
   if(S.panel){if(S.tab!==TASKS[S.task].tab)setTab(TASKS[S.task].tab);else renderTab()}
 }
-function resetFlow(){S.stage=0;S.cause=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';applyStage();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
+function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';applyStage();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
 function userFirst(){const n=(S.user&&S.user.name||'you').trim().split(/\s+/);return n[n.length-1]}
 
 
@@ -761,11 +772,23 @@ function closePanel(){
   S.panel=false;$('#work').classList.remove('panel-open');pWrap.inert=true;pWrap.setAttribute('aria-hidden','true');
   $('#panelBtn').classList.remove('on');$('#panelBtn').setAttribute('aria-pressed','false');syncViewNav();
 }
-function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?!$('#dataScreen').hidden:S.panel&&b.dataset.view===S.tab))}
+// Main-screen navigation uses an explicit S.view state:
+//   'chat' – the conversation (the detailed dashboard can open beside it on tab S.tab)
+//   'data' – the Company data screen (hides the whole chat workspace)
+// Every navigation item goes through showView(), so the target screen appears immediately, without a Back click.
+S.view='chat';
+function showView(view,{tab}={}){
+  if(view==='data'){openDataScreen('files');return}
+  if(!$('#dataScreen').hidden)closeDataScreen();
+  S.view='chat';
+  if(tab)setTab(tab);else syncViewNav();
+}
+function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?S.view==='data':S.view==='chat'&&S.panel&&b.dataset.view===S.tab))}
 function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr})[S.tab]()}
 function refreshTab(){if(S.panel)renderTab()}
 function setTab(id){
   if(id==='data'){openDataScreen('businesses');return}
+  if(!$('#dataScreen').hidden)closeDataScreen(); // the dashboard lives inside the chat workspace, so show it first
   if((id==='gap'&&S.stage<2)||(id==='whatif'&&S.stage<3))id='dash';
   S.tab=id;$$('.tab').forEach(t=>{const on=t.dataset.tab===id;t.classList.toggle('on',on);t.setAttribute('aria-selected',on)});
   $$('.tabpane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+id));
@@ -774,7 +797,11 @@ function setTab(id){
 }
 $('#panelClose').addEventListener('click',closePanel);
 $('#panelBtn').addEventListener('click',()=>S.panel?closePanel():setTab(S.tab&&S.tab!=='appr'?S.tab:TASKS[S.task].tab));
-$$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.view==='data')openDataScreen('files');else if(S.panel&&S.tab===b.dataset.view){closePanel()}else setTab(b.dataset.view);closeSide()}));
+$$('[data-view]').forEach(b=>b.addEventListener('click',()=>{const v=b.dataset.view;
+  if(v==='data')showView('data');
+  else if(S.view==='chat'&&S.panel&&S.tab===v)closePanel(); // clicking the open item again closes the panel
+  else showView('chat',{tab:v});
+  closeSide()}));
 
 
 function openSide(){$('#app').classList.add('side-open')}
@@ -830,7 +857,7 @@ function diagCardHTML(){
   return `<div class="liq-h"><div><h4>Working-capital diagnosis</h4><p>${S.firm} · ${esc(FIRMS[S.firm].short)} · as of ${fd(c.as_of)}${S.case==='s7'?' · assuming customers pay 7 days later':''}</p></div><span class="status amber"><i></i>simulated</span></div>
   <div class="liq-k">${kp('','DSO · collection',b.dso)}${kp('','DIO · storage',b.dio)}${kp('','DPO · supplier pay',b.dpo)}${kp('hl','CCC · cash cycle',b.ccc)}</div>
   <div class="liq-b"><div class="lb"><span>Receivables</span><b class="num">${money(c.ar)}</b></div><div class="lb"><span>Owned inventory</span><b class="num">${money(c.invv)}</b></div><div class="lb"><span>Payables</span><b class="num">${money(c.ap)}</b></div></div>
-  <div class="liq-note"><span>◎</span><div><b>Largest pocket: ${bigN}</b>, ${money(bigV)}. One day of ${arBig?'DSO':'DIO'} is about ${money(per)} of capital, not guaranteed cash.</div></div>
+  ${wNoteHTML()}<div class="liq-note"><span>◎</span><div><b>Largest pocket: ${bigN}</b>, ${money(bigV)}. One day of ${arBig?'DSO':'DIO'} is about ${money(per)} of capital, not guaranteed cash.</div></div>
   ${tb?`<div class="liq-note"><span>◷</span><div><b>Concentrated receivables</b>: ${esc(tb.k)} makes up ${nf(tb.v/tot*100,1)}% of open receivables (${money(tb.v)}).</div></div>`:''}
   ${oldest?`<div class="liq-note"><span>▤</span><div><b>Oldest owned lot</b>: ${esc(oldest.name)}, ${oldest.days} days, ${money(oldest.own)}.${slowest&&slowest!==oldest?` <b>Largest slow-moving value</b>: ${esc(slowest.name)}, ${money(slowest.own)}.`:''}</div></div>`:''}`;
 }
@@ -843,46 +870,74 @@ async function respondLiq(bot,{focus}={}){
   await say(bot,lead);
   const card=document.createElement('div');card.className='liq';card.innerHTML=diagCardHTML()+
     `<div class="liq-act"><button class="btn primary sm" type="button" data-a="dash">▦ View detailed dashboard</button></div>
-     <p class="liq-fn">CCC uses period-end balances, period ${c.N} days; goods held for subcontracting are excluded from owned inventory. The materiality threshold is an owner policy that is not set in the demo, so I do not label the bottleneck W0/W1/W2 yet. ${DISC}</p>`;
+     <p class="liq-fn">CCC uses period-end balances, period ${c.N} days; goods held for subcontracting are excluded from owned inventory. W is classified with the garment-industry thresholds (FiinTrade 2016–2025, tv1.threshold.v2) and the default 5% materiality level because no company policy is set, so the result is provisional. ${DISC}</p>`;
   bot.appendChild(card);scroll();
   $('[data-a=dash]',card).onclick=()=>setTab('dash');
     advance(1,bot);suggestRow(bot,nextSuggest());
 }
 const CAUSE_LBL={payroll:'payroll',tax:'tax',debt_service:'loan repayments',supplier_payment:'supplier payments',new_materials:'new materials',rent:'rent',utilities:'utilities',capex:'capex'};
-function causeOf(){
-  const c=C();if(!EP||EP.none)return null;
-  const a0=dn(c.as_of),pk=dn(EP.peakDay);
+function causeOf(ep=EP){
+  const c=C();if(!ep||ep.none)return null;
+  const a0=dn(c.as_of),pk=dn(ep.peakDay);
   const outs=c.ev.filter(e=>e[1]==='OUT'&&dn(e[5])>a0&&dn(e[5])<=pk),ins=c.ev.filter(e=>e[1]==='IN'&&dn(e[5])>a0&&dn(e[5])<=pk);
   const sumOut=outs.reduce((a,e)=>a+e[4],0),sumIn=ins.reduce((a,e)=>a+e[4],0),m={};
   outs.forEach(e=>m[e[2]]=(m[e[2]]||0)+e[4]);
   const by=Object.entries(m).sort((x,y)=>y[1]-x[1]).slice(0,3);
   const late=c.ev.filter(e=>e[1]==='IN'&&e[2]==='invoice_receipt'&&dn(e[5])>pk).sort((x,y)=>y[4]-x[4])[0];
-  return {open:EP.cashMin-sumIn+sumOut,sumIn,sumOut,by,late};
+  return {open:ep.cashMin-sumIn+sumOut,sumIn,sumOut,by,late};
 }
-async function respondCause(bot){
+// Cash bridge for every gap (or one gap when the question names it), shown as an accordion with the largest gap open.
+async function respondCause(bot,{focus}={}){
   const c=C();
   await toolCall(bot,'forecast_liquidity',1,{firm_id:S.firm,horizon_weeks:13},()=>{addLog({tool:'get_cash_forecast',tier:1,args:{firm_id:S.firm,horizon_weeks:13},status:'ok',summary:EPS.length?`${EPS.length} gaps; largest ${mm(Math.max(...EPS.map(e=>e.peak)))}`:'No shortfall in 13 weeks'});return {}},{ms:500});
   if(!EPS.length){
     await say(bot,`The lowest balance over 13 weeks is <b>${money(Math.min(...c.days.map(d=>d[1])))}</b>, always above the buffer ${money(c.buffer)}. There is no shortfall to explain, so there is nothing to match funding against.`);
     advance(2,bot);suggestRow(bot,nextSuggest());return;
   }
-  await say(bot,`<p>There are <b>${EPS.length} gap${EPS.length>1?'s':''}</b> below the buffer ${money(c.buffer)}:</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}</li>`).join('')}</ul>`);
-  await toolCall(bot,'explain_liquidity_case',0,{firm_id:S.firm,gap:EP.k},()=>{addLog({tool:'explain_liquidity_case',tier:0,args:{firm_id:S.firm,gap:EP.k},status:'ok',summary:`Cash bridge for gap ${EP.k}`});return {}},{ms:420});
-  const k=causeOf(),tb=openAR(c).top[0];
-  const drv=k.by.map(([t,v])=>`${CAUSE_LBL[t]||t} ${mm(v)}`);
-  const lateTxt=k.late?`${esc(k.late[3])} ${mm(k.late[4])} arrives only on ${fd(k.late[5])}, after the low point`:'';
-  const same=k.late&&tb&&k.late[3]===tb.k;
-  S.cause={txt:`${drv.slice(0,2).join(' and ')} fall before the low point${k.late?`, while ${lateTxt}`:''}`};
-  await say(bot,`<p>For <b>gap ${EP.k}</b> (the one under review), the balance reaches <b>${money(EP.cashMin)}</b> on ${fds(EP.peakDay)}, ${mm(EP.peak)} below the buffer. The cash bridge to that day:</p>`);
-  const card=document.createElement('div');card.className='liq';
-  card.innerHTML=`<div class="liq-h"><div><h4>Why gap ${EP.k} happens</h4><p>Bridge from the cut-off ${fd(c.as_of)} to ${fd(EP.peakDay)}</p></div><span class="status amber"><i></i>simulated</span></div>
-  <div class="liq-b"><div class="lb"><span>Opening cash</span><b class="num">${money(k.open)}</b></div><div class="lb"><span>+ Cash in</span><b class="num">${money(k.sumIn)}</b></div><div class="lb"><span>− Cash out</span><b class="num">${money(k.sumOut)}</b></div></div>
-  <div class="liq-note"><span>↧</span><div><b>Largest outflows before the low point</b><ul class="cause-list">${k.by.map(([t,v])=>`<li>${CAUSE_LBL[t]||t}: ${money(v)}</li>`).join('')}</ul></div></div>
-  ${k.late?`<div class="liq-note"><span>◷</span><div><b>Largest receipt after the low point</b>: ${lateTxt}.${same?` This is the same customer that holds ${nf(tb.v/openAR(c).tot*100,1)}% of receivables in the diagnosis.`:''} This is timing evidence, not proof that the customer caused the gap; the what-if step tests it.</div></div>`:''}
-  <div class="liq-act"><button class="btn primary sm" type="button">⚠ Open Shortfall tab</button></div>`;
-  bot.appendChild(card);scroll();
-  advance(2,bot);$('button',card).onclick=()=>setTab('gap');
+  const list=focus?EPS.filter(e=>e.k===focus):EPS,big=largestGap(),tb=openAR(c).top[0];
+  if(focus)await say(bot,`<p>Here is the cash bridge for <b>gap ${focus}</b> (${fds(list[0].start)}${list[0].start!==list[0].end?'–'+fds(list[0].end):''}, peak shortfall <b>${mm(list[0].peak)}</b>).</p>`);
+  else await say(bot,`<p>There are <b>${EPS.length} gap${EPS.length>1?'s':''}</b> below the buffer ${money(c.buffer)}:</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>Each card below explains one gap; the largest is open.</p>`);
+  await toolCall(bot,'explain_liquidity_case',0,{firm_id:S.firm,gaps:list.map(e=>e.k)},()=>{addLog({tool:'explain_liquidity_case',tier:0,args:{firm_id:S.firm,gaps:list.map(e=>e.k)},status:'ok',summary:`Cash bridge for gap${list.length>1?'s':''} ${list.map(e=>e.k).join(', ')}`});return {}},{ms:420});
+  S.causes=S.causes||{};
+  const wrap=document.createElement('div');wrap.className='gap-accs';
+  wrap.innerHTML=list.map(e=>{
+    const k=causeOf(e),drv=k.by.map(([t,v])=>`${CAUSE_LBL[t]||t} ${mm(v)}`);
+    const lateTxt=k.late?`${esc(k.late[3])} ${mm(k.late[4])} arrives only on ${fd(k.late[5])}, after the low point`:'';
+    const same=k.late&&tb&&k.late[3]===tb.k;
+    S.causes[e.k]={txt:`${drv.slice(0,2).join(' and ')} fall before the low point${k.late?`, while ${lateTxt}`:''}`};
+    return `<details class="liq gap-acc" data-gap="${e.k}" ${focus||e.k===big.k?'open':''}><summary><span class="ga-t">Why gap ${e.k} happens</span><span class="lv-tag"><i class="lv-sw lv-red" aria-hidden="true"></i>Red alert</span><span class="ga-s">${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''} · peak ${mm(e.peak)}${e.k===big.k?' · largest gap':''}</span></summary>
+    <div class="ga-b"><p class="ga-p">Bridge from the cut-off ${fd(c.as_of)} to the low point ${fd(e.peakDay)}: the balance reaches <b>${money(e.cashMin)}</b>, ${mm(e.peak)} below the buffer.</p>
+    <div class="liq-b"><div class="lb"><span>Opening cash</span><b class="num">${money(k.open)}</b></div><div class="lb"><span>+ Cash in</span><b class="num">${money(k.sumIn)}</b></div><div class="lb"><span>− Cash out</span><b class="num">${money(k.sumOut)}</b></div></div>
+    <div class="liq-note"><span>↧</span><div><b>Largest outflows before the low point</b><ul class="cause-list">${k.by.map(([t,v])=>`<li>${CAUSE_LBL[t]||t}: ${money(v)}</li>`).join('')}</ul></div></div>
+    ${k.late?`<div class="liq-note"><span>◷</span><div><b>Largest receipt after the low point</b>: ${lateTxt}.${same?` This is the same customer that holds ${nf(tb.v/openAR(c).tot*100,1)}% of receivables in the diagnosis.`:''} This is timing evidence, not proof that the customer caused the gap; the what-if step tests it.</div></div>`:''}
+    <div class="liq-act"><button class="btn primary sm" type="button" data-gap-open="${e.k}">⚠ Open gap ${e.k} in Shortfall</button></div></div></details>`}).join('');
+  S.cause=S.causes[focus||big.k];
+  bot.appendChild(wrap);scroll();
+  advance(2,bot);
+  $$('[data-gap-open]',wrap).forEach(b=>b.onclick=()=>{selectGap(+b.dataset.gapOpen);setTab('gap');renderDemoChips()});
   suggestRow(bot,nextSuggest());
+}
+// Financing for every gap (or one named gap): a summary table, then the top 3 per gap, collapsed.
+async function respondRank(bot,{focus}={}){
+  if(!EPS.length){await say(bot,'No shortfall, so there is nothing to match against the catalogue yet.');suggestRow(bot,nextSuggest());return}
+  const list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
+  await toolCall(bot,'rank_financing',1,{firm_id:S.firm,episodes:list.map(e=>e.k)},()=>{addLog({tool:'rank_financing',tier:1,args:{firm_id:S.firm,episodes:list.map(e=>e.k)},status:'ok',summary:res.map(({e,t3})=>`gap ${e.k}: ${t3.ranked[0]?t3.ranked[0].product_id:'none'}`).join('; ')});return {}},{ms:520});
+  const use=new Map();
+  res.forEach(({e,t3})=>t3.ranked.slice(0,3).forEach(x=>{if(x.invoice_id&&x.invoice_id!=='–'){if(!use.has(x.invoice_id))use.set(x.invoice_id,new Set());use.get(x.invoice_id).add(e.k)}}));
+  const dups=[...use].filter(([,g])=>g.size>1);
+  const cause=focus?(S.causes||{})[focus]:S.cause;
+  await say(bot,`${cause?`<p>Matching starts from the cause found in the last step${focus?` for gap ${focus}`:''}: ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
+  const rows=res.map(({e,t3})=>{const b=t3.ranked[0];return `<tr data-gap="${e.k}"><td><b>Gap ${e.k}</b></td><td class="num">${mm(e.peak)}</td><td class="num">${fd(e.start)}</td><td>${b?`<b>${b.product_id}</b>${b.invoice_id!=='–'?' · '+b.invoice_id:''}`:'—'}</td><td class="num">${b?nf(b.cost/1e6,2)+'M':'—'}</td><td>${!b?'—':b.gap_rem>0?`<span class="status amber">Partly · short ${mm(b.gap_rem)}</span>`:'<span class="status green">Yes</span>'}</td></tr>`}).join('');
+  const card=document.createElement('div');card.className='liq rank-all';
+  card.innerHTML=`<div class="liq-h"><div><h4>Financing summary</h4><p>Best option per gap · ${CAT.length} products in the synthetic catalogue</p></div><span class="status amber"><i></i>provisional</span></div>
+   <div class="table-wrap"><table class="dtable rank-sum"><thead><tr><th>Gap</th><th>Peak</th><th>Need date</th><th>Best option</th><th>Cost</th><th>Covered</th></tr></thead><tbody>${rows}</tbody></table></div>
+   ${dups.length?`<div class="liq-note"><span>⚠</span><div><b>The same invoice is proposed for more than one gap.</b> ${dups.map(([inv,g])=>`${inv} → gaps ${[...g].join(', ')}`).join('; ')}. An invoice can be financed only once: use it for one gap and take the next option for the others.</div></div>`:''}
+   <div class="gap-tops">${res.map(({e,t3})=>`<details class="gap-top" data-gap-top="${e.k}"><summary>Gap ${e.k} · top 3 options · short ${mm(e.peak)}</summary><ol>${t3.ranked.slice(0,3).map(x=>`<li><b>${x.product_id}</b> (${esc(CAT.find(z=>z.id===x.product_id).provider)})${x.invoice_id!=='–'?' · '+x.invoice_id:''}: receives ${mm(x.cash)}, cost ${nf(x.cost/1e6,2)}M (${nf(x.cpg*100,2)}% of the shortfall), ${x.gap_rem>0?'still short '+mm(x.gap_rem):'fully covered'}.</li>`).join('')}</ol>${t3.rejected.length?`<p class="rej">Rejected: ${t3.rejected.map(x=>x.product_id).join(', ')}</p>`:''}</details>`).join('')}</div>
+   <p class="liq-fn">${DISC}</p>
+   <div class="liq-act"><button class="btn sec sm" type="button" data-a="open">Open ranking</button></div>`;
+  bot.appendChild(card);scroll();
+  $('[data-a=open]',card).onclick=()=>setTab('gap');
+  advance(3,bot);suggestRow(bot,nextSuggest());
 }
 async function gateMsg(bot){
   const m={1:['Let’s start with the diagnosis. I want to know where your working capital is stuck before I look for the cause of any shortfall.'],2:['Funding is matched to a cause, not to a number. First let me find the cause of the shortfall.'],3:['Levers are built from the financing shortlist. First let me rank the options that fit the cause.']}[S.stage+1];
@@ -908,8 +963,16 @@ function welcome(task){
   h.innerHTML=`<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div>${accountFirm()?`<h1>Hi ${esc(userFirst())}. ${esc(T.hello(FIRMS[S.firm].short))}</h1>`:`<h1>Hi ${esc(userFirst())}. Let’s set up ${esc(S.user?.company||'your company')}.</h1><p class="hero-setup">Upload your company files to start the analysis.</p><button class="btn primary" type="button" data-setup-data>⇪ Upload company data</button>`}`;
   th.appendChild(h);syncChatEmpty();
 }
+// Suggestion chips above the composer: the flow step chips plus gap-specific chips, at most 4. Hidden only while busy.
+function chipList(){
+  const base=currentChips(),dyn=[];
+  if(S.stage>=1&&EPS.length&&!EP.none)dyn.push({id:'gx'+EP.k,ask:`Explain gap ${EP.k}`});
+  if(S.stage>=2&&EPS.length>1)dyn.push({id:'rall',ask:'Rank financing for all gaps'});
+  const ordered=[...base.filter(s=>!S.done.has(s.id)),...base.filter(s=>S.done.has(s.id))];
+  return [...ordered.slice(0,Math.max(0,4-dyn.length)),...dyn].slice(0,4);
+}
 function renderDemoChips(){
-  const box=$('#demoChips'),list=currentChips();box.hidden=!!(msgs&&msgs.querySelector('.msg.user'));
+  const box=$('#demoChips'),list=chipList();box.hidden=busy||!list.length;
   box.innerHTML=list.map((s,i)=>`<button type="button" class="${S.done.has(s.id)?'done':''}" data-i="${i}" title="${esc(s.ask)}"><span class="n">${S.done.has(s.id)?'✓':i+1}</span>${esc(s.ask.length>46?s.ask.slice(0,45)+'…':s.ask)}</button>`).join('');
   $$('button',box).forEach(b=>b.onclick=()=>sendChat(list[+b.dataset.i].ask));
 }
@@ -1285,8 +1348,8 @@ function detectedFileType(text){if(!text)return null;const rows=parseCSV(text);r
 let fileFilters={q:'',type:'all',sort:'newest'},selectedFiles=new Set();
 function loadFileFilters(){try{fileFilters={...fileFilters,...JSON.parse(localStorage.getItem(`lilact.files.filters.${S.user.id}`)||'{}')}}catch(e){}}
 function saveFileFilters(){try{localStorage.setItem(`lilact.files.filters.${S.user.id}`,JSON.stringify(fileFilters))}catch(e){}}
-function openDataScreen(tab='files'){$('#work').hidden=true;$('#dataScreen').hidden=false;$('#filesTab').classList.toggle('on',tab==='files');$('#filesTab').setAttribute('aria-selected',tab==='files');$('#businessesTab').classList.toggle('on',tab==='businesses');$('#businessesTab').setAttribute('aria-selected',tab==='businesses');$('#dataFiles').hidden=tab!=='files';$('#dataBusinesses').hidden=tab!=='businesses';syncViewNav();if(tab==='files')renderFiles();else renderData()}
-function closeDataScreen(){$('#dataScreen').hidden=true;$('#work').hidden=false;syncViewNav()}
+function openDataScreen(tab='files'){S.view='data';$('#work').hidden=true;$('#dataScreen').hidden=false;$('#filesTab').classList.toggle('on',tab==='files');$('#filesTab').setAttribute('aria-selected',tab==='files');$('#businessesTab').classList.toggle('on',tab==='businesses');$('#businessesTab').setAttribute('aria-selected',tab==='businesses');$('#dataFiles').hidden=tab!=='files';$('#dataBusinesses').hidden=tab!=='businesses';syncViewNav();if(tab==='files')renderFiles();else renderData()}
+function closeDataScreen(){S.view='chat';$('#dataScreen').hidden=true;$('#work').hidden=false;syncViewNav()}
 $('#dataBack').onclick=closeDataScreen;
 $('#filesTab').onclick=()=>openDataScreen('files');$('#businessesTab').onclick=()=>openDataScreen('businesses');
 $('#dataAddSources').onclick=()=>$('#dataFileInput').click();
@@ -1516,7 +1579,7 @@ const CATVN={invoice_receipt:'Customer collections',planned_inflow:'Planned infl
 const lblCat=k=>CATVN[k]||k;
 function weeklyModel(c){
   const A=dn(c.as_of),W=[];
-  for(let w=0;w<13;w++)W.push({w:w+1,start:A+1+7*w,end:A+7*(w+1),inn:0,out:0,bal:c.days[Math.min(7*(w+1),c.days.length)-1][1]});
+  for(let w=0;w<13;w++){const ds=c.days.slice(7*w,7*(w+1)),lo=ds.reduce((a,d)=>d[1]<a[1]?d:a,ds[0]);W.push({w:w+1,start:A+1+7*w,end:A+7*(w+1),inn:0,out:0,bal:c.days[Math.min(7*(w+1),c.days.length)-1][1],min:lo[1],minDay:lo[0]})}
   const rows=new Map();
   c.ev.forEach(e=>{const d=dn(e[5]);if(d<=A)return;const w=Math.floor((d-A-1)/7);if(w<0||w>12)return;
     const dir=e[1],k=dir+'|'+e[2];
@@ -1554,22 +1617,24 @@ function spk(vals,color){
   const pts=vals.map((v,i)=>X(i).toFixed(1)+','+Y(v).toFixed(1)).join(' ');
   return `<svg class="spk" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><polygon points="0,${H} ${pts} ${W},${H}" fill="${color}" opacity=".10"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
 }
-function flowChartSVG(c,M){
-  const {W}=M,buf=c.buffer,Wd=900,Hd=250,l=44,r=10,t=14,b=26,iw=Wd-l-r,ih=Hd-t-b;
+const gapWeeks=(M,ep)=>new Set(ep&&!ep.none?M.W.filter(x=>x.end>=dn(ep.start)&&x.start<=dn(ep.end)).map(x=>x.w):[]);
+function flowChartSVG(c,M,ep){
+  const {W}=M,buf=c.buffer,Wd=900,Hd=250,l=44,r=10,t=14,b=26,iw=Wd-l-r,ih=Hd-t-b,hw=gapWeeks(M,ep);
   const mn=Math.min(0,...W.map(x=>x.bal),buf),mx=Math.max(...W.flatMap(x=>[x.inn,x.out,x.bal]),buf)*1.08,rg=(mx-mn)||1;
   const Y=v=>t+(mx-v)*ih/rg,step=iw/13,bw=Math.min(22,step*.32);
   const tk=(()=>{const raw=rg/4,p=Math.pow(10,Math.floor(Math.log10(raw))),m=[1,2,2.5,5,10].find(x=>x*p>=raw)*p,o=[];for(let v=Math.ceil(mn/m)*m;v<=mx;v+=m)o.push(v);return o})();
   let s=`<svg viewBox="0 0 ${Wd} ${Hd}" role="img" aria-label="Cash in, out and week-end balance over 13 weeks">`;
+  W.forEach((x,i)=>{if(hw.has(x.w))s+=`<rect class="gapwk" x="${(l+step*i+1).toFixed(1)}" y="${t}" width="${(step-2).toFixed(1)}" height="${ih}" rx="4"/>`});
   tk.forEach(v=>{s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--lc-color-border-default)"/><text x="${l-6}" y="${Y(v)+3.5}" text-anchor="end" class="ax">${nf(Math.round(v/1e6)||0,0)}</text>`});
   s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="var(--lc-color-status-error)" stroke-dasharray="5 4" stroke-width="1.2"/><text x="${Wd-r}" y="${Y(buf)-4}" text-anchor="end" class="ax" fill="var(--lc-color-status-error)">Buffer ${nf(buf/1e6,0)}</text>`;
-  W.forEach((x,i)=>{const cx=l+step*(i+.5);
-    s+=`<g class="wk" data-w="${x.w}" data-tt="${esc(`<b>Week ${x.w} · ${fds(isoOf(x.start))}–${fds(isoOf(x.end))}</b><i style='background:var(--lc-color-status-success)'></i>In ${mm(x.inn)}<br><i style='background:var(--lc-color-status-error)'></i>Out ${mm(x.out)}<br><i style='background:${x.bal<buf?'var(--lc-color-status-error)':'var(--lc-color-data-cash)'}'></i>Week-end balance ${mm(x.bal)}${x.bal<buf?'<br>Below buffer':''}`)}"><rect class="wkhit" x="${l+step*i}" y="${t}" width="${step}" height="${ih}"/>
+  W.forEach((x,i)=>{const cx=l+step*(i+.5),lv=alertLevel(x.bal,buf),ml=alertLevel(x.min,buf);
+    s+=`<g class="wk" data-w="${x.w}" data-tt="${esc(`<b>Week ${x.w} · ${fds(isoOf(x.start))}–${fds(isoOf(x.end))}</b><i style='background:var(--lc-color-status-success)'></i>In ${mm(x.inn)}<br><i style='background:var(--lc-color-status-error)'></i>Out ${mm(x.out)}<br><i style='background:${LV[lv].color}'></i>Week-end balance ${mm(x.bal)} · ${LV[lv].label}<br><i style='background:${LV[ml].color}'></i>Lowest in week ${mm(x.min)} on ${fds(x.minDay)} · ${LV[ml].label}${hw.has(x.w)?`<br>Part of gap ${ep.k}`:''}`)}"><rect class="wkhit" x="${l+step*i}" y="${t}" width="${step}" height="${ih}"/>
     <rect class="bx" style="--bi:${i}" x="${cx-bw-1}" y="${Y(x.inn)}" width="${bw}" height="${Math.max(0,Y(0)-Y(x.inn))}" rx="3" fill="var(--lc-color-status-success-bg)" stroke="var(--lc-color-status-success)"/>
     <rect class="bx" style="--bi:${i}" x="${cx+1}" y="${Y(x.out)}" width="${bw}" height="${Math.max(0,Y(0)-Y(x.out))}" rx="3" fill="var(--lc-color-status-error-bg)" stroke="var(--lc-color-status-error)"/></g>
-    <text x="${cx}" y="${Hd-9}" text-anchor="middle" class="ax">T${x.w}</text>`});
+    <text x="${cx}" y="${Hd-9}" text-anchor="middle" class="ax${hw.has(x.w)?' gapax':''}">W${x.w}</text>`});
   const pts=W.map((x,i)=>[l+step*(i+.5),Y(x.bal)]);
   s+=`<polyline points="${pts.map(p=>p.map(v=>v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="var(--lc-color-data-cash)" stroke-width="2.2"/>`;
-  W.forEach((x,i)=>{s+=`<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="3.6" fill="${x.bal<buf?'var(--lc-color-status-error)':'var(--lc-color-data-cash)'}" stroke="var(--lc-color-bg-surface)" stroke-width="1.5"/>`});
+  W.forEach((x,i)=>{s+=`<circle class="lvdot" data-lv="${alertLevel(x.bal,buf)}" cx="${pts[i][0]}" cy="${pts[i][1]}" r="4.6" fill="${LV[alertLevel(x.bal,buf)].color}" stroke="var(--lc-color-bg-surface)" stroke-width="1.5"/>`});
   return s+'</svg>';
 }
 function agingSVG(A){
@@ -1581,19 +1646,22 @@ function agingSVG(A){
     s+=`<g class="ag" data-tt="${esc(`<b>${lb}</b><i style='background:var(--lc-color-data-receivables)'></i>Receivables ${mm(A.ar[i])}<br><i style='background:var(--lc-color-data-payables)'></i>Payables ${mm(A.ap[i])}`)}"><rect class="bx" style="--bi:${i}" x="${cx-bw-1}" y="${Y(A.ar[i])}" width="${bw}" height="${Y(0)-Y(A.ar[i])}" rx="2" fill="${i===0?'var(--lc-color-status-error)':'var(--lc-color-data-receivables)'}"/><rect class="bx" style="--bi:${i}" x="${cx+1}" y="${Y(A.ap[i])}" width="${bw}" height="${Y(0)-Y(A.ap[i])}" rx="2" fill="var(--lc-color-data-payables)"/><rect class="wkhit" x="${cx-step/2}" y="${t}" width="${step}" height="${ih}"/></g><text x="${cx}" y="${Hd-16}" text-anchor="middle" class="ax">${lb}</text>`});
   return s+`<text x="${(l+Wd-r)/2}" y="${Hd-2}" text-anchor="middle" class="ax" font-weight="700">Due in (days)</text></svg>`;
 }
-function flowTableHTML(c,M){
-  const {W,groups}=M,buf=c.buffer,cell=(v,cls='',w)=>`<td class="num ${cls}"${w?` data-w="${w}"`:''}>${v?nf(v/1e6,1):'–'}</td>`;
-  const head=`<thead><tr><th class="sticky">VND million</th>${W.map(x=>`<th data-w="${x.w}" class="${x.bal<buf?'low':''}"><span>T${x.w}</span><small>${fds(isoOf(x.start))}</small></th>`).join('')}<th>Total</th></tr></thead>`;
+function flowTableHTML(c,M,ep){
+  const {W,groups}=M,buf=c.buffer,hw=gapWeeks(M,ep),gw=w=>w&&hw.has(w)?' gapwk':'';
+  const cell=(v,cls='',w)=>`<td class="num ${cls}${gw(w)}"${w?` data-w="${w}"`:''}>${v?nf(v/1e6,1):'–'}</td>`;
+  const head=`<thead><tr><th class="sticky">VND million</th>${W.map(x=>{const lv=alertLevel(x.bal,buf);return `<th data-w="${x.w}" data-lv="${lv}" class="lv-${lv}${gw(x.w)}" title="Week-end level: ${LV[lv].label}"><span><i class="lv-sw lv-${lv}" aria-hidden="true"></i>W${x.w}</span><small>${fds(isoOf(x.start))}</small></th>`}).join('')}<th>Total</th></tr></thead>`;
   const sec=(dir,title)=>{
     const gs=groups.filter(g=>g.dir===dir),tot=W.map(x=>dir==='IN'?x.inn:x.out),sum=tot.reduce((a,v)=>a+v,0);
-    let h=`<tr class="grp ${dir}"><th class="sticky"><button type="button" class="tg" data-tg="${dir}" aria-expanded="true">▾ ${title}</button></th>${tot.map((v,i)=>cell(v,W[i].bal<buf?'low':'',i+1)).join('')}${cell(sum)}</tr>`;
-    gs.forEach((g,gi)=>{h+=`<tr class="cat ${dir}" data-par="${dir}"><th class="sticky">${g.kids.length?`<button type="button" class="tg sub" data-tg="${dir}${gi}" aria-expanded="false">▸ ${lblCat(g.cat)}</button>`:lblCat(g.cat)}</th>${g.wk.map((v,i)=>cell(v,W[i].bal<buf?'low':'',i+1)).join('')}${cell(g.tot)}</tr>`;
+    let h=`<tr class="grp ${dir}"><th class="sticky"><button type="button" class="tg" data-tg="${dir}" aria-expanded="true">▾ ${title}</button></th>${tot.map((v,i)=>cell(v,'',i+1)).join('')}${cell(sum)}</tr>`;
+    gs.forEach((g,gi)=>{h+=`<tr class="cat ${dir}" data-par="${dir}"><th class="sticky">${g.kids.length?`<button type="button" class="tg sub" data-tg="${dir}${gi}" aria-expanded="false">▸ ${lblCat(g.cat)}</button>`:lblCat(g.cat)}</th>${g.wk.map((v,i)=>cell(v,'',i+1)).join('')}${cell(g.tot)}</tr>`;
       g.kids.forEach(k=>{h+=`<tr class="kid" data-par="${dir}" data-gp="${dir}${gi}" hidden><th class="sticky">${esc(k.name)}</th>${k.wk.map((v,i)=>cell(v,'',i+1)).join('')}${cell(k.tot)}</tr>`})});
     return h};
-  const net=W.map(x=>x.inn-x.out),endb=W.map(x=>x.bal);
+  const net=W.map(x=>x.inn-x.out);
+  const lvCell=(v,lv,w,extra='',tip='')=>`<td class="num lvc lv-${lv}${gw(w)}" data-w="${w}" data-lv="${lv}" title="${tip||LV[lv].label}">${v<0?'−':''}${nf(Math.abs(v)/1e6,1)}${extra}</td>`;
   const body=`<tbody>${sec('IN','Cash in')}${sec('OUT','Cash out')}
-   <tr class="grp net"><th class="sticky">Net cash flow</th>${net.map(v=>`<td class="num ${v<0?'neg':'pos'}">${v<0?'−':''}${nf(Math.abs(v)/1e6,1)}</td>`).join('')}<td class="num">${nf(net.reduce((a,v)=>a+v,0)/1e6,1)}</td></tr>
-   <tr class="grp end"><th class="sticky">Week-end balance</th>${endb.map(v=>`<td class="num ${v<buf?'low neg':''}">${v<0?'−':''}${nf(Math.abs(v)/1e6,1)}</td>`).join('')}<td></td></tr></tbody>`;
+   <tr class="grp net"><th class="sticky">Net cash flow</th>${net.map((v,i)=>`<td class="num ${v<0?'neg':'pos'}${gw(i+1)}" data-w="${i+1}">${v<0?'−':''}${nf(Math.abs(v)/1e6,1)}</td>`).join('')}<td class="num">${nf(net.reduce((a,v)=>a+v,0)/1e6,1)}</td></tr>
+   <tr class="grp end"><th class="sticky">Week-end balance</th>${W.map(x=>{const lv=alertLevel(x.bal,buf);return lvCell(x.bal,lv,x.w,'',`Week-end · ${LV[lv].label}`)}).join('')}<td></td></tr>
+   <tr class="grp lowwk"><th class="sticky">Lowest in week <small>worst day</small></th>${W.map(x=>{const lv=alertLevel(x.min,buf);return lvCell(x.min,lv,x.w,`<small>${fds(x.minDay)}</small>`,`${fd(x.minDay)} · ${LV[lv].label}`)}).join('')}<td></td></tr></tbody>`;
   return `<div class="ftw"><table class="ft">${head}${body}</table></div>`;
 }
 function exportFlowCSV(c,M){
@@ -1602,55 +1670,166 @@ function exportFlowCSV(c,M){
   add('Cash in',M.W.map(x=>x.inn));M.groups.filter(g=>g.dir==='IN').forEach(g=>add('  '+lblCat(g.cat),g.wk));
   add('Cash out',M.W.map(x=>x.out));M.groups.filter(g=>g.dir==='OUT').forEach(g=>add('  '+lblCat(g.cat),g.wk));
   rows.push(['Week-end balance',...M.W.map(x=>Math.round(x.bal)),'']);
+  rows.push(['Lowest in week (worst day)',...M.W.map(x=>Math.round(x.min)),'']);
   dlFile(`${S.firm}_cash_flow_13_weeks.csv`,csvOf(hdr,rows));
 }
+/* ===== SRS v1.3 · W axis (UC01), cash state TH (UC02) and the M1–M9 matrix =====
+   A deterministic engine on the selected company's snapshot, always using the Base case.
+   Values missing from the data use the SRS demo assumptions and are always labelled "provisional". */
+const LIQ={
+  model:{F01:'FOB',F02:'FOB',F03:'FOB'},  // business model; when undeclared → FOB (demo assumption)
+  thr:{ // tv1.threshold.v2 (Table 2-28): [watch P75, severe P90]
+    FOB:{dso:[56.7,72.8],dio:[98.4,142.4],dpoLow:13.2,bufThin:.053},
+    CMT:{dso:[35.8,46.0],dio:[9.5,13.7],dpoLow:2.6,bufThin:.161}},
+  materiality:.05,            // wc.materiality_share
+  rhoWatch:.5,                // ar.invoice.overdue_watch_rho
+  termDays:30,                // invoice term when the data has none (demo assumption)
+  rminRatio:.5,rupperRatio:2, // tv2.rmin_default_ratio / tv2.rupper_default_ratio
+  th03Days:14,                // tv2.th03.min_consecutive_days
+  nearRatio:.9                // bn.near_threshold_ratio
+};
+const ITEM_EN={AR:'Receivables',INV:'Inventory',AP:'Payables'};
+const W_EN={W0:'W0 – No signs yet',W1:'W1 – Watch',W2:'W2 – Material bottleneck',unknown:'Not enough data'};
+const TH_EN={TH01:'TH01 – Cash shortfall',TH02:'TH02 – Balanced',TH03:'TH03 – Cash surplus',unknown:'Not determined'};
+const BN_EN={BN0:'No bottleneck',BN1:'Receivables',BN2:'Inventory',BN3:'Payables',BN4:'Receivables + Inventory',BN5:'Receivables + Payables',BN6:'Inventory + Payables',BN7:'All three items',unknown:'Not determined'};
+const MATRIX={W0:{TH01:'M1',TH02:'M2',TH03:'M3'},W1:{TH01:'M4',TH02:'M5',TH03:'M6'},W2:{TH01:'M7',TH02:'M8',TH03:'M9'}};
+const M_EN={M1:'Short from timing mismatch',M2:'Balanced, no bottleneck',M3:'Surplus, no bottleneck',M4:'Short, signs to check',M5:'Balanced, signs to watch',M6:'Surplus, signs to watch',M7:'Short and materially blocked',M8:'Enough cash, capital tied up',M9:'Surplus and materially blocked'};
+const baseCase=()=>DATA.cases[S.firm+'|base']||C();
+// Opening available cash (Cash0): from the data when present, otherwise derived from the first day-end balance.
+function openingCash(c){
+  if(c.cash0!=null)return c.cash0;
+  const d1=dn(c.days[0][0]),net=c.ev.filter(e=>dn(e[5])===d1).reduce((a,e)=>a+(e[1]==='IN'?e[4]:-e[4]),0);
+  return c.days[0][1]-net;
+}
+// W axis and bottleneck pattern BN0–BN7 (sections 2.7.8, 2.7.11). Does not use forecast balances (the two axes are independent).
+function classifyW(c){
+  const model=LIQ.model[c.firm]||'FOB',T=LIQ.thr[model],N=c.N;
+  if(!(c.rev>0)||!(c.cogs>0)||c.ar==null||c.invv==null||c.ap==null)return {w:'unknown',bn:'unknown',items:[],cause:[],main:null,mar:0,share:0,model};
+  const dso=c.ar/c.rev*N,dio=c.invv/c.cogs*N,dpo=c.ap/c.cogs*N,cash0=Math.max(0,openingCash(c));
+  const tsnh=cash0+c.ar+c.invv; // no current-asset figure: use cash + receivables + inventory (section 2.7.8 b)
+  const lvl=(v,[w,s])=>v>s?2:v>w?1:0;
+  const aAR=lvl(dso,T.dso),aggAR=aAR?(dso-T.dso[0])*c.rev/N:0;
+  const odAR=c.sales.filter(s=>s[4]===1&&typeof s[5]==='number'&&s[5]/LIQ.termDays>LIQ.rhoWatch).reduce((a,s)=>a+s[2],0); // R-AR-OD
+  const aINV=lvl(dio,T.dio),aggINV=aINV?(dio-T.dio[0])*c.cogs/N:0;
+  const slowINV=c.inv.filter(x=>x.own>0&&x.slow===1).reduce((a,x)=>a+x.own,0); // R-INV-SLOW, owned goods only
+  const ap1=dpo<T.dpoLow&&cash0/(c.rev*365/N)<T.bufThin; // R-AP-1
+  const item=(k,agg,aLvl,detail,val,watch)=>{const has=aLvl>0||detail>0,E=has?Math.max(agg,detail):0;
+    return {k,c:!has?0:(aLvl===2||E/tsnh>=LIQ.materiality?2:1),E,shape:!has?'':aLvl&&detail?'HL':aLvl?'H':'L',val,watch,headroom:watch-val,near:!has&&val>=LIQ.nearRatio*watch}};
+  const items=[item('AR',aggAR,aAR,odAR,dso,T.dso[0]),item('INV',aggINV,aINV,slowINV,dio,T.dio[0]),{k:'AP',c:ap1?1:0,E:0,shape:ap1?'H':'',val:dpo,watch:T.dpoLow,headroom:null,near:false}];
+  const order=['AR','INV','AP'],cause=items.filter(i=>i.c>=1).sort((a,b)=>b.c-a.c||b.E-a.E||order.indexOf(a.k)-order.indexOf(b.k));
+  const has=k=>cause.some(i=>i.k===k);
+  const bn=!cause.length?'BN0':cause.length===3?'BN7':has('AR')&&has('INV')?'BN4':has('AR')&&has('AP')?'BN5':has('INV')&&has('AP')?'BN6':has('AR')?'BN1':has('INV')?'BN2':'BN3';
+  return {w:cause.some(i=>i.c===2)?'W2':cause.length?'W1':'W0',bn,items,cause,main:cause[0]?cause[0].k:null,
+    mar:cause.length?items[0].E+items[1].E:0,share:Math.max(...items.map(i=>i.E))/tsnh,model};
+}
+// Cash state TH (section 2.8.12), required Cash0 (Table 2-86) and SafeCash for the surplus branch (section 2.9.5.7).
+function computeTH(c){
+  const Rt=c.buffer;if(!(Rt>0)||!c.days||!c.days.length)return {th:'unknown'};
+  const Rmin=Rt*LIQ.rminRatio,Rup=Rt*LIQ.rupperRatio,op=openingCash(c),D=c.days,lvls=[];
+  let minC=Infinity,minD=null,firstBelow=null,firstNeg=null,minCum=0,run=0,best={len:0,end:-1};
+  D.forEach(([d,v],i)=>{
+    if(v<minC){minC=v;minD=d}
+    if(v<Rt&&!firstBelow)firstBelow=d;
+    if(v<0&&!firstNeg)firstNeg=d;
+    minCum=Math.min(minCum,v-op);
+    lvls.push(alertLevel(v,Rt,Rmin));
+    run=v>Rup?run+1:0;if(run>best.len)best={len:run,end:i}});
+  const th=firstBelow?'TH01':best.len>=LIQ.th03Days?'TH03':'TH02';
+  const level=worstLevel(lvls); // overall level = highest daily level in the Base case
+  const out={th,Rt,Rmin,Rup,op,minC,minD,firstBelow,firstNeg,peakGap:Math.max(0,Rt-minC),need:Math.max(0,Rt-Math.min(0,minCum)),run:best.len,level,shown:th==='TH03'?'blue':level};
+  if(th==='TH03'){const i0=best.end-best.len+1,scen=[c,DATA.cases[c.firm+'|s7']].filter(Boolean),gap=x=>x.days.slice(i0,best.end+1).map(([,v])=>v-Rt);
+    out.safe=Math.max(0,Math.min(...scen.flatMap(gap)));   // SafeCash under the most adverse scenario (SRS 2.9.5.7)
+    out.safeBase=Math.max(0,Math.min(...gap(c)));          // reference: Base case only
+    out.window=[D[i0][0],D[best.end][0]];out.scenN=scen.length}
+  return out;
+}
+function wNoteHTML(){
+  const W=classifyW(baseCase());
+  if(W.w==='unknown')return `<div class="liq-note"><span>W</span><div><b>W axis: not enough data</b> to classify; no matrix cell is assigned.</div></div>`;
+  return `<div class="liq-note ${W.w==='W0'?'ok':W.w==='W2'?'red':''}"><span>W</span><div><b>${W_EN[W.w]}</b> · bottleneck pattern ${W.bn} (${BN_EN[W.bn]})${W.main?` · main bottleneck: ${ITEM_EN[W.main]}`:''}${W.mar?` · capital above threshold ${money(W.mar)}, materiality ${pct(W.share)}`:''}. Provisional result.</div></div>`;
+}
+// Liquidity-state card at the top of the dashboard: rendered by cash state TH01 / TH02 / TH03 combined with the W axis.
+function liquidityStateHTML(){
+  const c=baseCase(),W=classifyW(c),T=computeTH(c),cell=W.w!=='unknown'&&T.th!=='unknown'?MATRIX[W.w][T.th]:null;
+  const main=W.main?ITEM_EN[W.main]:'',tile=(lb,v,sub,cls='')=>`<div class="ls-tile ${cls}"><span>${lb}</span><b class="num">${v}</b><small>${sub}</small></div>`;
+  const marTile=W.mar>0?tile('Capital tied up above threshold',money(W.mar),`money_at_risk · ${main||'—'} · ${pct(W.share)} of current assets`,'hl'):tile('Capital tied up above threshold','0',`No item above its threshold (${W.bn})`);
+  const grid=`<div class="ls-matrix" role="img" aria-label="Nine-case matrix, current cell ${cell||'not routed'}"><span></span><span class="h">TH01</span><span class="h">TH02</span><span class="h">TH03</span>${['W0','W1','W2'].map(w=>`<span class="h">${w}</span>${['TH01','TH02','TH03'].map(t=>`<span class="${MATRIX[w][t]===cell?'on':''}" title="${MATRIX[w][t]} · ${M_EN[MATRIX[w][t]]}">${MATRIX[w][t]}</span>`).join('')}`).join('')}</div>`;
+  const chips=`<div class="ls-chips">${T.shown?`<span class="lv-pill lv-${T.shown}" data-lv="${T.shown}"><i class="lv-sw lv-${T.shown}" aria-hidden="true"></i>${T.shown==='blue'?'Blue · cash surplus':`Highest alert: ${LV[T.shown].label}`}</span>`:''}<span class="ls-w ${W.w}">${W_EN[W.w]}</span><span class="ls-chip">${TH_EN[T.th]}</span><span class="ls-chip">Pattern ${W.bn} · ${BN_EN[W.bn]}</span>${cell?`<span class="ls-chip strong">Cell ${cell} · ${M_EN[cell]}</span>`:'<span class="ls-chip">Not routed</span>'}</div>`;
+  let cls='unknown',icon='?',title='Liquidity state could not be routed',badge='',lead='',tiles='',body='',acts='';
+  if(T.th==='TH01'){
+    cls='th01 '+T.level;icon='⚠';title='Liquidity Shortfall Alert';badge=`Highest alert level: ${LV[T.level].label}`;
+    lead=`In the Base case, the balance falls below the target level ${money(T.Rt)} from ${fd(T.firstBelow)}; lowest ${money(T.minC)} on ${fd(T.minD)}.`;
+    tiles=tile('Peak shortfall',money(T.peakGap),`Vs Rtarget ${money(T.Rt)} · on ${fd(T.minD)}`)
+      +tile('First negative-cash date',T.firstNeg?fd(T.firstNeg):'No negative cash',`Below target from ${fd(T.firstBelow)}`)
+      +tile('Required Cash0',money(T.need),`Current ${money(T.op)} · additional ${money(Math.max(0,T.need-T.op))}`)+marTile;
+    body={M1:'Short because of a timing mismatch in collections and payments: no item is above its threshold, so cover the short-term gap on the date cash is needed; no tied-up capital needs releasing.',
+      M4:`Short of cash with signs to check in ${main}: cover the short-term gap and review the flagged items at the same time.`,
+      M7:`Top priority: release capital tied up in ${main} (collections, inventory) alongside a funding source that arrives in time.`}[cell]||'';
+    acts=`<button class="btn primary" type="button" data-liq="fund">Find financing to cover the gap →</button>`;
+  }else if(T.th==='TH02'){
+    cls='th02';icon='✓';title='Balanced Liquidity – Stable Operations';
+    badge={M2:'Optimal state',M5:'Balanced, signs to watch',M8:'Cash Balanced but Capital Tied Up'}[cell]||'Balanced';
+    lead=`In the Base case, the balance stays at or above the target level ${money(T.Rt)} and never stays above the ceiling ${money(T.Rup)} for 14 consecutive days.`;
+    tiles=tile('Lowest balance',money(T.minC),`On ${fd(T.minD)}`)+tile('Headroom over target',money(T.minC-T.Rt),`Rtarget ${money(T.Rt)}`)+tile('Rupper ceiling',money(T.Rup),'Cash above this level is idle')+(cell==='M2'?'':marTile);
+    body={M2:'The business keeps a safe cash buffer and no working-capital bottleneck was found.',
+      M5:`Short-term liquidity is secure; there are signs to watch in ${main}, but they are below the materiality level. No funding needed yet.`,
+      M8:`Short-term liquidity is secure, but a large amount of capital is tied up in ${main} (${vnd(W.mar)}). Improve collections and inventory turnover to prevent longer-term risk.`}[cell]||'';
+  }else if(T.th==='TH03'){
+    cls='th03';icon='◆';title='Safe Liquidity Surplus';badge='Reference (run-off)';
+    lead=`The balance stays above the Rupper ceiling ${money(T.Rup)} for ${T.run} consecutive days (required ≥ ${LIQ.th03Days} days), from ${fd(T.window[0])} to ${fd(T.window[1])}. Run-off mode excludes new revenue and costs, so this surplus is for reference.`;
+    tiles=tile('Safe idle cash (SafeCash)',money(T.safe),`Lowest in the surplus window, minus Rtarget, across ${T.scenN===2?'the Base and 7-day-late scenarios':'the Base scenario'}`,'hl')
+      +tile('Lowest balance in period',money(T.minC),`On ${fd(T.minD)}`)+tile('Rupper ceiling',money(T.Rup),`= ${nf(LIQ.rupperRatio,0)} × Rtarget ${money(T.Rt)}`)+(W.mar>0?marTile:'');
+    body=(cell==='M9'?'':cell==='M6'?`Check the signs in ${main} before using surplus cash. `:'Idle cash can be put to disciplined use. ')
+      +(T.safe>0?'':`SafeCash is 0 because the adverse scenario takes the balance below Rtarget inside the surplus window (Base case alone: ${money(T.safeBase)}); there is no safe idle cash to use yet.`);
+    acts=`${cell==='M9'?`<div class="callout red ls-warn"><span>⚠</span><div><b>Resolve the working-capital bottleneck before using idle cash.</b> ${money(W.mar)} is tied up in ${main}; do not borrow more.</div></div>`:''}
+      <div class="ls-opts"><div class="ls-opts-h">Options for idle cash <span class="ls-chip">Phase 2 · UC03</span></div>
+      <div class="ls-opt"><b>D1</b><div><strong>Prepay high-interest short-term loans</strong><small>Lowers financing cost; only when the net benefit is positive and the Base balance stays ≥ Rtarget after paying.</small></div></div>
+      <div class="ls-opt"><b>D2</b><div><strong>Pay suppliers early for a discount</strong><small>Annualised rate APR = d ÷ (1 − d) × 365 ÷ Δ; e.g. 2% for paying 30 days early ≈ ${nf(.02/.98*365/30*100,1)}% a year.</small></div></div>
+      <div class="ls-opt"><b>D3</b><div><strong>Short-term deposit</strong><small>Only the SafeCash amount, maturing at least 2 days before the next large payment; never the Rmin reserve.</small></div></div></div>`;
+  }else{
+    lead=W.w==='unknown'?'Core data is missing to classify the W axis (revenue, COGS, receivables, inventory or payables).':'Rtarget or the cash-flow sources are missing, so the cash state cannot be determined.';
+  }
+  const foot=`Rtarget = the company's minimum buffer ${money(T.Rt||0)}; Rmin = ${nf(LIQ.rminRatio*100,0)}% and Rupper = ${nf(LIQ.rupperRatio*100,0)}% of Rtarget (demo assumption, SRS 2.8.10.2). The W axis uses garment-industry thresholds for the ${W.model||'FOB'} model (tv1.threshold.v2), an assumed ${LIQ.termDays}-day invoice term, and current assets ≈ cash + receivables + inventory. TH is determined from the Base case.${S.case==='s7'?' The chart below shows the 7-day-late scenario; it does not change the Base matrix cell.':''} Provisional result.`;
+  return `<section class="lstate ${cls}" data-wid="state" aria-label="Liquidity state">
+    <header class="ls-head"><span class="ls-ic" aria-hidden="true">${icon}</span><div class="ls-tt"><h2>${title}</h2>${badge?`<span class="ls-badge">${badge}</span>`:''}</div>${grid}</header>
+    ${chips}<p class="ls-lead">${lead}</p>${tiles?`<div class="ls-tiles">${tiles}</div>`:''}${body?`<p class="ls-msg">${body}</p>`:''}${acts?`<div class="ls-acts">${acts}</div>`:''}
+    ${T.th!=='unknown'?alertLegendHTML({surplus:true}):''}<p class="ls-foot">${foot}</p></section>`;
+}
+// "Find financing" (UC03): solutions only open after diagnosis → cause → ranking, so Copilot runs the next step in the chat.
+function goFinancing(){
+  if(S.stage>=3){setTab('gap');return}
+  const list=currentChips(),next=list.find(x=>!S.done.has(x.id))||list[0];
+  if(innerWidth<900)closePanel();
+  toast('Copilot goes step by step: diagnosis → cause of the shortfall → financing ranking.',2800);
+  if(next)sendChat(next.ask);
+}
 function renderDash(){
-  renderDashOld();
   const c=C(),p=$('#pane-dash'),M=weeklyModel(c),AG=agingModel(c);
   const dso=c.ar/c.rev*c.N,dio=c.invv/c.cogs*c.N,dpo=c.ap/c.cogs*c.N,ccc=dso+dio-dpo;
-  const old=p.querySelector('.kpis');old&&old.remove();
   const own=isUserFirm(S.firm),f=own?dstore.load().firms[S.firm]:null,snap=f&&activeSnap(f);
-  const sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
-  const cash0=c.cash0!=null?c.cash0:(c.days[0][1]);
   const slow=c.inv.filter(x=>x.slow&&x.own>0).reduce((a,x)=>a+x.own,0);
   const kc=(t,v,sub,sp,col,ic,cls='',wid='')=>`<div class="card kc ${cls}" data-wid="${wid}" style="--kc:${col}"><div class="ki" aria-hidden="true">${ic}</div><div class="kv num">${v}</div><div class="kt">${t}</div><div class="ks">${sub}</div>${sp||''}</div>`;
   const wkSeries=cat=>M.W.map((_,i)=>M.groups.filter(g=>g.cat===cat).reduce((a,g)=>a+g.wk[i],0));
-  const low=minB<c.buffer;
-  const sec=(n,col,h,pp,inner)=>`<section class="dsec" style="--sc:${col};--i:${n-1}"><header class="dsh"><span class="dsn">${n}</span><div><h2>${h}</h2><p>${pp}</p></div></header>${inner}</section>`;
-  const html=`
+  // The 13-week forecast, daily balance and gaps live in the Shortfall tab.
+  p.innerHTML=`
   <div class="dsrc ${own?'own':''}">${own?`<span><b>${esc(f.name)}</b> · your uploaded data · version ${snap.id} · as of ${fd(snap.asOf)} · estimated figures</span><span class="dsa"><button class="btn primary sm" data-go="upd">Update data</button><button class="btn sec sm" data-go="hist">Version history</button></span>`
    :`<span>Viewing <b>sample data ${S.firm}</b>. Want to analyse your own business?</span><span class="dsa"><button class="btn primary sm" data-go="new">⇪ Upload data</button></span>`}</div>
-  ${sec(1,'var(--lc-color-data-receivables)','Working capital overview','What is tying up and holding your business’s cash',`<div class="kcs">
+  ${liquidityStateHTML()}
+  ${dashSec(1,'var(--lc-color-data-receivables)','Working capital overview','What is tying up and holding your business’s cash',`<div class="kcs">
    ${kc('Open receivables',money(c.ar),`${c.sales.filter(s=>s[4]===1).length} invoices`,spk(wkSeries('invoice_receipt'),'var(--lc-color-data-receivables)'),'var(--lc-color-data-receivables)','↘','','ar')}
    ${kc('Open payables',money(c.ap),`${c.pur.filter(s=>s[3]===1).length||'–'} purchase invoices`,spk(wkSeries('supplier_payment'),'var(--lc-color-status-error)'),'var(--lc-color-status-error)','↗','','ap')}
    ${kc('Owned inventory',money(c.inv.reduce((a,x)=>a+x.own,0)),slow?`Aged stock ${money(slow)}`:'No aged stock','','var(--lc-color-data-inventory)','▦','','inv')}
-   ${kc('Lowest balance in 13 weeks',money(minB),low?`Below buffer from week ${M.W.find(x=>x.bal<c.buffer).w}`:`Always ≥ buffer ${money(c.buffer)}`,'',low?'var(--lc-color-status-error)':'var(--lc-color-status-success)',low?'⚠':'✓',low?'bad':'good','min')}
   </div>`)}
-  ${sec(2,'var(--lc-color-data-cash)','Cash conversion cycle','DSO, DIO, DPO and how due amounts spread over time',`<div class="dmid">
+  ${dashSec(2,'var(--lc-color-data-cash)','Cash conversion cycle','DSO, DIO, DPO and how due amounts spread over time',`<div class="dmid">
    <div class="gauges">${gauge(dso,90,'var(--lc-color-data-receivables)','days','DSO','Days to collect = Receivables ÷ Revenue × 90')}${gauge(dio,90,'var(--lc-color-data-inventory)','days','DIO','Days in stock = Owned inventory ÷ COGS × 90')}${gauge(dpo,90,'var(--lc-color-data-payables)','days','DPO','Days to pay suppliers = Payables ÷ COGS × 90')}${gauge(ccc,120,'var(--lc-color-data-cash)','days','CCC','CCC = DSO + DIO − DPO')}</div>
    <div class="card agc" data-wid="aging"><div class="card-head"><div><h3>Receivables and payables by due bucket</h3><p>VND million · from the cut-off date</p></div></div><div class="chartbox">${agingSVG(AG)}</div>
     <div class="legend"><span><i style="background:var(--lc-color-data-receivables)"></i>Receivables</span><span><i style="background:var(--lc-color-status-error)"></i>Overdue receivables</span><span><i style="background:var(--lc-color-data-payables)"></i>Payables</span></div></div>
   </div>`)}
-  ${sec(3,'var(--lc-color-data-cash)','13-week cash forecast','Cash in, cash out and week-end balance vs buffer',`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${S.case==='s7'?'Assuming customers pay 7 days later · ':''}VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}</p></div><button class="btn sec sm" data-csv="1" id="flowCsv" type="button">⤓ CSV</button></div>
-   <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(cash0)}</b><small>Cash at cut-off</small></div>
-    <div class="fst"><b class="num pos">+${money(sumIn)}</b><small>Expected cash in</small><b class="num neg" style="margin-top:8px">−${money(sumOut)}</b><small>Expected cash out</small></div>
-    <div class="fst"><b class="num ${minB<c.buffer?'neg':''}">${money(minB)}</b><small>Lowest, week ${minW.w}</small></div></div>
-    <div class="chartbox fch">${flowChartSVG(c,M)}</div></div>
-   <div class="legend"><span><i style="background:var(--lc-color-status-success-bg);border:1px solid var(--lc-color-status-success)"></i>Cash in</span><span><i style="background:var(--lc-color-status-error-bg);border:1px solid var(--lc-color-status-error)"></i>Cash out</span><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Week-end balance</span><span><i class="ds"></i>Buffer ${money(c.buffer)}</span><span><i style="background:var(--lc-color-status-error-bg)"></i>Weeks below buffer</span></div>
-   ${flowTableHTML(c,M)}</div>`)}`;
-  p.insertAdjacentHTML('afterbegin',html);
-  const chart=p.querySelector(':scope > .card.hov');
-  if(chart){chart.dataset.wid='daily';const h=chart.querySelector('h3');h&&(h.textContent='Daily cash balance and what-if scenarios');
-    const z=document.createElement('section');z.className='dsec';z.style.cssText='--sc:var(--lc-color-alert-orange-mark);--i:3';
-    z.innerHTML='<header class="dsh"><span class="dsn">4</span><div><h2>Risk and what-if scenarios</h2><p>Cash gaps, Copilot’s assessment and the latest simulation result</p></div></header>';
-    const nodes=[];let n=chart;while(n&&!n.classList.contains('foot-note')){nodes.push(n);n=n.nextElementSibling}
-    chart.before(z);nodes.forEach(x=>z.appendChild(x))}
+  <div class="foot-note">CCC uses period-end balances, ${c.N}-day period; goods held for subcontracting are excluded from owned inventory. Cash-flow projections, the daily balance and the cash gaps are in the Shortfall tab. Synthetic data.</div>`;
   $$('.gv b[data-v]',p).forEach(e=>animNum(e,+e.dataset.v,v=>nf(v,1),1000));
-  $$('[data-csv]',p).forEach(b=>b.onclick=()=>exportFlowCSV(c,M));
-  window._csvCtx=()=>exportFlowCSV(c,M);
   $$('[data-go]',p).forEach(b=>b.onclick=()=>{const g=b.dataset.go;if(g==='new')startImport(null);else if(g==='upd')startImport(S.firm);else{DW.view='hist';DW.firmId=S.firm;openDataScreen('businesses')}});
+  $$('[data-liq="fund"]',p).forEach(b=>b.onclick=goFinancing);
   decorateWidgets(p);
-  if(S.stage<2){const m=$('[data-wid="min"]',p);m&&(m.style.display='none');$$('.dsec',p).forEach(z=>{const h=(z.querySelector('h2')||{}).textContent||'';if(/13-week cash forecast|Risk and what-if/.test(h))z.style.display='none'})}
 }
 
 document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('.tg');if(!b)return;
@@ -1722,7 +1901,7 @@ function savePins(){try{localStorage.setItem(pinKey(),JSON.stringify(PINS))}catc
 const toggleIn=(arr,v)=>{const i=arr.indexOf(v);if(i>=0){arr.splice(i,1);return false}arr.push(v);return true};
 const PIN_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></svg>';
 const FS_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
-const WNAME={ar:'Open receivables',ap:'Open payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance'};
+const WNAME={ar:'Open receivables',ap:'Open payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance',state:'Liquidity state'};
 
 function renderPins(){
   const box=$('#pinBox'),list=$('#pinList');if(!box)return;
@@ -1793,7 +1972,7 @@ function closeFS(){if(!fsEl)return;const o=fsEl;fsEl=null;o.classList.remove('on
 
 function setWide(on){
   $('#work').classList.toggle('wide',on);$('#app').classList.toggle('fs-mode',on);
-  const b=$('#panelWide');b.setAttribute('aria-pressed',on);b.querySelector('span').textContent=on?'Exit full screen':'Full screen';setTimeout(placeInk,500);
+  const b=$('#panelWide');b.setAttribute('aria-pressed',on);b.querySelector('span').textContent=on?'Exit full screen':'Full screen';setTimeout(()=>{placeInk();redrawCharts()},500);
 }
 $('#panelWide').addEventListener('click',()=>setWide(!$('#work').classList.contains('wide')));
 function setSide(open,persist=true){
@@ -1820,10 +1999,12 @@ function chatsWrite(){try{chats.sort((a,b)=>b.updatedAt-a.updatedAt);chats=chats
 function chatHasMessages(){return !!msgs?.querySelector('.msg.user')}
 function chatSave(){if(!S.user||!activeChat||!msgs)return;const c=chats.find(x=>x.id===activeChat);if(!c)return;Object.assign(c,{firmId:accountFirm(),case:S.case,updatedAt:Date.now(),stage:S.stage,cause:S.cause,done:[...S.done],html:threadHTML()});chatsWrite();chatRender()}
 function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});msgs=THREADS.tv1;resetFlow();welcome('tv1');activeChat='c'+Date.now().toString(36);chats.unshift({id:activeChat,title:'New chat',firmId:accountFirm(),case:S.case,createdAt:Date.now(),updatedAt:Date.now(),stage:S.stage,cause:null,done:[],html:threadHTML()});chatsWrite();$('#taskTitle').textContent='New chat';chatRender();renderDemoChips()}
-function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button><button class="chat-more" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>chatRestore(b.closest('.chat-row').dataset.id));box.querySelectorAll('.chat-more').forEach(b=>b.onclick=e=>{e.stopPropagation();openChatMenu(b,chats.find(x=>x.id===b.closest('.chat-row').dataset.id))})}
+function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button><button class="chat-more" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>{showView('chat');chatRestore(b.closest('.chat-row').dataset.id);closeSide()});box.querySelectorAll('.chat-more').forEach(b=>b.onclick=e=>{e.stopPropagation();openChatMenu(b,chats.find(x=>x.id===b.closest('.chat-row').dataset.id))})}
 function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;if(c.firmId&&FIRMS[c.firmId])switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.rcact button,.liq-act button,.suggest button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});applyStage();$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
 function chatLoad(){chats=chatsRead();chatRender();if(chats.length)chatRestore(chats[0].id);else chatNew()}
-$('#newChat').onclick=chatNew;$('#newChatSide').onclick=chatNew;
+// New chat goes straight back to the conversation from any screen (Company data, Approval queue…).
+function startNewChat(){showView('chat');closePanel();chatNew();closeSide();const ci=$('#chatInput');if(!ci.disabled)ci.focus({preventScroll:true})}
+$('#newChat').onclick=startNewChat;$('#newChatSide').onclick=startNewChat;
 $('#taskTitle').ondblclick=()=>{const h=$('#taskTitle'),v=h.textContent,i=document.createElement('input');i.value=v;i.className='chat-title-input';h.replaceChildren(i);i.focus();i.select();i.onkeydown=e=>{if(e.key==='Enter'){const c=chats.find(x=>x.id===activeChat);if(c){c.title=i.value.slice(0,48)||'New chat';chatsWrite();chatRender()}h.textContent=c?.title||'New chat'}if(e.key==='Escape')h.textContent=v};i.onblur=()=>{if(i.isConnected)h.textContent=v}};
 document.addEventListener('change',e=>{if(e.target.id==='firmSel'&&chatHasMessages())chatSave()},true);
 uploadComposerFiles=async function(){if(!pendingChatFiles.length)return;leaveChatEmpty();await uploadComposerAuto();chatSave()};
@@ -1962,7 +2143,7 @@ function openChatMenu(btn,c){
   m.style.left=Math.max(8,Math.min(r.right-w,innerWidth-w-8))+'px';
   m.style.top=(r.bottom+4+h>innerHeight-8?r.top-h-4:r.bottom+4)+'px';
   m.querySelector('[data-chat-act="rename"]').onclick=()=>{closeChatMenu();renameChatDialog(c)};
-  m.querySelector('[data-chat-act="delete"]').onclick=()=>{closeChatMenu();confirmAction('Delete this chat?','This conversation will be removed from this browser.',()=>{chats=chats.filter(x=>x!==c);if(activeChat===c.id)chatNew();else{chatsWrite();chatRender()}closeModal()})};
+  m.querySelector('[data-chat-act="delete"]').onclick=e=>{e.stopPropagation();closeChatMenu();confirmAction('Delete this chat?','This conversation will be removed from this browser.',()=>deleteChat(c.id),{okLabel:'Delete'})};
   m.querySelector('button').focus({preventScroll:true});
 }
 function renameChatDialog(c){
@@ -1971,6 +2152,22 @@ function renameChatDialog(c){
     n.querySelector('#chatCancelName').onclick=closeModal;
     n.querySelector('#renameChatForm').onsubmit=e=>{e.preventDefault();c.title=input.value.trim().slice(0,48)||'New chat';chatsWrite();chatRender();if(activeChat===c.id)$('#taskTitle').textContent=c.title;closeModal()};
   });
+}
+// Shared confirmation dialog (delete chat, log out, clear data, delete account).
+// It was called before but never defined, so Delete chat threw a ReferenceError and nothing was deleted.
+function confirmAction(title,msg,onOk,{okLabel='Confirm',danger=true}={}){
+  openModal(`<h3>${esc(title)}</h3><p>${esc(msg)}</p><div class="acts"><button type="button" class="btn sec" id="cfNo">Cancel</button><button type="button" class="btn ${danger?'danger':'primary'}" id="cfYes">${esc(okLabel)}</button></div>`,m=>{
+    $('#cfNo',m).onclick=closeModal;
+    $('#cfYes',m).onclick=async()=>{closeModal();await onOk()};
+  });
+}
+// Delete one chat. If it is the open chat, switch to the most recent remaining chat, or start a new one if none is left.
+function deleteChat(id){
+  const wasActive=activeChat===id;
+  chats=chats.filter(x=>x.id!==id);
+  if(wasActive){activeChat=null;chatsWrite();if(chats.length)chatRestore(chats[0].id);else chatNew()}
+  else{chatsWrite();chatRender()}
+  toast('Chat deleted');
 }
 document.addEventListener('click',e=>{if(!e.target.closest('.chat-menu'))closeChatMenu()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.querySelector('.chat-menu')){const b=document.querySelector('.chat-more[aria-expanded="true"]');closeChatMenu();b&&b.focus()}});

@@ -22,6 +22,17 @@
 - **Data:** the synthetic data (`DATA`) and the scenario presets (`SC`).
 - **Language:** English UI text.
 
+## Navigation, formatting and SRS v1.3 states
+- Numbers use the Vietnamese convention `1.234.567,89`, money is shown in `M`/`bn`, dates in `dd/mm/yyyy`; the shared helpers are in `js/formatters.js` (loaded before `js/app.js`).
+- Navigation uses an explicit `S.view` (`chat` / `data`) through `showView()`, so New chat, Approval queue and chat history switch screens directly.
+- The dashboard opens with a liquidity-state banner (SRS v1.3: W axis, TH01/TH02/TH03, M1–M9). It always uses the Base case; Rmin = 50% and Rupper = 200% of Rtarget, the FOB thresholds and a 30-day invoice term are demo assumptions, so the result is labelled provisional.
+
+## Every gap, chips and alert colours
+- Cause and ranking cover every gap, not only `c.defk`. `tv3For(ep)` wraps `rankFor` with a cache per firm|case|gap; the default gap reuses `c.tv3`. `simulate`, `episodes`, `rankFor` and `data.js` are unchanged.
+- "Explain gap N" / "Rank financing for gap N" (`/gap\s*(\d+)/i`) select that gap first. Suggestion chips stay above the input (max 4) and are hidden only while a reply is running.
+- The 13-week forecast and the daily balance moved from the dashboard to the Shortfall tab (forecast → daily chart → gap cards → ranking). Clicking a gap highlights its weeks and shows its ranking.
+- Colours follow SRS 2.8.11.3 through `alertLevel(cashEnd, Rt, Rmin = 0.5·Rt)`: red below 0, below Rmin or gap > 50%; orange 20–50%; yellow 0–20%; green otherwise; blue for TH03 surplus. Gap cards are always red. Week cells use the week-end balance, while "lowest in week" uses the worst day.
+
 ## Changed for the Lilact identity
 - **Logo and name:** the "✦ SME Finance Copilot" brand mark is replaced by the Lilact logo (light/dark variants) with the descriptor "SME Liquidity Copilot". The chat avatar and welcome mark now use the Lilact symbol. The page title and favicon are Lilact's.
 - **Colours:**

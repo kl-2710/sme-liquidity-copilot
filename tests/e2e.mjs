@@ -194,19 +194,26 @@ for (const theme of ["light", "dark"]) {
   await step(`[${theme}] Task 1 diagnosis shows DSO/DIO/DPO/CCC`, async () => {
     await ask("Where is my working capital stuck?");
     const t = await last().innerText();
-    assert.match(t, /diagnose_working_capital/); assert.match(t, /69\.0/);
+    assert.match(t, /diagnose_working_capital/); assert.match(t, /69[.,]0/);
   });
-  await step(`[${theme}] Task 2 forecast explains the shortfall`, async () => {
+  await step(`[${theme}] Task 2 explains every gap; chips stay visible after the 2nd message`, async () => {
     await ask("Why am I short of cash? Show me the cause.");
-    assert.equal(await page.locator('.tab[data-tab="dash"]').getAttribute("aria-selected"), "true");
-    await page.locator("#panelBtn").click();
+    const acc = last().locator(".gap-acc");
+    assert.equal(await acc.count(), 5, "one 'Why gap N happens' card per gap");
+    assert.deepEqual(await acc.evaluateAll((els) => els.filter((e) => e.open).map((e) => e.dataset.gap)), ["5"], "largest gap open");
+    assert.equal(await page.locator("#demoChips").isVisible(), true);
+    const chips = await page.locator("#demoChips button").count();
+    assert.ok(chips > 0 && chips <= 4, `chips: ${chips}`);
   });
-  await step(`[${theme}] Task 3 ranks financing options`, async () => {
+  await step(`[${theme}] Task 3 ranks financing for every gap`, async () => {
     await ask("Rank the financing options that fit this cause.");
+    assert.equal(await last().locator(".rank-sum tbody tr").count(), 5);
+    assert.deepEqual(await last().locator('[data-gap-top="3"] li b').allTextContents(), ["INV-001", "CL-001", "RF-001"]);
+    assert.equal(await page.locator("#demoChips").isVisible(), true);
   });
   await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
     await ask("K1 will only pay 7 days early. What if we combine that with financing invoice S-F01-0070 via RF-001?");
-    assert.match(await last().innerText(), /3\.87/);
+    assert.match(await last().innerText(), /3[.,]87/);
     await last().locator("button", { hasText: "Create draft" }).click();
     await page.waitForTimeout(1800);
     assert.ok(Number(await page.locator("#pendN").innerText()) > 0);
@@ -227,11 +234,58 @@ for (const theme of ["light", "dark"]) {
     await page.fill("#rjTxt", "Cost too high"); await page.click("#mOk"); await page.waitForTimeout(1500);
     assert.match(await page.locator("#pane-appr").innerText(), /Rejected/);
   });
+  await step(`[${theme}] "Explain gap N" selects that gap; unknown gaps are reported`, async () => {
+    await ask("Explain gap 2");
+    assert.equal(await last().locator(".gap-acc").count(), 1);
+    assert.equal(await page.evaluate(() => EP.k), 2);
+    await ask("Rank financing for gap 4");
+    assert.equal(await last().locator(".rank-sum tbody tr").count(), 1);
+    assert.equal(await page.evaluate(() => EP.k), 4);
+    await ask("Explain gap 9");
+    assert.match(await last().innerText(), /There is no gap 9/);
+  });
   await step(`[${theme}] dashboard tabs render`, async () => {
     for (const t of ["dash", "gap", "whatif"]) {
       await page.click(`.tab[data-tab=${t}]`); await page.waitForTimeout(500);
       assert.ok((await page.locator(`#pane-${t}`).innerText()).length > 40, t);
     }
+  });
+  await step(`[${theme}] dashboard has no forecast; Shortfall holds forecast, daily chart, gaps and ranking`, async () => {
+    await page.click(".tab[data-tab=dash]"); await page.waitForTimeout(500);
+    assert.equal(await page.locator('#pane-dash :is([data-wid="flow"], [data-wid="daily"], .fch, #gapChart, #dashChart)').count(), 0);
+    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /13-week cash forecast/);
+    assert.match(await page.locator("#pane-dash .lstate .lv-pill").innerText(), /Highest alert: Red/);
+    await page.click(".tab[data-tab=gap]"); await page.waitForTimeout(700);
+    const h2 = await page.locator("#pane-gap .dsec h2").allInnerTexts();
+    assert.deepEqual(h2.slice(0, 3), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
+    assert.match(h2[3], /^Financing ranking/);
+    const cards = page.locator("#pane-gap .ep");
+    assert.equal(await cards.count(), 5);
+    for (const t of await cards.allInnerTexts()) assert.match(t, /Red alert/);
+    assert.doesNotMatch(await page.locator("#pane-gap").innerText(), /Target gap|No TV3 result/);
+    assert.equal(await page.locator("#pane-gap #gapChart .gapband").count(), 5);
+    await page.click('#pane-gap .ep[data-ep="3"]'); await page.waitForTimeout(600);
+    assert.deepEqual(await page.locator("#pane-gap .ft thead th.gapwk").evaluateAll((els) => els.map((e) => e.dataset.w)), ["4", "5"]);
+    assert.equal(await page.locator("#pane-gap table:not(.ft) tbody tr td:nth-child(2) b").first().innerText(), "INV-001");
+    await shot(page, `${theme}-shortfall`);
+  });
+  await step(`[${theme}] alert colours follow SRS 2.8.11.3 boundaries`, async () => {
+    const lv = await page.evaluate(() => [400e6, 399999999, 250e6, 249999999, 500e6, -1].map((c) => alertLevel(c, 500e6)));
+    assert.deepEqual(lv, ["yellow", "orange", "orange", "red", "green", "red"], "gr=20% yellow, 50%/Rmin orange, below Rmin red");
+    const weeksOk = await page.evaluate(() => { const c = C(), M = weeklyModel(c);
+      const th = [...document.querySelectorAll("#pane-gap .ft thead th[data-w]")], lo = [...document.querySelectorAll("#pane-gap .ft tr.lowwk td[data-w]")];
+      return th.length === 13 && th.every((t, i) => t.dataset.lv === alertLevel(M.W[i].bal, c.buffer))
+        && lo.every((t, i) => t.dataset.lv === alertLevel(Math.min(...c.days.slice(7 * i, 7 * i + 7).map((d) => d[1])), c.buffer)); });
+    assert.ok(weeksOk, "week cells use the week-end balance; lowest-in-week uses the worst day");
+  });
+  await step(`[${theme}] F02/F03 base render without errors`, async () => {
+    for (const fm of ["F02", "F03"]) {
+      await page.evaluate((f) => { switchContext(f, "base", { silent: true }); advance(3); setTab("dash"); }, fm); await page.waitForTimeout(500);
+      assert.match(await page.locator("#pane-dash .lv-pill").innerText(), /Blue/);
+      await page.evaluate(() => setTab("gap")); await page.waitForTimeout(500);
+      assert.match(await page.locator("#pane-gap").innerText(), /No cash shortfall/);
+    }
+    await page.evaluate(() => switchContext("F01", defCase("F01"), { silent: true }));
   });
   await step(`[${theme}] Company data opens separately and returns to the same conversation`, async () => {
     const chatBefore = await page.locator(".messages.on").innerText();
