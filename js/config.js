@@ -5,10 +5,13 @@
 const CFG={
   versions:{formula:'uc0102.formulas.v1.3',threshold:'tv1.threshold.v2',config:'cfg.defaults.v1'},
   // UC01 aggregate thresholds by business model (Table 2-28). DSO/DIO: reference P50, watch P75, severe P90.
+  // Full precision of the workbook v9 sheet Nguong (rows 5-22); rounding them would move E_AR / E_INV by millions.
   wc:{
     thr:{
-      CMT:{dso:{ref:26.3,watch:35.8,severe:46.0},dio:{ref:7.1,watch:9.5,severe:13.7},dpo:{low:2.6,high:11.9},bufThin:.161},
-      FOB:{dso:{ref:41.6,watch:56.7,severe:72.8},dio:{ref:74.2,watch:98.4,severe:142.4},dpo:{low:13.2,high:59.7},bufThin:.053}
+      CMT:{dso:{ref:26.27016744,watch:35.8290068554972,severe:45.9584059232531},dio:{ref:7.1334971105,watch:9.46889728525,severe:13.7015882191},
+        dpo:{low:2.63718419871133,high:11.9014270205264},bufThin:.161181709909933},
+      FOB:{dso:{ref:41.58923909,watch:56.7221787175074,severe:72.7583916814747},dio:{ref:74.16105886,watch:98.4402794356076,severe:142.444059996393},
+        dpo:{low:13.2386325202917,high:59.7450185196815},bufThin:.0531758804480545}
     },
     materiality:.05,            // wc.materiality_share (owner_policy default)
     factorSize:1,factorSeason:1,
@@ -26,7 +29,7 @@ const CFG={
   size:{micro:3e9,small:50e9,medium:200e9},
   // UC02 reserve reference (Table 2-85): cash buffer percentiles × business-model factor, share of 12-month revenue.
   liq:{
-    reference:{CMT:{rmin:.161,rtarget:.311,rupper:.578},FOB:{rmin:.0532,rtarget:.1026,rupper:.1908}},
+    reference:{CMT:{rmin:.1611817099099339,rtarget:.311013635392693,rupper:.5782255225792152},FOB:{rmin:.0532,rtarget:.1026,rupper:.1908}}, // CMT: Nguong rows 53-55
     rminDefaultRatio:.5,rupperDefaultRatio:2,criticalDays:{rmin:[15,20],rtarget:[30,45]}
   },
   tv2:{horizonWeeks:13,delay:{lookbackDays:180,minN:5,defaultLate:7,conditionalMinN:3},

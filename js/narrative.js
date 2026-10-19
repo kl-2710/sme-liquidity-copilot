@@ -76,7 +76,7 @@ const NARR=(()=>{
   /* ---------- Controls (E5 / EC-6) ---------- */
   const plain=html=>String(html).replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim();
   // Numeric tokens not glued to letters (codes such as W2, BN7, P75, M7, TH01, F-AR-1 are not quantities).
-  const NUM=/(?<![\p{L}\d\-_.,])[−-]?\d[\d.]*(?:,\d+)?(?:\s?(?:%|M|bn|days?)(?![\p{L}\d]))?/gu;
+  const NUM=/(?<![\p{L}\d\-_.,])[−-]?\d[\d.]*(?:,\d+)?(?:\s?(?:%|M|B|days?)(?![\p{L}\d]))?/gu;
   const DATE=/\b\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4}\b/g;
   // opts.foreign: names that belong to other companies or runs; none of them may appear in the answer.
   function verifyAnswer(ans,opts={}){

@@ -209,7 +209,21 @@ addStrings('en',{
 addStrings('en',{
   'hero.hi':'Hi {n}.','hero.tv1':'How is {s}’s liquidity today?','na.ccc':'CCC of {f} is {ccc} days = DSO {dso} + DIO {dio} − DPO {dpo}.',
   'cat.invoice_receipt':'Customer collections','cat.planned_inflow':'Planned inflows','cat.supplier_payment':'Supplier payments','cat.planned_outflow':'Planned outflows','cat.payroll':'Payroll and allowances',
-  'cat.rent':'Rent','cat.utilities':'Utilities','cat.new_materials':'New raw-material purchases','cat.tax':'Tax','cat.debt_service':'Loan repayments','cat.capex':'Equipment investment','cat.new_sales':'New sales (assumed)'
+  'cat.rent':'Rent','cat.utilities':'Utilities','cat.new_materials':'New raw-material purchases','cat.tax':'Tax','cat.debt_service':'Loan repayments','cat.capex':'Equipment investment','cat.new_sales':'New sales (assumed)','cat.new_cost':'Variable cost of new sales (assumed)',
+  'uc03.title':'Funding plan for the shortfall','uc03.sub':'{n} options from the financing table, ranked by the workbook rules',
+  'uc03.lead':'One funding plan covers the whole shortfall: the round, the options that fit it in ranked order and the package that covers it.',
+  'uc03.round':'Cash needed from {d} ({l} days from the cut-off): {g} for {n} days; the shortfall {s}.','uc03.review':'It needs a manual review.',
+  'uc03.factors':'Contributing factors, for reference (not added up):','uc03.f.AR':'receivables','uc03.f.INV':'inventory','uc03.f.AP':'overdue payables',
+  'uc03.pkg':'Proposed package: {p}. It covers {c} at a cost of {cost} ({cpg} of the gap).','uc03.rem':'Still short {x}.',
+  'uc03.nc':'holds {h} days, shorter than the {d}-day shortfall: extend it or add a source','uc03.in':'In package','uc03.excl':'Excluded:',
+  'uc03.human':'The package needs a decision by an authorised person (manual review, early collection or supplier terms). Copilot only proposes.',
+  'u4.what':'receipts moved {ar}, supplier payments moved {ap}, stock sale brings in {sale} net.',
+  'u4.cash':'Lowest balance {m0} → {m1} (on {d}); days below the safe level {g0} → {g1}; days below zero {n0} → {n1}.',
+  'u4.cost':'Cash cost {c} (early-payment discount {disc}, extension fee {fee}, sale cost {sale}); book value not recovered {book}.',
+  'u4.worse':'{w} days get worse and {n} new shortfall days appear.','u4.tail':'{x} of payments move past the 13-week horizon.',
+  'u4.c.partial_improvement':'Partial improvement: the shortfall remains.','u4.c.no_improvement':'No improvement.','u4.c.no_shortfall':'No shortfall left in the simulated period.',
+  'u4.c.some_days_worse':'Some days get worse.','u4.c.not_enough_to_assess':'Not enough to assess: obligations move past the horizon.',
+  'u4.limit':'This is a simulation on the data as of {d}; it does not confirm that the customer pays, the supplier agrees or the stock sells.'
 });
 
 addStrings('en',{'m.M1':'Short from a timing mismatch','m.M2':'Balanced, no bottleneck yet','m.M3':'Surplus, no bottleneck yet','m.M4':'Short, signs to check','m.M5':'Balanced, signs to watch',

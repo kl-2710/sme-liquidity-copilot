@@ -81,8 +81,8 @@ const ENGINE=(()=>{
     };
     const sales=input.tables.sales?input.sales.map(r=>inv(r,'sale')).filter(Boolean):null;
     const purchases=input.tables.purchases?input.purchases.map(r=>inv(r,'purchase')).filter(Boolean):null;
-    const essential=new Set((input.firm.essential_suppliers||[]).map(normName));
-    if(purchases)purchases.forEach(p=>{if(p.essential!=='yes'&&p.essential!=='no')p.essential=essential.has(normName(p.supplier))?'yes':'unknown'});
+    const essential=new Set((input.firm.essential_suppliers||[]).map(normName)),notEssential=new Set((input.firm.non_essential_suppliers||[]).map(normName));
+    if(purchases)purchases.forEach(p=>{if(p.essential!=='yes'&&p.essential!=='no')p.essential=essential.has(normName(p.supplier))?'yes':notEssential.has(normName(p.supplier))?'no':'unknown'});
     const lots=input.tables.inventory?input.inventory.map(x=>{
       const age=x.days==null?null:x.days-shift;if(age!=null&&age<0)return null;  // lot not yet in stock at an earlier cut-off
       const declaredType=x.type&&/^(NVL|BTP|TP|HH|HGC)$/i.test(x.type)?x.type.toUpperCase():null;
@@ -108,7 +108,7 @@ const ENGINE=(()=>{
   function inputFromRaw(raw,loadedAt){
     return {firm:raw.firm,snapshot_id:raw.snapshot.id,as_of:raw.snapshot.as_of,source:{type:'sample',id:raw.snapshot.source,at:loadedAt},
       fin:raw.fin,config:raw.config,tables:{sales:true,purchases:true,inventory:true,planned:true},
-      sales:raw.sales.map(([id,customer,amount,issue,due,paid])=>({id,customer,amount,issue,due,paid,paid_amount:null,tax_code:null})),
+      sales:raw.sales.map(([id,customer,amount,issue,due,paid,confirmed])=>({id,customer,amount,issue,due,paid,paid_amount:null,tax_code:null,confirmed_date:confirmed||null})),
       purchases:raw.purchases.map(([id,supplier,amount,issue,due,paid,disc_pct,disc_days])=>({id,supplier,amount,issue,due,paid,paid_amount:null,disc_pct,disc_days,tax_code:null,essential:null})),
       inventory:raw.inventory.map(([name,type,qty,unit_cost,days,owner,cancelled,pledged])=>({name,type,qty,unit_cost,days,owner,cancelled,pledged})),
       planned:raw.planned.map(([id,date,direction,category,amount,certainty,source_id])=>({id,date,week:null,direction,category,amount,certainty,source_id}))};
@@ -174,8 +174,11 @@ const ENGINE=(()=>{
   // slow lots (R-INV-SLOW) split by cancelled status (confirmed or proposed by the name); (7) is the unassigned remainder of E_INV.
   function decompose({E_AR,E_INV,arFlagged,slowLots}){
     const p=[0,0,0,0,0,0,0,0];
-    arFlagged.forEach(x=>{p[x.tier>=4?1:x.tier<=2?2:3]+=x.amount});
-    slowLots.forEach(x=>{p[x.cancelled?6:5]+=x.amount});
+    // DECISION (workbook v9): E_AR / E_INV are the threshold excesses (T1-87/88); flagged invoices and slow lots are details that can
+    // exceed them, so their sources are scaled pro rata to fit inside E (the parts still add up to MoneyAtRisk).
+    const fAR=sum(arFlagged,x=>x.amount),fINV=sum(slowLots,x=>x.amount),kAR=fAR>E_AR&&fAR>0?E_AR/fAR:1,kINV=fINV>E_INV&&fINV>0?E_INV/fINV:1;
+    arFlagged.forEach(x=>{p[x.tier>=4?1:x.tier<=2?2:3]+=x.amount*kAR});
+    slowLots.forEach(x=>{p[x.cancelled?6:5]+=x.amount*kINV});
     p[4]=E_AR-(p[1]+p[2]+p[3]);p[7]=E_INV-(p[5]+p[6]);
     const parts=[1,2,3,4,5,6,7].map(i=>({source:i,amount:p[i],item:i<=4?'AR':'INV',unassigned:i===4||i===7}));
     const okAR=Math.abs(p[1]+p[2]+p[3]+p[4]-E_AR)<=CFG.tv2.tolerance&&p[4]>=-CFG.tv2.tolerance,okINV=Math.abs(p[5]+p[6]+p[7]-E_INV)<=CFG.tv2.tolerance&&p[7]>=-CFG.tv2.tolerance;
@@ -224,13 +227,16 @@ const ENGINE=(()=>{
     const apOD=(pur||[]).filter(p=>p.open&&p.dpd>0&&((p.rho!=null&&GT(p.rho,CFG.ap.rhoWatch))||p.essential==='yes')).map(p=>({inv:p,level:p.essential==='yes'?2:1}));
     const ap1=dpo!=null&&cashBuffer!=null&&LT(dpo,T.dpo.low)&&LT(cashBuffer,T.bufThin);     // R-AP-1
     const apInfo=dpo!=null&&GT(dpo,T.dpo.high);                                            // R-AP-INFO: note only, never a signal (T09)
-    // Capital above threshold E_i with double-count protection (Table 2-52).
+    // Capital above threshold (workbook v9, T1-87/88/91): ExcessAR = MAX(0; DSO − DSOWatch) × Rev ÷ N, ExcessINV = MAX(0; DIO − DIOWatch) × COGS ÷ N,
+    // MoneyAtRisk = ExcessAR + ExcessINV. Overdue invoices, slow lots and overdue payables are details: they are listed but do not raise
+    // the signals or W ("chi tiet qua han khong tu nang W"). E_AP is the overdue payables total (T1-55), a reference only.
     const aggAR=aAR?(dso-T.dso.watch)*rev/N:0,odAR=sum(arOD,x=>x.inv.open_amount);
     const aggINV=aINV?(dio-T.dio.watch)*cogs/N:0,slowV=sum(slow,x=>x.lot.value_own);
-    const E_AR=aAR||arOD.length?Math.max(aggAR,odAR):0,E_INV=aINV||slow.length?Math.max(aggINV,slowV):0,E_AP=sum(apOD,x=>x.inv.open_amount);
-    const caV=ca.value,m=E=>caV>0?E/caV:0;
-    const has={AR:!!(aAR||arOD.length),INV:!!(aINV||slow.length),AP:!!(ap1||apOD.length)};
-    const c={AR:!has.AR?0:aAR===2||GE(m(E_AR),mat)?2:1,INV:!has.INV?0:aINV===2||GE(m(E_INV),mat)?2:1,AP:!has.AP?0:GE(m(E_AP),mat)?2:1};
+    const E_AR=aggAR,E_INV=aggINV,E_AP=sum((pur||[]).filter(p=>p.open&&p.dpd>0),p=>p.open_amount);
+    const caV=ca.value,shareW=caV>0?Math.max(E_AR,E_INV)/caV:null;
+    // W (T1-90): W2 when a level is severe (wc.severe_forces_w2) or a level ≥ 1 with MaterialityRatio ≥ 5 %; W1 for any AR/INV level or the AP signal.
+    const lvW=(a)=>!a?0:a===2||(shareW!=null&&GE(shareW,mat))?2:1;
+    const c={AR:lvW(aAR),INV:lvW(aINV),AP:ap1?1:0};
     const shape=(agg,det)=>agg&&det?'HL':agg?'H':det?'L':'';
     const status=(v,t)=>v==null?'n/a':GT(v,t.severe)?'severe':GT(v,t.watch)?'watch':'normal';
     const near=(k,v,w)=>c[k]===0&&v!=null&&GE(v,CFG.bn.nearThresholdRatio*w);
@@ -246,7 +252,7 @@ const ENGINE=(()=>{
     const unknown=missing.length>0||inactive;
     const set=new Set(cause.map(i=>i.item));
     const bn=unknown?'unknown':!set.size?'BN0':set.size===3?'BN7':set.has('AR')&&set.has('INV')?'BN4':set.has('AR')&&set.has('AP')?'BN5':set.has('INV')&&set.has('AP')?'BN6':set.has('AR')?'BN1':set.has('INV')?'BN2':'BN3';
-    const share=caV>0?Math.max(E_AR,E_INV,E_AP)/caV:null;
+    const share=shareW;
     const w=unknown?'unknown':cause.some(i=>i.c===2)?'W2':cause.length?'W1':'W0';
     const rule_ids=[];if(aAR)rule_ids.push(aAR===2?'R-AR-2':'R-AR-1');if(arOD.length)rule_ids.push('R-AR-OD');if(aINV)rule_ids.push(aINV===2?'R-INV-2':'R-INV-1');
     if(slow.length)rule_ids.push('R-INV-SLOW');if(ap1)rule_ids.push('R-AP-1');if(apOD.length)rule_ids.push('R-AP-OD');if(cause.length&&share!=null&&GE(share,mat))rule_ids.push('R-MAT');
@@ -288,7 +294,7 @@ const ENGINE=(()=>{
     const policyVersion=policy.version_id||'CFG-default';
     const run_id='RUN-UC01-'+hash([snap.snapshot_id,CFG.versions.formula,CFG.versions.threshold,policyVersion,M.model,mat].join('|'));
     const result={wc_class:w,rule_ids,info_rules:apInfo?['R-AP-INFO']:[],main_bottleneck:unknown||!cause.length?null:cause[0].item,
-      money_at_risk:!unknown&&cause.length?E_AR+E_INV:0,obligation_overdue:unknown?0:E_AP,bn_pattern:bn,cause_items:unknown?[]:cause.map(i=>i.item),
+      money_at_risk:unknown?0:E_AR+E_INV,obligation_overdue:unknown?0:E_AP,bn_pattern:bn,cause_items:unknown?[]:cause.map(i=>i.item),
       item_states,materiality_share:share,materiality:mat,findings:final,coverage:{AR:sales?(covProv.AR?'provisional':'ok'):'missing',INV:lots?(covProv.INV?'provisional':'ok'):'missing',
         AP:pur?'ok':'missing',revenue:rev==null?'missing':'ok',cogs:cogs==null?'missing':covProv.cogs?'provisional':'ok',current_assets:ca.src},
       missing,inactive,provisional,model:M,thresholds:T,run_id,snapshot_id:snap.snapshot_id,as_of:snap.as_of,period_start:snap.period_start,N,
@@ -412,13 +418,14 @@ const ENGINE=(()=>{
   const SCENARIOS=['base','optimistic','conservative','stress_7','continuing_sales'];
   const kOf=sc=>sc==='optimistic'||sc==='conservative'?sc:'base';   // delay assumption behind each scenario
   const ceilT=x=>Math.ceil(x-1e-9);
-  // Amount-weighted statistics: Base = weighted mean, Optimistic = P25, Conservative = P75. SRS-DECISION: P25/P75 are amount-weighted
-  // quantiles (the first sample whose cumulative weight reaches p), consistent with the weighted Base; P25 ≤ Base ≤ P75 is enforced (T2-04).
-  function wQuantile(sorted,tot,p){let acc=0;for(const s of sorted){acc+=s.w;if(acc>=p*tot-1e-9)return s.late}return sorted.length?sorted[sorted.length-1].late:null}
+  // Delay statistics (workbook v9, T2-04 and T2-32): Base = amount-weighted mean of the sample delays; P25 / P75 are sample
+  // percentiles of the delays (unweighted, linear interpolation like Excel PERCENTILE.INC); Optimistic = MIN(P25; Mean) and
+  // Conservative = MAX(P75; Mean), so Opt ≤ Base ≤ Cons without moving the mean.
+  function percentileInc(values,p){const v=values.slice().sort((a,b)=>a-b),n=v.length;if(!n)return null;const h=(n-1)*p,lo=Math.floor(h);return lo+1<n?v[lo]+(h-lo)*(v[lo+1]-v[lo]):v[lo]}
   function delayStats(samples){
     if(!samples||!samples.length)return null;const tot=sum(samples,s=>s.w);if(!(tot>0))return null;
-    const sorted=samples.slice().sort((a,b)=>a.late-b.late),mean=sum(samples,s=>s.w*s.late)/tot,p25=wQuantile(sorted,tot,.25),p75=wQuantile(sorted,tot,.75);
-    return {base:Math.min(Math.max(mean,p25),p75),optimistic:p25,conservative:p75,mean,n:samples.length};
+    const mean=sum(samples,s=>s.w*s.late)/tot,lates=samples.map(s=>s.late),p25=percentileInc(lates,.25),p75=percentileInc(lates,.75);
+    return {base:mean,optimistic:Math.min(p25,mean),conservative:Math.max(p75,mean),mean,p25,p75,n:samples.length};
   }
   // Samples with a due date in (as_of − lookback; as_of]: paid in full → MAX(0; paid − due); still open and overdue → as_of − due
   // (a truncated sample, a lower bound of the real delay, BR-02.13). Partly paid invoices that are still open count as open.
@@ -427,6 +434,14 @@ const ENGINE=(()=>{
       if(r.fully_paid&&r.paid)out.push({id:r.id,key:r.key,late:Math.max(0,dnum(r.paid)-due),w:r.amount,truncated:false});
       else if(r.open)out.push({id:r.id,key:r.key,late:A-due,w:r.amount,truncated:true})});
     return out;
+  }
+  // Supplier payment history (workbook v9, T2-06 "historical_policy"): completed payments only (no open lower bounds), each supplier's
+  // own amount-weighted mean of MAX(0; paid − due), whatever the number of samples; a supplier without history is paid on the due date.
+  function paymentModel(rows,A){
+    const samples=delaySamples(rows,A).filter(s=>!s.truncated),by=new Map();samples.forEach(s=>{if(!by.has(s.key))by.set(s.key,[]);by.get(s.key).push(s)});
+    const parties={};by.forEach((ss,k)=>{parties[k]={samples:ss,n:ss.length,stats:delayStats(ss)}});
+    const tierOf=k=>{const p=parties[k];return p&&p.n?{tier:'supplier',set:p.samples,stats:p.stats,n:p.n}:{tier:'none',set:[],stats:null,n:0}};
+    return {pool:{samples,n:samples.length,stats:delayStats(samples)},parties,tierOf};
   }
   function delayModel(snap){
     const A=dnum(snap.as_of),minN=CFG.tv2.delay.minN;
@@ -438,7 +453,7 @@ const ENGINE=(()=>{
         if(pool.n>=minN)return {tier:'pool',set:pool.samples,stats:pool.stats,n:pool.n};return {tier:'default',set:[],stats:null,n:p?p.n:0}};
       return {pool,parties,tierOf};
     };
-    return {receipts:build(snap.sales),payments:build(snap.purchases)};
+    return {receipts:build(snap.sales),payments:paymentModel(snap.purchases,A)};
   }
   // Cash basis of invoice amounts (T2-22): gross → 1; net with a rate → 1 + rate; net without a rate → 1 and provisional (never 10 % by default).
   function vatFactor(cfg){const c=cfg||{};if(c.amount_basis==='gross')return {f:1,status:'gross'};if(c.vat_rate>0)return {f:1+c.vat_rate,status:'net_with_rate'};return {f:1,status:'net_no_rate'}}
@@ -450,16 +465,18 @@ const ENGINE=(()=>{
     // essential_suppliers list of Table 2-79 is explicit), while UC01 still shows the flag as unknown, never as "no".
     const isEssential=p=>p.essential==='yes'||essential.has(normName(p.supplier)),apTiming=opts.apTiming||'historical';
     const openSales=(snap.sales||[]).filter(s=>s.open),openPur=(snap.purchases||[]).filter(p=>p.open);
-    const odPur=openPur.filter(p=>p.due&&dnum(p.due)<=A).sort((a,b)=>dnum(a.due)-dnum(b.due)||(a.id<b.id?-1:a.id>b.id?1:0));
+    const odPur=openPur.filter(p=>p.due&&dnum(p.due)<=A).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);   // workbook v9: rank by invoice order
     const byK={};
     ['base','optimistic','conservative'].forEach(k=>{
       const rec=openSales.map(s=>{
         const amt=s.open_amount*vat.f,base={id:s.id,dir:'IN',cat:'invoice_receipt',partner:s.customer,amt,certainty:'estimated',src:'sales_invoice',key:s.key};
+        // A confirmed receipt schedule (known at the cut-off) replaces the estimated date in every scenario; it adds no money (A07, A11).
+        if(s.confirmed_date&&dnum(s.confirmed_date)>A)return {...base,certainty:'confirmed',t:Math.max(start,dnum(s.confirmed_date)),method:'confirmed_schedule'};
         if(!s.due)return {...base,t:null,method:'no_due_date'};
         const due=dnum(s.due),tr=D.receipts.tierOf(s.key);let delay,method;
         if(due>A){delay=tr.tier==='default'?T.delay.defaultLate:tr.stats[k];method=tr.tier}          // not yet due: due + CEILING(delay), not before Start
-        else{const dpd=A-due,cond=tr.set.filter(x=>x.late>=dpd&&x.id!==s.id);                     // overdue: conditional delay on samples late ≥ dpd
-          // SRS-DECISION: the invoice's own truncated sample is left out of its conditional set (it would only say "late ≥ dpd").
+        else{const dpd=A-due,cond=tr.set.filter(x=>x.late>=dpd);                                    // overdue: conditional delay on samples late ≥ dpd
+          // Workbook v9 (T2-19): the eligible set is every sample of the same level with ModelDelay ≥ DPD, the invoice's own open sample included.
           if(tr.tier!=='default'&&cond.length>=T.delay.conditionalMinN){delay=delayStats(cond)[k];method=tr.tier+'_conditional'}
           else{delay=dpd+T.overdueResidual[k];method='residual'}}
         return {...base,t:Math.max(start,due+ceilT(delay)),tier:tr.tier,n:tr.n,method,delay,dpd:due<=A?A-due:0};
@@ -468,10 +485,10 @@ const ENGINE=(()=>{
         const amt=p.open_amount*vat.f,ess=isEssential(p),base={id:p.id,dir:'OUT',cat:'supplier_payment',partner:p.supplier,amt,certainty:'confirmed',src:'purchase_invoice',key:p.key,essential:ess};
         if(!p.due)return {...base,t:null,method:'no_due_date'};
         const due=dnum(p.due);
-        if(due<=A){const rank=odPur.indexOf(p);return {...base,t:A+T.apOverdueOffset[k]+(rank%5),method:'overdue_spread',rank}}   // as_of + off + (rank mod 5)
+        if(due<=A){const rank=odPur.indexOf(p)+1;return {...base,t:A+T.apOverdueOffset[k]+(rank%5),method:'overdue_spread',rank}}   // as_of + off + MOD(rank; 5), rank from 1
         if(k==='conservative'||ess||apTiming==='due')return {...base,t:Math.max(start,due),method:ess?'essential_due':'due'};
         const tr=D.payments.tierOf(p.key),L=tr.stats?tr.stats.mean:0;                                      // historical: due + CEILING(L_sup)
-        return {...base,t:Math.max(start,due+ceilT(L)),method:'historical_'+tr.tier,delay:L};
+        return {...base,t:Math.max(start,due+ceilT(L)),method:tr.stats?'historical_supplier':'due_no_history',delay:L};
       });
       byK[k]=rec.concat(pay);
     });
@@ -487,14 +504,20 @@ const ENGINE=(()=>{
       if(t!=null&&t<start){issues.push({code:'PLAN_BEFORE_START',severity:'warning',id:p.id});return}
       plans.push({...base,t,method:p.date?'plan_date':p.week?'plan_week':'no_date'});
     });
-    // continuing_sales (T2-21): new revenue each week = period revenue ÷ (N / 7), received at issue + average term + company delay.
-    // SRS-DECISION: new sales are issued on the first day of each forecast week; the delay is the company-pool Base delay.
-    const per=(snap.sales||[]).filter(s=>s.in_period&&s.due&&s.issue),wt=sum(per,s=>s.amount);
-    const avgTerm=wt?sum(per,s=>s.amount*(dnum(s.due)-dnum(s.issue)))/wt:CFG.ar.termFallbackDays;
+    // continuing_sales (T2-21): new revenue each week = Rev ÷ N × 7, issued on the first day of each forecast week and received at
+    // issue + Terms + DelayBase (company pool). Terms = the declared credit days for new sales (config.continuing.credit_days), else the
+    // amount-weighted term of the period's invoices. When the company declares an incremental cost ratio, each week also pays
+    // WeeklySales × ratio at issue + cost lag (fixed payroll and rent are already in Base); without it the scenario has receipts only
+    // and is flagged CONTINUING_NO_COST (workbook A17).
+    const per=(snap.sales||[]).filter(s=>s.in_period&&s.due&&s.issue),wt=sum(per,s=>s.amount),cont=(snap.config||{}).continuing||{};
+    const avgTerm=cont.credit_days!=null?cont.credit_days:wt?sum(per,s=>s.amount*(dnum(s.due)-dnum(s.issue)))/wt:CFG.ar.termFallbackDays;
     const poolDelay=D.receipts.pool.n>=T.delay.minN?D.receipts.pool.stats.base:T.delay.defaultLate;
-    const weekly=snap.fin.revenue>0?snap.fin.revenue/(snap.N/7)*vat.f:0;
-    const newSales=weekly>0?Array.from({length:T.horizonWeeks},(_,i)=>{const iss=start+7*i;
-      return {id:'NS-W'+(i+1),dir:'IN',cat:'new_sales',partner:'New sales (assumed)',amt:weekly,certainty:'estimated',src:'continuing_sales',t:iss+ceilT(avgTerm+poolDelay),issue:diso(iss),method:'continuing_sales'}}):[];
+    const weekly=snap.fin.revenue>0?snap.fin.revenue/snap.N*7*vat.f:0;
+    const newSales=weekly>0?Array.from({length:T.horizonWeeks},(_,i)=>{const iss=start+7*i,ev=[
+      {id:'NS-W'+(i+1),dir:'IN',cat:'new_sales',partner:'New sales (assumed)',amt:weekly,certainty:'estimated',src:'continuing_sales',t:iss+ceilT(avgTerm+poolDelay),issue:diso(iss),method:'continuing_sales'}];
+      if(cont.cost_ratio>0)ev.push({id:'NC-W'+(i+1),dir:'OUT',cat:'new_cost',partner:'Variable cost of new sales (assumed)',amt:weekly*cont.cost_ratio,certainty:'estimated',src:'continuing_sales',t:iss+(cont.cost_lag_days||0),issue:diso(iss),method:'continuing_cost'});
+      return ev}).flat():[];
+    if(weekly>0&&!(cont.cost_ratio>0))issues.push({code:'CONTINUING_NO_COST',severity:'provisional'});
     const cash0=opts.cash0;
     const scen={};
     SCENARIOS.forEach(sc=>{
@@ -766,6 +789,165 @@ const ENGINE=(()=>{
       const c=legacyCase(snap,sc,{rtarget:rt,cash0:cash0??0,ev,days:o.days.map(x=>[x.d,x.close])});c.fc=fc;out[sc]=c});
     return out;
   }
-  return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
+  /* ---------- UC03 · financing match per the UC01–UC04 workbook v9 (UC3_Cong_thuc T3-01 … T3-38) ---------- */
+  // Base amount of a product's object, computed from the snapshot (D_UC03 "Co so" cells are formulas on the same data):
+  // OBJ-NB short-term investments; OBJ-APX not-yet-due payables of declared non-essential suppliers without overdue and with a purchase
+  // share below key_partner; OBJ-APS not-yet-due payables of essential suppliers; OBJ-AR-<code> the customer's not-yet-due receivables;
+  // OBJ-INV-NOR owned lots declared not pledged that are neither slow nor cancelled; OBJ-INV-SLOW slow TP/HH lots declared not pledged and
+  // not cancelled; OBJ-INV-PLG lots declared pledged; LIM-* the declared unused limit.
+  function uc03Objects(snap,P){
+    const A=dnum(snap.as_of),sales=snap.sales||[],pur=snap.purchases||[],lots=(snap.lots||[]).filter(l=>l.owner!=='customer');
+    const notDue=r=>r.open&&r.due&&dnum(r.due)>A,slowOf=l=>l.days!=null&&l.days>(CFG.inv.slowDays[l.type]||CFG.inv.unknownTypeSlowDays);
+    const bySup=new Map();pur.forEach(p=>{if(!bySup.has(p.key))bySup.set(p.key,[]);bySup.get(p.key).push(p)});
+    const purPeriod=sum(pur.filter(p=>p.in_period),p=>p.amount);
+    let apx=0,aps=0;bySup.forEach(rows=>{const e=rows[0].essential,overdue=rows.some(r=>r.open&&r.dpd>0),share=purPeriod>0?sum(rows.filter(r=>r.in_period),r=>r.amount)/purPeriod:0;
+      const nd=sum(rows.filter(notDue),r=>r.open_amount);if(e==='yes')aps+=nd;else if(e==='no'&&!overdue&&share<P.key_partner)apx+=nd});
+    const ar=code=>{const re=new RegExp('(^|\\s)'+code+'$','i');return sum(sales.filter(s=>re.test(String(s.customer).trim())&&notDue(s)),s=>s.open_amount)};
+    const objs={'OBJ-NB':snap.fin.st_investments||0,'OBJ-APX':apx,'OBJ-APS':aps,
+      'OBJ-INV-NOR':sum(lots.filter(l=>l.pledged==='no'&&!slowOf(l)&&l.cancelled!=='yes'),l=>l.value_own),
+      'OBJ-INV-SLOW':sum(lots.filter(l=>l.pledged==='no'&&slowOf(l)&&['TP','HH'].includes(l.type)&&l.cancelled!=='yes'),l=>l.value_own),
+      'OBJ-INV-PLG':sum(lots.filter(l=>l.pledged==='yes'),l=>l.value_own)};
+    return id=>id in objs?objs[id]:/^OBJ-AR-/.test(id)?ar(id.slice(7)):null;
+  }
+  // Funding rounds (T3-01 … T3-07) from the Base two-week blocks of the same UC02 run.
+  function uc03Rounds(run,P){
+    const R=run.reserves,Rt=R.rtarget,theta=Rt*P.theta_pct,B=run.blocks.list,base=run.fc.scenarios.base.days.slice(0,7*run.weeks);
+    const blocks=B.map(b=>({k:b.k,start:b.start,end:b.end,days:b.days,min:b.min,deficit:b.status==='shortage'?Math.max(0,Rt-b.min):0}));
+    blocks.forEach((b,i)=>{b.delta=i?Math.abs(b.deficit-blocks[i-1].deficit):null;b.material=i>0&&b.delta>=theta&&b.days>=P.min_days?1:0});
+    const changes=blocks.filter(b=>b.material),n=changes.length,first=changes[0]||null;
+    const dir=n===1?Math.sign(first.deficit-blocks[first.k-2].deficit):0;
+    const shape=n===0?'uniform':n===1?(dir>0?'step_up':'step_down'):'unclassifiable';
+    const short=base.filter(x=>x.close<Rt),lastShort=short.length?short[short.length-1].d:null,firstShort=short.length?short[0].d:null;
+    const peak=Math.max(0,...blocks.map(b=>b.deficit)),days=(a,b)=>dnum(b)-dnum(a)+1;
+    let rounds=[];
+    if(!firstShort)rounds=[];
+    else if(shape==='step_up'){const lo=Math.max(0,...blocks.filter(b=>b.k<first.k).map(b=>b.deficit)),hi=Math.max(0,...blocks.filter(b=>b.k>=first.k).map(b=>b.deficit));
+      rounds=[{j:1,need_date:firstShort,G_cum:lo,G:lo,end:diso(dnum(first.start)-1)},{j:2,need_date:first.start,G_cum:hi,G:hi-lo,end:lastShort}]}
+    else rounds=[{j:1,need_date:firstShort,G_cum:peak,G:peak,end:shape==='step_down'?first.start:lastShort}];
+    rounds.forEach(r=>{r.duration=days(r.need_date,r.end);r.severity=r.G_cum>=theta?'severe':'light'});
+    return {theta,blocks,n,shape,review_manual:n>=2,change_date:first?first.start:null,change_block:first?first.k:0,direction:dir,peak_gap:peak,last_short:lastShort,rounds};
+  }
+  const UC03_FACTOR_GROUPS={AR:['AR_EARLY','RF','FAC'],INV:['INV_LOAN','INV_SALE'],AP:['AP_EXT']};
+  function matchFinancing(snap,uc01,run,table,opts={}){
+    const P=table.params,A=dnum(snap.as_of),req=opts.request_date?dnum(opts.request_date):A;
+    if(!run||run.th.th!=='TH01')return {status:'not_applicable',reason:run?'th_'+run.th.th:'no_uc02',th:run?run.th.th:'unknown'};
+    if(!uc01||uc01.snapshot_id!==run.snapshot_id)return {status:'not_applicable',reason:'different_snapshot'};
+    const base=uc03Objects(snap,P),G=uc03Rounds(run,P),W=uc01.wc_class;
+    const E={AR:uc01.metrics.agg.AR,INV:uc01.metrics.agg.INV,AP:uc01.obligation_overdue};
+    const cOf=it=>{const s=uc01.item_states.find(x=>x.item===it);return s&&s.c>=1?1:0},c={AR:cOf('AR'),INV:cOf('INV'),AP:cOf('AP')};
+    const nFactors=c.AR+c.INV+c.AP,persistent=!!run.blocks.persistent,used=new Set(),drawnCL={};
+    const rounds=G.rounds.map(r=>{
+      const daysLeft=dnum(r.need_date)-req,urgent=daysLeft<=P.urgent_days;
+      const shares=Object.fromEntries(['AR','INV','AP'].map(k=>[k,r.G_cum>0?Math.min(1,E[k]/r.G_cum):0]));
+      const role=k=>shares[k]>=P.cause_main?'main':shares[k]>=P.cause_sec?'secondary':'ignored';
+      const main=['AR','INV','AP'].filter(k=>role(k)==='main').sort((a,b)=>shares[b]-shares[a])[0]||null;
+      const single=main==='AR'?'A1':main==='INV'?'A2':main==='AP'?'A4':'A3';
+      const secGroups=new Set(['AR','INV','AP'].filter(k=>role(k)==='secondary').flatMap(k=>UC03_FACTOR_GROUPS[k]));
+      // Products: capacity, cost, timeliness and the hard filter (T3-13 … T3-26).
+      const rows=table.products.map(p=>{
+        const bse=p.base_declared!=null?Math.max(0,p.base_declared-(drawnCL[p.object]||0)):base(p.object);
+        const net=p.group==='INV_SALE'?1-p.haircut:p.adv*(1-p.haircut),C=(bse||0)*net;
+        const hold=p.early_repay?Math.min(p.hold,r.duration):p.hold;
+        const cost=p.group==='INV_SALE'?(bse||0)*p.haircut+p.fee_flat:C*p.rate*hold/365+C*p.fee_pct+p.fee_flat;
+        const reasons=[];if(p.pledged)reasons.push('PLEDGED');if(p.strategic)reasons.push('STRATEGIC_OR_CRITICAL');if(!p.has_data)reasons.push('NO_PRODUCT_DATA');
+        if(!(C>0)&&p.has_data)reasons.push('NO_NET_CASH');if(r.j>1&&used.has(p.object))reasons.push('OBJECT_USED_IN_EARLIER_ROUND');
+        const hard=!reasons.length,timely=p.dtf<=daysLeft,flags=[];
+        if(!p.early_repay&&p.hold<r.duration&&['RF','FAC'].includes(p.group))flags.push('NOT_COVERING_DURATION');
+        if(!timely)flags.push('TOO_SLOW');
+        return {...p,base:bse||0,net,C,hold_charged:hold,cost,timely,hard,reasons,flags,cpg:C>0?Math.round(cost/Math.min(C,r.G)*1e4)/1e4:null,
+          speed:p.dtf<=3?1:p.dtf<=10?2:3,certainty:P.model_health==='degraded'?3:p.certainty}});
+      // Scenario (T3-10/T3-11): persistent shortfall → B1/B2; otherwise the single-round scenario from the main factor.
+      const bestC=Math.max(0,...rows.filter(x=>x.hard&&x.timely).map(x=>x.C));
+      const scenario=!persistent?single:(W==='W2'&&nFactors>=2)||bestC<r.G?'B2':nFactors>0&&!c.INV&&P.all_l1?'B1':'B2';
+      rows.forEach(x=>{x.in_scenario=!!(table.allowed[x.group]||{})[scenario];if(x.hard&&!x.in_scenario)x.reasons.push('OUT_OF_SCENARIO');
+        x.eligible=x.hard&&x.in_scenario;x.cause_match=urgent?1:((table.cause[x.group]||{})[scenario]||secGroups.has(x.group))?1:0});
+      // Ranking key (T3-31): timely, cause match (normal mode), speed band, certainty, CostPerGap, Rel, days to fund, product id.
+      const ranked=rows.filter(x=>x.eligible).sort((a,b)=>(b.timely-a.timely)||(urgent?0:b.cause_match-a.cause_match)||(a.speed-b.speed)||(a.certainty-b.certainty)||
+        ((a.cpg??9)-(b.cpg??9))||(a.rel-b.rel)||(a.dtf-b.dtf)||(a.id<b.id?-1:1));
+      ranked.forEach((x,i)=>{x.rank=i+1});
+      // Package (T3-32/T3-33): internal cash first, then by rank; one object once; ≤ 2 sources per option; ≤ max_sources.
+      const minDraw=r.G*P.min_draw_pct,pkg=[],perOption={},order=ranked.slice().sort((a,b)=>(a.group==='NB'?0:1)-(b.group==='NB'?0:1)||a.rank-b.rank);
+      let left=r.G;
+      order.forEach(x=>{let skip=null;
+        if(!x.timely)skip='TOO_SLOW';else if(used.has(x.object))skip='OBJECT_USED';else if(left<=0)skip='GAP_COVERED';else if(x.C<minDraw)skip='BELOW_MIN_DRAW';
+        else if((perOption[x.option]||0)>=P.max_per_option)skip='OPTION_LIMIT';else if(pkg.length>=P.max_sources)skip='MAX_SOURCES';
+        x.skip=skip;if(skip)return;
+        const draw=Math.min(x.C,left);left-=draw;used.add(x.object);perOption[x.option]=(perOption[x.option]||0)+1;
+        if(/^LIM-/.test(x.object))drawnCL[x.object]=(drawnCL[x.object]||0)+draw;
+        pkg.push({id:x.id,name:x.name,group:x.group,option:x.option,object:x.object,rank:x.rank,C:x.C,draw,cost:x.C>0?x.cost*draw/x.C:0,dtf:x.dtf,certainty:x.certainty,flags:x.flags.slice()})});
+      // A remainder below MinDraw goes to a chosen source with spare capacity.
+      if(left>0&&left<minDraw){const s=pkg.find(y=>y.C-y.draw>=left);if(s){const x=ranked.find(z=>z.id===s.id);s.draw+=left;s.cost=x.C>0?x.cost*s.draw/x.C:0;left=0}}
+      const covered=sum(pkg,y=>y.draw),cost=sum(pkg,y=>y.cost);
+      return {...r,days_left:daysLeft,urgent,shares,roles:{AR:role('AR'),INV:role('INV'),AP:role('AP')},main_factor:main,scenario_single:single,scenario,best_c:bestC,
+        products:rows,ranked:ranked.map(x=>x.id),excluded:rows.filter(x=>!x.eligible).map(x=>({id:x.id,reasons:x.reasons})),
+        package:pkg,covered,cost,remaining_gap:Math.max(0,r.G-covered),cost_per_gap:r.G>0?Math.round(cost/r.G*1e4)/1e4:null,min_draw:minDraw,
+        not_covering:pkg.filter(y=>y.flags.includes('NOT_COVERING_DURATION')).length,eligible_count:rows.filter(x=>x.eligible).length};
+    });
+    const pkgAll=rounds.flatMap(r=>r.package);
+    const human=G.review_manual||pkgAll.some(y=>['AP_EXT','AR_EARLY'].includes(y.group))||rounds.some(r=>r.remaining_gap>0||r.not_covering>0);
+    return {status:run.status==='ok'?'ok':'provisional',run_id:'RUN-UC03-'+hash([run.run_id,uc01.run_id,JSON.stringify(P)].join('|')),snapshot_id:run.snapshot_id,
+      matrix_cell:run.matrix.cell,th:run.th.th,w:W,c,n_factors:nFactors,persistent,E,...G,rounds,
+      totals:{draw:sum(rounds,r=>r.covered),cost:sum(rounds,r=>r.cost),remaining_gap:sum(rounds,r=>r.remaining_gap)},requires_human_decision:human};
+  }
+
+  /* ---------- UC04 · what-if on a copy of the UC02 Base ledger, per the workbook v9 (UC4_Cong_thuc U4-01 … U4-30) ---------- */
+  // Three internal levers: collect part of a customer's receipts earlier (or later in case 6), extend part of a supplier's payments, sell
+  // part of an owned, unpledged lot. Cases: 0 keep; 1 plan; 2 only 50 % collected early; 3 supplier refuses; 4 slow sale; 5 = 2+3+4; 6 customer late.
+  function simulateUC04(snap,run,uc01,setup){
+    const S=setup||{},R=run.reserves,Rt=R.rtarget,o=run.fc.scenarios.base,start=dnum(run.fc.start),end=dnum(run.end),H=run.weeks,errors=[];
+    const share01=x=>x!=null&&x>=0&&x<=1,intDays=x=>Number.isInteger(x)&&x>=0;
+    ['ar_share','discount','ap_share','ap_fee','sale_share','recovery','sale_cost','partial_early'].forEach(k=>{if(S[k]!=null&&!share01(S[k]))errors.push('INVALID_'+k.toUpperCase())});
+    ['early_days','late_days','extend_days','sale_lag','stress_sale_days'].forEach(k=>{if(S[k]!=null&&!intDays(S[k]))errors.push('INVALID_'+k.toUpperCase())});
+    const cs=S.case|0,early=cs!==6,lateCase=cs===6;
+    const arShare=cs===0?0:(cs===2||cs===5?(S.ar_share||0)*(S.partial_early??.5):S.ar_share||0);
+    const apShare=cs===0||cs===3||cs===5||cs===6?0:S.ap_share||0,saleShare=cs===0||cs===6?0:S.sale_share||0;
+    const shiftDays=lateCase?(S.late_days||0):-(S.early_days||0),discount=lateCase?0:S.discount||0;
+    const saleDate=start+(S.sale_lag||0)-1+(cs===4||cs===5?(S.stress_sale_days||0):0)+1;
+    // Lot check (U4-09): owned by the company, declared not pledged, sale assumption confirmed.
+    const lot=(snap.lots||[]).find(l=>l.name===S.lot);
+    if(saleShare>0){if(!lot)errors.push('LOT_NOT_FOUND');else{if(lot.owner==='customer')errors.push('LOT_CUSTOMER_OWNED');if(lot.pledged!=='no')errors.push(lot.pledged==='yes'?'LOT_PLEDGED':'LOT_PLEDGE_UNKNOWN');
+      if(!S.sale_confirmed)errors.push('SALE_NOT_CONFIRMED')}}
+    const sup=(snap.purchases||[]).find(p=>p.supplier===S.supplier);
+    if(apShare>0&&sup&&sup.essential==='yes'&&!S.allow_essential)errors.push('ESSENTIAL_SUPPLIER_NOT_CONFIRMED');
+    if(errors.length)return {status:'rejected',errors,setup:S,case:cs};
+    const delta=new Map(),add=(t,x)=>delta.set(t,(delta.get(t)||0)+x),affected=[];
+    let movedAR=0,discCost=0,movedAP=0,feeCost=0,tailPay=0,tailRec=0,cdAR=0,cdAP=0,replacedConfirmed=0;
+    o.events.forEach(e=>{if(e.t==null)return;
+      if(arShare>0&&e.dir==='IN'&&e.src==='sales_invoice'&&e.partner===S.customer){
+        if(e.certainty==='confirmed'&&!S.allow_confirmed)return;if(e.certainty==='confirmed')replacedConfirmed+=e.amt*arShare;
+        const m=e.amt*arShare,nd=early?Math.max(start,e.t+shiftDays):e.t+shiftDays;if(nd===e.t)return;
+        const dc=nd<e.t?m*discount:0,nr=m-dc;movedAR+=m;discCost+=dc;cdAR+=m*(e.t-nd);
+        if(e.t<=end)add(e.t,-m);if(nd<=end)add(nd,nr);else tailRec+=nr;affected.push({id:e.id,lever:'AR',old:diso(e.t),new:diso(nd),moved:m,net:nr})}
+      if(apShare>0&&e.dir==='OUT'&&e.src==='purchase_invoice'&&e.partner===S.supplier&&(S.extend_days||0)>0){
+        const m=e.amt*apShare,nd=e.t+S.extend_days,fee=m*(S.ap_fee||0);movedAP+=m;feeCost+=fee;cdAP+=m*(nd-e.t);
+        if(e.t<=end)add(e.t,m);if(nd<=end)add(nd,-(m+fee));else tailPay+=m+fee;affected.push({id:e.id,lever:'AP',old:diso(e.t),new:diso(nd),moved:m,fee})}});
+    const released=saleShare>0?lot.value_own*saleShare:0,gross=released*(S.recovery||0),saleCost=gross*(S.sale_cost||0),saleNet=gross-saleCost;
+    if(saleNet>0){if(saleDate<=end)add(saleDate,saleNet);else tailRec+=saleNet}
+    const days=o.days.slice(0,7*H);let cum=0;
+    const path=days.map(x=>{cum+=delta.get(dnum(x.d))||0;return {d:x.d,base:x.close,after:x.close+cum,delta:cum}});
+    const lv=v=>{const gr=Math.max(0,Rt-v)/Rt;return v<0||v<R.rmin||gr>.5?3:gr>.2?2:gr>0?1:0},LV=['green','yellow','orange','red'];
+    const stat=k=>{const low=path.reduce((a,x)=>x[k]<a[k]?x:a,path[0]);return {min:low[k],min_date:low.d,peak_gap:Math.max(0,...path.map(x=>Rt-x[k])),peak_zero:Math.max(0,...path.map(x=>-x[k])),
+      gap_days:path.filter(x=>x[k]<Rt).length,negative_days:path.filter(x=>x[k]<0).length,worst:LV[Math.max(...path.map(x=>lv(x[k])))],end_cash:path[path.length-1][k],
+      first_below:(path.find(x=>x[k]<Rt)||{}).d||null}};
+    const before=stat('base'),after=stat('after'),tol=S.tolerance??1;
+    const crit=S.critical_date||before.min_date,cx=path.find(x=>x.d===crit)||path[path.length-1];
+    const newGap=path.filter(x=>x.base>=Rt&&x.after<Rt).length,worse=path.filter(x=>Math.max(0,Rt-x.after)>Math.max(0,Rt-x.base)+tol).length;
+    const reduction=before.peak_gap-after.peak_gap,cashCost=discCost+feeCost+saleCost,bookShort=Math.max(0,released-gross);
+    // Conclusion (U4-21): obligations moved past the horizon → not enough to assess; no day below Rtarget → no shortfall; worse days; partial; none.
+    const improved=reduction>tol||after.gap_days<before.gap_days;
+    const conclusion=tailPay>0?'not_enough_to_assess':after.gap_days===0?'no_shortfall':worse>0?'some_days_worse':improved?'partial_improvement':'no_improvement';
+    const thAfter=path.some(x=>x.after<Rt)?'TH01':(()=>{let r=0,b=0;path.forEach(x=>{r=x.after>R.rupper?r+1:0;b=Math.max(b,r)});return b>=CFG.tv2.th03MinConsecutiveDays?'TH03':'TH02'})();
+    const W=uc01&&uc01.snapshot_id===run.snapshot_id?uc01.wc_class:'unknown';
+    return {status:'provisional',run_id:'RUN-UC04-'+hash([run.run_id,JSON.stringify(S)].join('|')),snapshot_id:run.snapshot_id,case:cs,setup:S,
+      effective:{ar_share:arShare,shift_days:shiftDays,discount,ap_share:apShare,sale_share:saleShare,sale_date:diso(saleDate)},
+      before,after,critical:{date:crit,cash_lift:cx.after-cx.base,gap_reduction:Math.max(0,Rt-cx.base)-Math.max(0,Rt-cx.after)},
+      gap_reduction:reduction,new_gap_days:newGap,worse_gap_days:worse,moved:{ar:movedAR,ap:movedAP},
+      costs:{discount:discCost,extension_fee:feeCost,sale_cash:saleCost,book_shortfall:bookShort,cash:cashCost,economic:cashCost+bookShort},
+      sale:{released_book:released,gross,net:saleNet,date:diso(saleDate)},tail:{pay:tailPay,receipt:tailRec},replaced_confirmed:replacedConfirmed,
+      cash_days:{ar:snap.fin.revenue>0?cdAR/snap.fin.revenue:null,ap:snap.fin.cogs>0?cdAP/snap.fin.cogs:null},
+      w:W,th_after:thAfter,matrix_after:W!=='unknown'?MATRIX_CELLS[W][thAfter]:null,conclusion,affected,path};
+  }
+
+  return {matchFinancing,uc03Objects,uc03Rounds,simulateUC04,dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
     sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,contributingFactors,gapRequestCheck,buildGapRequest,forecastLog,reconcile,modelHealth,calibrationProposal,legacyCase,buildCases};
 })();
