@@ -68,3 +68,9 @@ The interface hides the audit log while keeping `addLog` and its in-memory event
 - **Chat:** guards for threshold changes, causal claims and out-of-scope questions; deterministic five-part (UC01) and four-part (UC02) answers from a fact registry, checked by verifyAnswer; tool names of Table 2-5 with a "Tools used" line; English only.
 - **Feedback loop:** one forecast log per snapshot and configuration version; reconciliation of older logs with a newer snapshot (FB-2/3/4/6) and model_health on the Shortfall tab.
 - Decisions taken where the SRS is open are marked `// SRS-DECISION:` in the code.
+
+## Simple view and Expert mode
+- The default view is for business owners: plain results only ("Safe cash level", "Cash tied up above normal", Normal / Watch / Severe, Act now / Watch / OK) with a small "Estimate" badge whose tooltip gives the reason. Calculations are unchanged and always run.
+- The "Expert mode" checkbox (dashboard data line and Shortfall bar, remembered per browser in `lilact.expert.v1`) adds formulas, rule ids, W/BN/TH/M codes, c_i and shapes, threshold sources and versions, snapshot and run ids, raw VND, the cut-off pickers and the threshold policy.
+- Plain wording comes from `tx(key)` in `js/i18n.js`, which uses `<key>.s` when it exists and Expert mode is off; chat answers use the same switch.
+- Item status follows the signal level c_i (0 Normal, 1 Watch, 2 Severe).

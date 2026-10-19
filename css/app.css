@@ -965,9 +965,9 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .tb-mk{position:absolute;top:-3px;width:2px;height:14px;margin-left:-1px;background:var(--lc-color-text-muted)}
 .tb-mk.mk-watch{background:var(--lc-color-alert-yellow-mark)}.tb-mk.mk-severe{background:var(--lc-color-alert-red-mark)}.tb-mk.mk-high{background:var(--lc-color-status-info)}
 .tb-lbl{position:relative;height:26px;font-size:9.5px;color:var(--lc-color-text-muted)}
-.tb-lbl span.r2{top:14px}
+.tb-lbl span.r1{top:15px}.tb-lbl span.r2{top:28px}.tb-lbl span.r3{top:41px}
 .icard .ic-h,.mtile>span:first-child{padding-right:58px}
-.tb-lbl span{position:absolute;transform:translateX(-50%);white-space:nowrap;top:2px}.tb-lbl b{color:var(--lc-color-text-secondary);margin-right:3px}
+.tb-lbl span{position:absolute;transform:translateX(-50%);white-space:nowrap;top:2px;line-height:12px}.tb-lbl b{color:var(--lc-color-text-secondary);margin-right:3px}
 .dtables{padding:12px 14px}
 .dt-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:12px 0 6px;flex-wrap:wrap}.dt-h:first-child{margin-top:0}.dt-h h3{margin:0;font-size:13.5px}
 .seg2{display:inline-flex;border:1px solid var(--lc-color-border-default);border-radius:8px;overflow:hidden}
@@ -1046,3 +1046,17 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .fbcard{margin:10px 0 0;padding:10px 14px;border-left:4px solid var(--lc-color-status-neutral)}
 .fbcard h3{font-size:13px;margin:0}.fbcard p{margin:4px 0 0;font-size:12px;color:var(--lc-color-text-secondary)}
 .fbcard.mh-ok{border-left-color:var(--lc-color-status-success)}.fbcard.mh-watch{border-left-color:var(--lc-color-alert-yellow)}.fbcard.mh-degraded{border-left-color:var(--lc-color-status-error)}
+
+/* Simple view (default) — Estimate badge, three-colour status bar, one-line alert legend, simple tables */
+.est{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--lc-color-status-warning-bg);color:var(--lc-color-status-warning);cursor:help}
+.est:focus-visible{outline:2px solid var(--lc-color-action-primary);outline-offset:2px}
+.uc-src-l .uc-exp{margin-left:auto}
+.sbar{position:relative;height:10px;margin:4px 0 2px}
+.sbar .sz{display:flex;height:100%;border-radius:6px;overflow:hidden;border:1px solid var(--lc-color-border-default)}
+.sbar .sz span{height:100%}.sbar .g{background:var(--lc-color-status-success-bg)}.sbar .a{background:var(--lc-color-alert-yellow-bg)}.sbar .r{background:var(--lc-color-alert-red-bg)}
+.sbar .sv{position:absolute;top:-4px;width:3px;height:18px;margin-left:-1.5px;border-radius:2px;background:var(--lc-color-text-primary)}
+.lv-one{display:block;line-height:1.5}.lv-one .lv-dots{display:inline-flex;gap:3px;margin-right:6px;vertical-align:middle}
+.dtables .table-wrap{overflow-x:auto}
+.dtable td .status{white-space:nowrap;vertical-align:middle}
+.dtable td:has(> .status){white-space:nowrap;width:1%}
+.dtables.simple .dtable td:last-child,.dtables.simple .dtable th:last-child{width:1%;white-space:nowrap}

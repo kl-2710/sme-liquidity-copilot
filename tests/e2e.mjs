@@ -516,7 +516,7 @@ for (const theme of ["light", "dark"]) {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await page.goto(URL0);
-  await page.evaluate((t) => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: t})); }, theme);
+  await page.evaluate((t) => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: t})); localStorage.setItem("lilact.expert.v1", "1"); }, theme);
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])");
   const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3800); };
   const last = () => page.locator(".messages.on .msg.bot").last();
@@ -760,7 +760,7 @@ for (const theme of ["light", "dark"]) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(URL0);
-  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light"})); });
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light"})); localStorage.setItem("lilact.expert.v1", "1"); });
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
   const dash = async () => { await page.evaluate(() => { setTab("dash"); setWide(true); }); await page.waitForTimeout(700); };
   await step("D · dashboard order, data source line and gauge scales follow Table 3-1", async () => {
@@ -776,11 +776,14 @@ for (const theme of ["light", "dark"]) {
     assert.ok(r.gaugeMax.length === 4 && !r.gaugeMax.includes("90"), "gauge scales follow the thresholds: " + r.gaugeMax.join(","));
   });
   await step("D · expert mode shows rule ids, versions and raw VND; tables sort and switch order", async () => {
-    await page.click("#ucExpert"); await page.waitForTimeout(300);
     const t = await page.locator("#pane-dash .wcard .expert").innerText();
     assert.match(t, /R-AR-2, R-INV-2, R-INV-SLOW, R-AP-OD, R-MAT/); assert.match(t, /tv1\.threshold\.v2/);
     assert.match(await page.locator("#pane-dash .mtile.hl").innerText(), /\d{1,3}(\.\d{3})+ VND/);
-    await page.click("#ucExpert"); await page.waitForTimeout(200);
+    await page.click("#ucExpert"); await page.waitForTimeout(300);                 // off: the simple view hides rule ids and raw VND
+    assert.equal(await page.locator("#pane-dash .wcard .expert").count(), 0);
+    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /R-AR-2|tv1\.threshold|money_at_risk|\d{1,3}(\.\d{3}){2,} VND/);
+    await page.click("#ucExpert"); await page.waitForTimeout(300);                 // back on (remembered)
+    assert.equal(await page.evaluate(() => localStorage.getItem("lilact.expert.v1")), "1");
     const exposure = await page.locator("#pane-dash .t-cust tbody tr td:first-child b").allInnerTexts();
     assert.equal(exposure[0], "Large Exporter K1");
     await page.click('[data-corder="intervention"]'); await page.waitForTimeout(200);
@@ -892,12 +895,78 @@ for (const theme of ["light", "dark"]) {
 }
 
 
-// Chat guards, scenario questions, repeat runs and Vietnamese (phase H).
+// Simple view (default, Expert mode off): plain results without codes, formulas, ids or raw VND (business-owner view).
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(URL0);
   await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light"})); });
+  await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
+  const TECH = /\b(W[0-2] –|BN\d|TH0\d|M[1-9]|R-AR|R-INV|R-AP|R-MAT|c_i|E_AR|E_INV|E_i|money_at_risk|tv1\.threshold|SNP-|RUN-|SRS|Rtarget|Rmin|Rupper|demo assumption|90-day)\b|[÷×]|\d{1,3}(\.\d{3}){2,} VND/;
+  const plain = (x) => x.replace(/Tools used:.*/g, "").replace(/\{[\s\S]*?\}/g, "");
+  await step("Simple · dashboard shows plain results; Expert mode is off by default", async () => {
+    await page.evaluate(() => { setTab("dash"); setWide(true); }); await page.waitForTimeout(700);
+    assert.equal(await page.isChecked("#ucExpert"), false);
+    const txt = await page.locator("#pane-dash").innerText();
+    assert.doesNotMatch(txt, TECH);
+    assert.match(txt, /Sample data F01 · as of 30 Sep 2026 · updated \d{1,2} [A-Z][a-z]{2} \d{4}/);
+    assert.equal(await page.locator("#pane-dash .uc-src .est").count(), 1);
+    assert.ok((await page.locator("#pane-dash .uc-src .est").getAttribute("title")).length > 10, "the Estimate badge explains why");
+    assert.match(await page.locator("#pane-dash .wcard").innerText(), /Inventory is tying up more cash than is normal for your industry[\s\S]*Main issue\s+Owned inventory[\s\S]*Also watch\s+Receivables \(Severe\) · Payables \(Watch\)/);
+    const tiles = await page.locator("#pane-dash .mtiles").innerText();
+    assert.match(tiles, /Cash tied up above normal\s+4,07bn\s+receivables \+ inventory/); assert.match(tiles, /Impact\s+28%\s+of short-term assets · High/); assert.match(tiles, /Overdue to suppliers\s+158,0M/);
+    assert.deepEqual(await page.locator("#pane-dash .icard .ic-h .status").allInnerTexts(), ["Severe", "Severe", "Watch"]);   // from c_i: payables c=1
+    assert.match(await page.locator("#pane-dash .icard").first().innerText(), /About 14 days above normal/);
+    assert.equal(await page.locator("#pane-dash .tb-lbl").count(), 0, "no numeric threshold labels");
+    assert.deepEqual((await page.locator("#pane-dash .t-cust thead th").allInnerTexts()).map((x) => x.replace(/[▲▼]/g, "").trim().toLowerCase()), ["name", "amount", "share", "overdue", "longest overdue (days)", "priority"]);
+    assert.equal(await page.locator("#pane-dash .foot-note").innerText(), "Sample data. Estimates only, not financial advice.");
+    assert.doesNotMatch(await page.locator("#pane-dash .gcard .info").first().getAttribute("data-tip"), /[=÷×]/);
+  });
+  await step("Simple · evidence panel has no rule ids; customer labels and tier appear only in Expert mode", async () => {
+    await page.click('#pane-dash .t-cust tr[data-ev*="large exporter k1"]'); await page.waitForTimeout(300);
+    assert.doesNotMatch(await page.locator("#modal").innerText(), /R-AR|Tier|RUN-|ρ/); await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+    await page.click("#ucExpert"); await page.waitForTimeout(300);
+    await page.click('#pane-dash .t-cust tr[data-ev*="large exporter k1"]'); await page.waitForTimeout(300);
+    assert.match(await page.locator("#modal").innerText(), /Size · relationship · behaviour[\s\S]*Tier/); await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+  });
+  await step("Expert · threshold labels never overlap on the item bars; status pills stay inside their cells", async () => {
+    const overlaps = await page.evaluate(() => [...document.querySelectorAll("#pane-dash .tb-lbl")].map((l) => { const r = [...l.children].map((s) => s.getBoundingClientRect());
+      return r.some((a, i) => r.some((b, j) => j > i && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)); }));
+    assert.deepEqual(overlaps, [false, false, false]);
+    await page.evaluate(() => setWide(false)); await page.waitForTimeout(400);
+    const pills = await page.evaluate(() => [...document.querySelectorAll("#pane-dash .t-cust td .status")].map((s) => { const r = s.getBoundingClientRect(), c = s.closest("td").getBoundingClientRect(); return r.left >= c.left - 1 && r.right <= c.right + 1; }));
+    assert.ok(pills.length && pills.every(Boolean), "pills stay inside their cell");
+    await page.click("#ucExpert"); await page.waitForTimeout(300);
+  });
+  await step("Simple · Shortfall tab uses plain names and shows only the main Cash0 figure", async () => {
+    await page.evaluate(() => { advance(3); setTab("gap"); setWide(true); }); await page.waitForTimeout(900);
+    const txt = await page.locator("#pane-gap").innerText();
+    assert.doesNotMatch(txt, TECH); assert.doesNotMatch(txt, /PeakZero|Need\(0\)|to stay ≥ 0/);
+    assert.match(txt, /Minimum cash 250,0M · Safe cash level 500,0M · Surplus level 1,00bn/);
+    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /Cash needed at the start\s+2,32bn\s+Largest shortfall/);
+    assert.match(await page.locator("#pane-gap .fbcard").innerText(), /Forecast confidence\s+There are not enough past forecasts/);
+    assert.equal(await page.locator("#pane-gap .lv-legend").first().evaluate((e) => e.tagName), "P");
+  });
+  await step("Simple · chat answers use plain words, no rule codes or formulas", async () => {
+    await page.evaluate(() => { setWide(false); startNewChat(); }); await page.waitForTimeout(400);
+    const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3600); return page.locator(".messages.on .msg.bot").last().innerText(); };
+    const a = await ask("Where is my working capital stuck?");
+    assert.match(a, /1\. Overall conclusion\./); assert.match(a, /Owned inventory is tying up more cash than is normal/);
+    assert.doesNotMatch(plain(a), TECH);
+    const b = await ask("Why am I short of cash? Show me the contributing factors.");
+    assert.match(b, /With no new sales and an estimated opening cash, the alert level is Red/);
+    assert.doesNotMatch(plain(b), TECH);
+  });
+  await step("Simple · no JavaScript errors", async () => assert.deepEqual(errors, []));
+  await page.close();
+}
+
+// Chat guards, scenario questions, repeat runs and Vietnamese (phase H).
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = []; page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(URL0);
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light"})); localStorage.setItem("lilact.expert.v1", "1"); });
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
   const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3800); };
   const last = () => page.locator(".messages.on .msg.bot").last();

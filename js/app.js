@@ -168,6 +168,7 @@ const LV={red:{n:3,label:'Red',color:'var(--lc-color-status-error)'},orange:{n:2
 const worstLevel=levels=>levels.reduce((a,l)=>LV[l].n>LV[a].n?l:a,'green');
 const LV_RULE={red:'below 0, below Rmin or more than 50% short of Rtarget',orange:'20–50% short of Rtarget',yellow:'up to 20% short of Rtarget',green:'at or above Rtarget'};
 function alertLegendHTML({surplus}={}){
+  if(!XP())return `<p class="legend lv-legend lv-one"><span class="lv-dots" aria-hidden="true">${['green','yellow','orange','red'].concat(surplus?['blue']:[]).map(l=>`<i class="lv-sw lv-${l}"></i>`).join('')}</span>${t('s.legend')}${surplus?t('s.legend.blue'):''}</p>`;
   return `<div class="legend lv-legend" role="list" aria-label="Alert colours">${['red','orange','yellow','green'].map(l=>`<span role="listitem"><i class="lv-sw lv-${l}" aria-hidden="true"></i><b>${LV[l].label}</b>&nbsp;· ${LV_RULE[l]}</span>`).join('')}${surplus?`<span role="listitem"><i class="lv-sw lv-blue" aria-hidden="true"></i><b>Blue</b>&nbsp;· surplus, above Rupper for ≥ 14 days</span>`:''}</div>`;
 }
 function offLev(){
@@ -237,10 +238,10 @@ function drawChart(box,svg,o,sv,first){
   const len=Math.round(W*1.6);
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('height',H);
   svg.innerHTML=`<defs><clipPath id="${cid}"><rect x="${m.l}" y="${yb}" width="${W-m.l-m.r}" height="${Math.max(0,H-yb)}"/></clipPath><linearGradient id="${cid}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--lc-color-data-cash)" stop-opacity=".16"/><stop offset="1" stop-color="var(--lc-color-data-cash)" stop-opacity="0"/></linearGradient></defs>
-  ${g}${xl}${band}${bandP}${rline(rup,'Rupper','var(--lc-color-status-info)')}${rline(rmin,'Rmin','var(--lc-color-status-error)')}
+  ${g}${xl}${band}${bandP}${rline(rup,RN('rup'),'var(--lc-color-status-info)')}${rline(rmin,RN('rmin'),'var(--lc-color-status-error)')}
   <path d="${area(base)}" fill="color-mix(in srgb,var(--lc-color-alert-red-mark) 19%,transparent)" clip-path="url(#${cid})" ${first?'style="animation:areaIn .9s .5s both"':''}/>
   <line x1="${m.l}" x2="${W-m.r}" y1="${yb}" y2="${yb}" stroke="var(--lc-color-alert-orange-mark)" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <text x="${W-m.r}" y="${yb-5}" text-anchor="end" font-size="10" font-weight="700" fill="var(--lc-color-alert-orange)">Rtarget ${Math.round(buf)}</text>
+  <text x="${W-m.r}" y="${yb-5}" text-anchor="end" font-size="10" font-weight="700" fill="var(--lc-color-alert-orange)">${RN('rt')} ${Math.round(buf)}</text>
   <path d="${line(base)}" fill="none" stroke="${dim}" stroke-width="${sc?2:2.6}" stroke-linecap="round" stroke-linejoin="round" ${first?`style="--len:${len};stroke-dasharray:${len};animation:lineDraw 1.1s var(--ease) both"`:''} ${sc?'opacity=".75"':''}/>
   ${o.path.map((p,i)=>`<circle class="dpt" cx="${X(i).toFixed(1)}" cy="${Y(base[i]).toFixed(1)}" r="2.4" fill="${LV[alertLevel(p.c,o.buf,o.rmin)].color}"><title>${fd(p.d)} · ${LV[alertLevel(p.c,o.buf,o.rmin)].label}</title></circle>`).join('')}
   ${sc?`<path d="${line(sc)}" fill="none" stroke="var(--lc-color-status-success)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>`:''}
@@ -267,7 +268,7 @@ function bindHover(box){
 }
 // Daily charts size themselves to their box, so redraw them after a resize or once a panel transition has settled.
 function redrawCharts(){$$('.chartbox').forEach(b=>{if(b._o){const o=b._o;b._prev=null;b._drawn=1;cashChart(b,o)}})}
-let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{redrawCharts();placeInk()},120)});
+let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{redrawCharts();placeInk();placeBarLabels()},120)});
 
 
 function placeInk(){const t=$(`.tab[data-tab="${S.tab}"]`),ink=$('#ink');if(!t)return;ink.style.left=t.offsetLeft+'px';ink.style.width=t.offsetWidth+'px'}
@@ -314,8 +315,8 @@ const toolLine=list=>NARR.tools(list);
 function foreignNames(){const out=new Set();Object.entries(DATA.snaps).forEach(([id,s])=>{if(id===S.firm)return;[...(s.sales||[]).map(x=>x.customer),...(s.purchases||[]).map(x=>x.supplier),...(s.lots||[]).map(x=>x.name)].forEach(n=>out.add(n))});return [...out]}
 async function respondPolicy(bot,r){
   addLog({tool:'chat_guard',tier:0,args:{firm_id:S.firm,request:'change_'+r.kind},status:'blocked',summary:'Threshold or reserve change requested in the chat',reason:'E7'});
-  await say(bot,`<p>${t('rt.policy')}</p>`,'warn');
-  suggestRow(bot,[{t:t('rt.policy.thr'),f:()=>{setTab('dash');setTimeout(openPolicy,300)}},{t:t('rt.policy.c0'),f:()=>{if(S.stage<2)advance(2);setTab('gap');setTimeout(openCash0Form,300)}}]);
+  await say(bot,`<p>${tx('rt.policy')}</p>`,'warn');
+  suggestRow(bot,[{t:tx('rt.policy.thr'),f:()=>{setTab('dash');if(!XP())setExpert(true);setTimeout(openPolicy,300)}},{t:tx('rt.policy.c0'),f:()=>{if(S.stage<2)advance(2);setTab('gap');setTimeout(openCash0Form,300)}}]);
 }
 // Causal claims are not confirmed; the answer describes the numbers and calls them contributing factors (T18).
 async function respondCausal(bot,text){
@@ -335,20 +336,22 @@ async function respondCausal(bot,text){
 async function respondScope(bot,r){
   if(r.kind==='uc03'){await say(bot,`<p>${t('rt.scope.uc03')}</p>`);suggestRow(bot,nextSuggest());return}
   const d=uc01(),m=d.metrics;
-  await say(bot,`<p>${t('rt.scope.uc02')} ${t(d.wc_class==='unknown'?'w.unknown':'w.'+d.wc_class)}${d.main_bottleneck?' · '+t('w.main')+': '+t('item.'+d.main_bottleneck):''} · DSO ${nf(m.dso,1)} · DIO ${nf(m.dio,1)} · DPO ${nf(m.dpo,1)}.</p>${toolLine(['diagnose_working_capital'])}`);
+  const what=XP()?`${t(d.wc_class==='unknown'?'w.unknown':'w.'+d.wc_class)}${d.main_bottleneck?' · '+t('w.main')+': '+t('item.'+d.main_bottleneck):''} · DSO ${nf(m.dso,1)} · DIO ${nf(m.dio,1)} · DPO ${nf(m.dpo,1)}`
+    :(d.wc_class==='W2'?t('s.w.W2.'+(d.main_bottleneck||'INV')):d.wc_class==='unknown'?t('s.w.unknown'):t('s.w.'+d.wc_class));
+  await say(bot,`<p>${tx('rt.scope.uc02')} ${what}.</p>${toolLine(['diagnose_working_capital'])}`);
   suggestRow(bot,nextSuggest());
 }
 async function respondScenarioQ(bot,text){
   const u=uc02(),sc=/optimistic/i.test(text)?'optimistic':/conservative|pessimistic/i.test(text)?'conservative':/stress|7 days/i.test(text)?'stress_7':/continuing/i.test(text)?'continuing_sales':null;
   await toolCall(bot,'forecast_cash',1,{firm_id:S.firm,horizon_weeks:u.weeks,scenario:sc||'all',run_id:u.run_id},()=>({}),{ms:380});
-  const row=k=>{const s=u.summary[k];return t('rt.scen',{s:t('sc.'+k),v:money(s.min),d:fd(s.min_date),need:money(s.need_rtarget),lv:lvLabel(s.overall),th:t('th.'+u.th.th)})+(k==='continuing_sales'?' '+t('rt.scen.cont'):'')};
-  await say(bot,sc?`<p>${row(sc)}</p>${toolLine(['forecast_cash'])}`:`<p>${t('rt.scen.all')}</p><ul>${SC_KEYS.map(k=>`<li>${row(k)}</li>`).join('')}</ul>${toolLine(['forecast_cash'])}`);
+  const row=k=>{const s=u.summary[k];return tx('rt.scen',{s:tx('sc.'+k),v:money(s.min),d:fd(s.min_date),need:money(s.need_rtarget),lv:lvLabel(s.overall),th:t('th.'+u.th.th)})+(k==='continuing_sales'?' '+t('rt.scen.cont'):'')};
+  await say(bot,sc?`<p>${row(sc)}</p>${toolLine(['forecast_cash'])}`:`<p>${tx('rt.scen.all')}</p><ul>${SC_KEYS.map(k=>`<li>${row(k)}</li>`).join('')}</ul>${toolLine(['forecast_cash'])}`);
   suggestRow(bot,nextSuggest());
 }
 async function respondCash0Q(bot){
   const u=uc02(),b=u.summary.base;
   await toolCall(bot,'forecast_cash',1,{firm_id:S.firm,horizon_weeks:u.weeks,run_id:u.run_id},()=>({}),{ms:380});
-  await say(bot,`<p>${t('rt.cash0',{rt:money(u.reserves.rtarget),need:money(b.need_rtarget),zero:money(b.need_zero),c:money(u.cash0.value),st:t('c0.st.'+u.cash0.status)})}</p>${toolLine(['forecast_cash'])}`);
+  await say(bot,`<p>${tx('rt.cash0',{rt:money(u.reserves.rtarget),need:money(b.need_rtarget),zero:money(b.need_zero),c:money(u.cash0.value),st:tx('c0.st.'+u.cash0.status)})}</p>${toolLine(['forecast_cash'])}`);
   suggestRow(bot,nextSuggest());
 }
 async function respondWeekQ(bot){
@@ -372,6 +375,7 @@ const FEEDBACK={
   health(f){return ENGINE.modelHealth(this.get(f).recon)}
 };
 function reliabilityHTML(){
+  if(!XP()){const h=FEEDBACK.health(S.firm);return `<div class="card fbcard mh-${h}" data-wid="reliability"><div class="card-head"><div><h3>${tx('fb.title')}</h3><p>${t('fb.s.'+h)}</p></div></div></div>`}
   const st=FEEDBACK.get(S.firm),h=ENGINE.modelHealth(st.recon),last=st.recon[st.recon.length-1],prop=last?ENGINE.calibrationProposal(st.recon,h):null;
   return `<div class="card fbcard mh-${h}" data-wid="reliability"><div class="card-head"><div><h3>${t('fb.title')}: ${t('mh.'+h)}</h3><p>${last?t('fb.res',{n:last.matched,d:fd(last.log_as_of),b:last.fb3==null?'—':pct(last.fb3,1),w:last.fb2==null?'—':pct(last.fb2,1),l:last.fb4.median==null?'—':nf(last.fb4.median,1)})+(last.fb6.missed?' '+t('fb.missed'):''):t('fb.none')}</p>${prop?`<p>${t('fb.h3',{d:prop.default_late})}</p>`:''}</div></div></div>`;
 }
@@ -388,17 +392,20 @@ function delayNote(e){
 }
 function factorsHTML(cf){
   const L=cf.links;
-  const linkLine=l=>l.type==='L1'?t('link.L1.'+l.item,{obj:esc(l.object),f:l.finding_ids.join(', '),ev:t('ev.'+l.evidence),v:money(l.amount)})
-    :t('link.L2',{f:l.finding_ids.join(', ')||'—',ev:t('ev.'+l.evidence),v:money(l.amount)});
+  const linkLine=l=>l.type==='L1'?tx('link.L1.'+l.item,{obj:esc(l.object),f:l.finding_ids.join(', '),ev:t('ev.'+l.evidence),v:money(l.amount)})
+    :tx('link.L2',{f:l.finding_ids.join(', ')||'—',ev:t('ev.'+l.evidence),v:money(l.amount)}),lt=x=>XP()?`<span class="lt">${x}</span>`:'';
   return `<div class="cf"><div class="cf-col"><b>${t('cf.out')}</b><ul>${cf.outflows.map(e=>`<li>${esc(lblCat(e.cat))}${e.cat==='supplier_payment'?' · '+esc(e.partner):''}: ${money(e.amt)} · ${evDate(e)}</li>`).join('')||`<li>—</li>`}</ul></div>
-   <div class="cf-col"><b>${t('cf.after')}</b><ul>${cf.receipts_after.map(e=>`<li>${esc(e.partner)} · ${esc(e.id)}: ${money(e.amt)} · ${e.scope==='beyond_horizon'?t('cf.beyond'):t('cf.expected',{d:evDate(e)})}<small>${delayNote(e)}</small></li>`).join('')||`<li>—</li>`}</ul></div></div>
-   <div class="cf-links">${L.length?L.map(l=>`<p class="lk lk-${l.type}"><span class="lt">${l.type}</span>${linkLine(l)}</p>`).join(''):`<p class="lk lk-L3"><span class="lt">L3</span>${t('link.L3')}</p>`}
-    ${cf.squeeze?`<p class="lk sq">⇄ ${t('link.squeeze')}</p>`:''}<p class="cf-note">${t('cf.note')}${cf.fallback_delays?' '+t('cf.fallback'):''}</p></div>`;
+   <div class="cf-col"><b>${t('cf.after')}</b><ul>${cf.receipts_after.map(e=>`<li>${esc(e.partner)} · ${esc(e.id)}: ${money(e.amt)} · ${e.scope==='beyond_horizon'?t('cf.beyond'):t('cf.expected',{d:evDate(e)})}${XP()?`<small>${delayNote(e)}</small>`:''}</li>`).join('')||`<li>—</li>`}</ul></div></div>
+   <div class="cf-links">${L.length?L.map(l=>`<p class="lk lk-${l.type}">${lt(l.type)}${linkLine(l)}</p>`).join(''):`<p class="lk lk-L3">${lt('L3')}${tx('link.L3')}</p>`}
+    ${cf.squeeze?`<p class="lk sq">⇄ ${tx('link.squeeze')}</p>`:''}<p class="cf-note">${tx('cf.note')}${cf.fallback_delays&&XP()?' '+t('cf.fallback'):''}</p></div>`;
 }
 // gap_request (UC02.7): a summary to confirm first; only with an ok/provisional run, TH01 and a matrix cell; never with W unknown or expired data.
 function gapRequestState(){const u=uc02(),d=uc01(),fr=freshness(DATA.snaps[S.firm]).level;return {u,d,chk:ENGINE.gapRequestCheck(u,d,fr)}}
 function gapRequestHTML(gr){
-  const row=(k,v)=>`<div><dt>${t('gr.'+k)}</dt><dd>${v}</dd></div>`;
+  const row=(k,v)=>`<div><dt>${tx('gr.'+k)}</dt><dd>${v}</dd></div>`;
+  if(!XP())return `<dl class="ev-info gr">${row('need_date',fd(gr.need_date))}${row('peak_gap',`${money(gr.peak_gap)} · ${fd(gr.peak_date)}`)}${row('cash0_need',money(gr.cash0_need))}
+   ${row('episodes',gr.episodes.map(e=>`${fds(e.start)}–${fds(e.end)}${e.censored?' ('+t('ep.open')+')':''}`).join(', '))}${row('bottleneck',gr.main_bottleneck?t('item.'+gr.main_bottleneck):t('w.none'))}
+   ${row('obligation',money(gr.obligation_overdue))}${row('scenario',tx('sc.'+gr.scenario))}</dl><p class="cf-note">${t('gr.peaknote')}</p>`;
   return `<dl class="ev-info gr">${row('need_date',fd(gr.need_date))}${row('peak_gap',`${money(gr.peak_gap)} · ${fd(gr.peak_date)}`)}${row('cash0_need',money(gr.cash0_need))}
    ${row('episodes',gr.episodes.map(e=>`${fds(e.start)}–${fds(e.end)}${e.censored?' ('+t('ep.open')+')':''}`).join(', '))}${row('matrix',`${gr.matrix_case_id} · ${t('m.'+gr.matrix_case_id)}`)}
    ${row('bottleneck',gr.main_bottleneck?t('item.'+gr.main_bottleneck):t('w.none'))}${row('pattern',`${gr.bn_pattern} · ${gr.cause_items.join(', ')||'—'}`)}${row('findings',gr.finding_ids.join(', ')||'—')}
@@ -408,9 +415,9 @@ function gapRequestHTML(gr){
 }
 function openGapRequest(after){
   const {u,d,chk}=gapRequestState();
-  if(!chk.ok){openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${chk.label==='idle_cash'?t('gr.idle'):t('gr.title')}</h3><p>${t('gr.block.'+chk.reason)}</p><div class="acts"><button class="btn sec" id="grClose">${t('pol.cancel')}</button></div></div>`,m=>{m.querySelector('.settings-close').onclick=m.querySelector('#grClose').onclick=closeModal});return}
+  if(!chk.ok){openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${chk.label==='idle_cash'?tx('gr.idle'):tx('gr.title')}</h3><p>${tx('gr.block.'+chk.reason)}</p><div class="acts"><button class="btn sec" id="grClose">${t('pol.cancel')}</button></div></div>`,m=>{m.querySelector('.settings-close').onclick=m.querySelector('#grClose').onclick=closeModal});return}
   const gr=ENGINE.buildGapRequest(u,d,{scenario:S.case,health:modelHealthNow(),createdAt:new Date().toISOString()});
-  openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${t('gr.title')}</h3><p class="sub">${t('gr.sub')}</p>${gapRequestHTML(gr)}
+  openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${tx('gr.title')}</h3><p class="sub">${tx('gr.sub')}</p>${gapRequestHTML(gr)}
     <div class="acts"><button class="btn sec" id="grCancel">${t('pol.cancel')}</button><button class="btn primary" id="grSend">${t('gr.send')}</button></div></div>`,m=>{
     m.querySelector('.settings-close').onclick=m.querySelector('#grCancel').onclick=closeModal;
     m.querySelector('#grSend').onclick=()=>{S.gapRequest=gr;closeModal();addLog({tool:'match_financing',tier:1,args:{gap_request:gr.request_id},status:'ok',summary:`gap_request ${gr.request_id} sent: need ${gr.need_date}, peak ${Math.round(gr.peak_gap)}`});
@@ -428,7 +435,31 @@ const lvLabel=l=>l==='na'||l==='unknown'?t('lv.na'):t('lv.'+l);
 const srcName=k=>thrSrcName(k);
 // Colour of one shortfall episode = the worst daily level inside it (SRS 2.8.11.4), with the configured Rmin.
 function episodeLevel(c,e){const r=RMIN();return worstLevel(c.days.slice(e.i0,e.i1+1).map(([,v])=>alertLevel(v,c.buffer,r)))}
+function uc02HeaderSimpleHTML(u,c){
+  const sc=S.case,sm=u.summary[sc],b=u.summary.base,R=u.reserves;
+  const opts=SC_KEYS.map(k=>`<option value="${k}" ${k===sc?'selected':''}>${tx('sc.'+k)}</option>`).join('');
+  const wk=Array.from({length:CFG.tv2.horizonWeeks},(_,i)=>`<option value="${i+1}" ${i+1===u.weeks?'selected':''}>${i+1}</option>`).join('');
+  const est=u.cash0.status!=='confirmed'?t('est.cash0'):u.status==='provisional'?t('est.data'):'';
+  const bar=`<div class="uc-src uc2-bar" data-wid="uc2bar"><div class="uc-src-l"><span>${t('gap.bar.s',{f:`<b>${esc(FIRMS[S.firm].name)}</b>`,d:fd(u.as_of),a:fd(u.start),b:fd(u.end),w:u.weeks})}</span>${est?estBadge(est):''}${expertToggleHTML('gpExpert')}</div>
+    <div class="uc-ctl"><label>${t('gap.scenario')}<select id="scSel">${opts}</select></label><label>${t('gap.weeks')}<select id="wkSel">${wk}</select></label>
+     <button class="btn sec sm" type="button" id="cash0Btn">${tx('c0.open')}</button><button class="btn primary sm" type="button" id="grBtn">${u.th.th==='TH03'?tx('gr.idle'):t('gr.open')}</button></div>
+    ${sc==='continuing_sales'?`<p class="uc-note warn">${tx('gap.cont.note')}</p>`:''}${sc!=='base'?`<p class="uc-note">${tx('gap.base.note')}</p>`:''}</div>`;
+  const banner=u.cash0.status!=='confirmed'?`<div class="callout warn c0b" data-wid="cash0"><span>⚠</span><div><b>${tx('c0.banner.t')}</b> ${tx('c0.banner',{v:u.cash0.value==null?'—':money(u.cash0.value)})}
+     <div style="margin-top:8px"><button class="btn primary sm" type="button" id="cash0Btn2">${tx('c0.open')}</button></div></div></div>`:'';
+  if(u.status==='invalid_data')return bar+banner+`<div class="callout red"><span>⛔</span><div><b>${t('run.invalid.t')}</b></div></div>`;
+  const tile=(lb,v,sub,cls='')=>`<div class="ls-tile ${cls}"><span>${lb}</span><b class="num">${v}</b>${sub?`<small>${sub}</small>`:''}</div>`,ov=u.overall;
+  const tiles=`<div class="ls-tiles uc2-tiles" data-wid="uc2tiles">
+    ${tile(tx('ov.level'),`<span class="lv-pill lv-${ov==='unknown'?'na':ov}" data-lv="${ov}"><i class="lv-sw lv-${ov==='unknown'?'na':ov}" aria-hidden="true"></i>${lvLabel(ov)}</span>`,tx('ov.level.sub'))}
+    ${tile(t('ov.min'),money(sm.min),t('ov.min.sub',{d:fd(sm.min_date),s:tx('sc.'+sc)}))}
+    ${tile(tx('ov.first'),sm.first_below_rtarget?fd(sm.first_below_rtarget):t('ov.none'),tx('ov.first.sub',{z:sm.first_negative?fd(sm.first_negative):t('ov.none')}))}
+    ${tile(tx('ov.need'),sm.need_rtarget==null?'—':money(sm.need_rtarget),'')}
+    ${tile(tx('ov.peak'),money(sm.peak_buffer),tx('ov.peak.sub',{d:sm.peak_buffer_date?fd(sm.peak_buffer_date):'—'}))}
+    ${tile(tx('ov.th'),u.th.th==='unknown'?tx('ov.unknown'):tx('th.'+u.th.th),'')}</div>
+   <p class="uc2-res">${tx('res.line',{rmin:money(R.rmin),rt:money(R.rtarget),rup:money(R.rupper)})}</p>`;
+  return bar+banner+tiles+reliabilityHTML();
+}
 function uc02HeaderHTML(u,c){
+  if(!XP())return uc02HeaderSimpleHTML(u,c);
   const sc=S.case,sm=u.summary[sc],b=u.summary.base,R=u.reserves,snap=DATA.snaps[S.firm],fr=freshness(snap);
   const scope=t('gap.scope',{s:(snap.sales||[]).filter(x=>x.open).length,p:(snap.purchases||[]).filter(x=>x.open).length,pl:(snap.planned||[]).length});
   const opts=SC_KEYS.map(k=>`<option value="${k}" ${k===sc?'selected':''}>${t('sc.'+k)}</option>`).join('');
@@ -436,7 +467,7 @@ function uc02HeaderHTML(u,c){
   const bar=`<div class="uc-src uc2-bar" data-wid="uc2bar"><div class="uc-src-l"><span><b>${esc(FIRMS[S.firm].name)}</b> · ${t('gap.asof',{d:fd(u.as_of)})} · ${t('gap.period',{a:fd(u.start),b:fd(u.end),w:u.weeks})} · ${t('gap.mode.'+(sc==='continuing_sales'?'cont':'runoff'))}</span>
      <span class="runst st-${u.status}">${t('run.'+u.status)}</span><span>${scope}</span><span class="fr fr-${fr.level}"><i class="lv-sw" aria-hidden="true"></i>${t('fresh.'+fr.level,{h:CFG.erp.freshMaxHours})}</span></div>
     <div class="uc-ctl"><label>${t('gap.scenario')}<select id="scSel">${opts}</select></label><label>${t('gap.weeks')}<select id="wkSel">${wk}</select></label>
-     <button class="btn sec sm" type="button" id="cash0Btn">${t('c0.open')}</button><button class="btn primary sm" type="button" id="grBtn">${u.th.th==='TH03'?t('gr.idle'):t('gr.open')}</button></div>
+     <button class="btn sec sm" type="button" id="cash0Btn">${t('c0.open')}</button><button class="btn primary sm" type="button" id="grBtn">${u.th.th==='TH03'?t('gr.idle'):t('gr.open')}</button>${expertToggleHTML('gpExpert')}</div>
     ${sc==='continuing_sales'?`<p class="uc-note warn">${t('gap.cont.note')}</p>`:''}${sc!=='base'?`<p class="uc-note">${t('gap.base.note')}</p>`:''}</div>`;
   const banner=u.cash0.status!=='confirmed'?`<div class="callout warn c0b" data-wid="cash0"><span>⚠</span><div><b>${t('c0.banner.t')}</b> ${t('c0.banner',{v:u.cash0.value==null?'—':money(u.cash0.value),need:b.need_rtarget==null?'—':money(b.need_rtarget)})}
      <div style="margin-top:8px"><button class="btn primary sm" type="button" id="cash0Btn2">${t('c0.open')}</button></div></div></div>`:'';
@@ -455,6 +486,9 @@ function uc02HeaderHTML(u,c){
 }
 // Comparison of the five scenarios of the same run (UC02.4); nothing is recalculated.
 function scenarioTableHTML(u){
+  if(!XP()){const rows=SC_KEYS.map(k=>{const s=u.summary[k];return `<tr class="${k===S.case?'on':''}"><td><b>${tx('sc.'+k)}</b></td><td class="num ${s.min<0?'neg':''}">${money(s.min)}</td><td class="num">${fd(s.min_date)}</td>
+      <td><span class="lv-tag" style="--lvc:${LV[s.overall==='unknown'?'na':s.overall].color}"><i class="lv-sw lv-${s.overall}" aria-hidden="true"></i>${lvLabel(s.overall)}</span></td><td class="num">${s.need_rtarget==null?'—':money(s.need_rtarget)}</td></tr>`}).join('');
+    return `<div class="table-wrap"><table class="dtable sc-cmp"><thead><tr><th>${t('gap.scenario')}</th><th class="num">${t('cmp.min')}</th><th class="num">${t('cmp.date')}</th><th>${tx('cmp.level')}</th><th class="num">${tx('ov.need')}</th></tr></thead><tbody>${rows}</tbody></table></div>`}
   const rows=SC_KEYS.map(k=>{const s=u.summary[k];return `<tr class="${k===S.case?'on':''}"><td><b>${t('sc.'+k)}</b>${k==='continuing_sales'?`<small>${t('gap.cont.short')}</small>`:''}</td><td>${t('gap.mode.'+(k==='continuing_sales'?'cont':'runoff'))}</td>
     <td class="num ${s.min<0?'neg':''}">${money(s.min)}</td><td class="num">${fd(s.min_date)}</td><td><span class="lv-tag" style="--lvc:${LV[s.overall==='unknown'?'na':s.overall].color}"><i class="lv-sw lv-${s.overall}" aria-hidden="true"></i>${lvLabel(s.overall)}</span></td>
     <td class="num">${s.need_rtarget==null?'—':money(s.need_rtarget)}</td><td><small>${t('basis.'+k)}</small></td></tr>`}).join('');
@@ -462,9 +496,9 @@ function scenarioTableHTML(u){
 }
 function blocksHTML(u){
   const b=u.blocks;if(!b.list.length)return '';
-  const it=x=>`<li class="blk b-${x.status}"><span class="blk-k">${t('blk.n',{k:x.k})}</span><span>${fds(x.start)}–${fds(x.end)}</span><b>${t('blk.'+x.status)}</b>${x.severity?`<span class="lv-tag" style="--lvc:${LV[x.severity].color}"><i class="lv-sw lv-${x.severity}"></i>${lvLabel(x.severity)}</span>`:''}<span class="num">${t('blk.min',{v:money(x.min),d:fds(x.min_date)})}</span>${x.gap?`<span class="num neg">${t('blk.gap',{v:money(x.gap)})}</span>`:''}${x.excess?`<span class="num">${t('blk.ex',{v:money(x.excess)})}</span>`:''}</li>`;
-  return `<div class="card blks" data-wid="blocks"><div class="card-head"><div><h3>${t('blk.title')}</h3><p>${t('blk.sub')}</p></div></div>
-    ${b.persistent?`<div class="callout warn"><span>⏳</span><div><b>${t('blk.persist')}</b> ${t('blk.persist.sub',{a:fd(b.persistent.from),b:fd(b.persistent.to),n:b.persistent.blocks,d:fd(b.persistent.need_date),g:money(b.persistent.peak_gap)})}</div></div>`:''}
+  const it=x=>`<li class="blk b-${x.status}"><span class="blk-k">${t('blk.n',{k:x.k})}</span><span>${fds(x.start)}–${fds(x.end)}</span><b>${t('blk.'+x.status)}</b>${x.severity?`<span class="lv-tag" style="--lvc:${LV[x.severity].color}"><i class="lv-sw lv-${x.severity}"></i>${lvLabel(x.severity)}</span>`:''}<span class="num">${t('blk.min',{v:money(x.min),d:fds(x.min_date)})}</span>${x.gap?`<span class="num neg">${t('blk.gap',{v:money(x.gap)})}</span>`:''}${x.excess?`<span class="num">${tx('blk.ex',{v:money(x.excess)})}</span>`:''}</li>`;
+  return `<div class="card blks" data-wid="blocks"><div class="card-head"><div><h3>${tx('blk.title')}</h3><p>${tx('blk.sub')}</p></div></div>
+    ${b.persistent?`<div class="callout warn"><span>⏳</span><div><b>${t('blk.persist')}</b> ${tx('blk.persist.sub',{a:fd(b.persistent.from),b:fd(b.persistent.to),n:b.persistent.blocks,d:fd(b.persistent.need_date),g:money(b.persistent.peak_gap)})}</div></div>`:''}
     <ol class="blk-list">${b.display.map(it).join('')}</ol></div>`;
 }
 function dailyTableHTML(c){
@@ -477,40 +511,40 @@ function renderGap(){
   const ov=!!(S.last&&S.overlay&&!EP.none),weeklyOnly=u.weekly_only,sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
   const head=uc02HeaderHTML(u,c);
   if(u.status==='invalid_data'){p.innerHTML=head;bindGapHeader(p);return}
-  const scName=t('sc.'+S.case);
-  const forecast=dashSec(1,'var(--lc-color-data-cash)',t('gap.h.forecast',{h:H}),`Cash in, cash out and week-end balance vs Rtarget · ${scName}`,`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${scName} · VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
-   <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(c.cash0??openingCash(c))}</b><small>Cash at cut-off (${t('c0.st.'+u.cash0.status)})</small></div>
+  const scName=tx('sc.'+S.case);
+  const forecast=dashSec(1,'var(--lc-color-data-cash)',t('gap.h.forecast',{h:H}),`${XP()?'Cash in, cash out and week-end balance vs Rtarget':tx('gap.h.sub.forecast')} · ${scName}`,`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${scName} · VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
+   <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(c.cash0??openingCash(c))}</b><small>Cash at cut-off (${tx('c0.st.'+u.cash0.status)})</small></div>
     <div class="fst"><b class="num pos">+${money(sumIn)}</b><small>Expected cash in</small><b class="num neg" style="margin-top:8px">−${money(sumOut)}</b><small>Expected cash out</small></div>
     <div class="fst"><b class="num ${minB<c.buffer?'neg':''}">${money(minB)}</b><small>Lowest week-end, week ${minW.w}</small></div></div>
     <div class="chartbox fch">${flowChartSVG(c,M,EP)}</div></div>
-   <div class="legend"><span><i style="background:var(--lc-color-status-success-bg);border:1px solid var(--lc-color-status-success)"></i>Cash in</span><span><i style="background:var(--lc-color-status-error-bg);border:1px solid var(--lc-color-status-error)"></i>Cash out</span><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Week-end balance (dot = alert level)</span><span><i class="ds"></i>Rtarget ${money(c.buffer)}</span>${EP.none?'':`<span><i class="gapwk-sw"></i>Weeks of gap ${EP.k}</span>`}</div>
+   <div class="legend"><span><i style="background:var(--lc-color-status-success-bg);border:1px solid var(--lc-color-status-success)"></i>Cash in</span><span><i style="background:var(--lc-color-status-error-bg);border:1px solid var(--lc-color-status-error)"></i>Cash out</span><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Week-end balance (dot = alert level)</span><span><i class="ds"></i>${RN('rt')} ${money(c.buffer)}</span>${EP.none?'':`<span><i class="gapwk-sw"></i>Weeks of gap ${EP.k}</span>`}</div>
    ${alertLegendHTML()}
    ${flowTableHTML(c,M,EP)}
-   <p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.${weeklyOnly?' '+t('gap.weekly'):''}</p>
+   ${XP()?`<p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.${weeklyOnly?' '+t('gap.weekly'):''}</p>`:''}
    ${weeklyOnly?'':`<button class="btn sec sm" type="button" id="dailyBtn" aria-expanded="${!!S.showDaily}">${S.showDaily?t('gap.daily.hide'):t('gap.daily.show')}</button>${S.showDaily?dailyTableHTML(c):''}`}</div>`);
-  const daily=dashSec(2,'var(--lc-color-status-error)',t('gap.h.daily'),'Every gap below Rtarget is shaded; each dot shows that day’s alert level; Rmin, Rtarget and Rupper lines; Optimistic–Conservative band',weeklyOnly?`<div class="card"><div class="empty">${t('gap.weekly')}</div></div>`
+  const daily=dashSec(2,'var(--lc-color-status-error)',t('gap.h.daily'),XP()?'Every gap below Rtarget is shaded; each dot shows that day’s alert level; Rmin, Rtarget and Rupper lines; Optimistic–Conservative band':tx('gap.h.sub.daily'),weeklyOnly?`<div class="card"><div class="empty">${t('gap.weekly')}</div></div>`
     :`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${scName}</p></div>
       <label class="legend" style="cursor:pointer;user-select:none;${S.last&&!EP.none?'':'display:none'}" id="ovLbl"><input type="checkbox" id="ovChk" ${S.overlay?'checked':''} style="accent-color:var(--lc-color-status-success)"> Show latest scenario</label></div>
     <div class="chartbox" id="gapChart"></div>
-    <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>${scName}</span>${ov?'<span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span>':''}<span><i class="band-sw"></i>${t('chart.band')}</span><span><i class="ds"></i>Rtarget ${money(c.buffer)}</span><span><i class="ds rmin"></i>Rmin ${money(u.reserves.rmin)}</span><span><i class="ds rup"></i>Rupper ${money(u.reserves.rupper)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 30%,transparent);border:1px dashed var(--lc-color-status-error)"></i>Gap (selected gap is darker)</span></div>
-    ${alertLegendHTML()}<h4 class="sub-h">${t('cmp.title')}</h4>${scenarioTableHTML(u)}</div>`);
-  const foot=`<div class="foot-note">${t('gap.foot',{n:(uc01()||{}).N||c.N})} Aged stock and goods held for subcontracting are excluded from collateral; financed receivables are not counted as receivables. Interest, fees and advance rates come from the synthetic finance_catalogue; EAC is indicative only. ${DISC}</div>`;
+    <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>${scName}</span>${ov?'<span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span>':''}<span><i class="band-sw"></i>${t('chart.band')}</span><span><i class="ds"></i>${RN('rt')} ${money(c.buffer)}</span><span><i class="ds rmin"></i>${RN('rmin')} ${money(u.reserves.rmin)}</span><span><i class="ds rup"></i>${RN('rup')} ${money(u.reserves.rupper)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 30%,transparent);border:1px dashed var(--lc-color-status-error)"></i>Gap (selected gap is darker)</span></div>
+    ${alertLegendHTML()}<h4 class="sub-h">${tx('cmp.title')}</h4>${scenarioTableHTML(u)}</div>`);
+  const foot=`<div class="foot-note">${XP()?`${t('gap.foot',{n:(uc01()||{}).N||c.N})} Aged stock and goods held for subcontracting are excluded from collateral; financed receivables are not counted as receivables. Interest, fees and advance rates come from the synthetic finance_catalogue; EAC is indicative only. ${DISC}`:t('s.foot',{src:isUserFirm(S.firm)?t('s.src.own'):'Sample data'})}</div>`;
   const stuck=(()=>{const d=uc01();return `<p class="stuck">${t('stuck.line',{ar:money(d.metrics.total_overdue_ar),inv:money(d.profiles.stuck_inventory)})}</p>`})();
   if(!EPS.length){
     p.innerHTML=head+forecast+daily+`<div class="card" style="margin-top:14px"><div class="empty"><b>No cash shortfall in the ${H}-week forecast (${scName}), so there is nothing to simulate.</b></div></div>`+blocksHTML(u)+stuck+foot;
   }else{
     const dl=dn(EP.start)-asOf,rq=t('chip.f2'),t3=S.stage>=3?tv3For(EP):null;
     const card=e=>{const lv=episodeLevel(c,e),rec=e.censored?null:c.days[e.i1+1];return `<button class="ep gap-lv lv-${lv} ${EP.k===e.k?'on':''}" data-ep="${e.k}" data-lv="${lv}" aria-pressed="${EP.k===e.k}"><div class="ep-tags"><span class="lv-tag" style="--lvc:${LV[lv].color}"><i class="lv-sw lv-${lv}" aria-hidden="true"></i>${t('ep.alert',{l:lvLabel(lv)})}</span>${big&&big.k===e.k?'<span class="status blue">Largest gap</span>':''}${e.censored?`<span class="status gray">${t('ep.open')}</span>`:''}</div><div class="k">Gap ${e.k}</div><div class="a num">${mm(e.peak)}</div><div class="d">${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''} · ${t('ep.days',{n:e.i1-e.i0+1})} · lowest ${money(e.cashMin)} on ${fds(e.peakDay)}</div><div class="d">${rec?t('ep.recovery',{d:fds(rec[0])}):t('ep.notended')}</div></button>`};
-    const gaps=dashSec(3,'var(--lc-color-status-error)',t('gap.h.gaps'),`Gap = a run of consecutive days with balance below Rtarget ${money(c.buffer)} (${scName}). The colour is the worst daily alert level inside the gap. Pick a gap to see its weeks, KPIs and financing ranking.`,`<div class="eps">${EPS.map(card).join('')}</div>
+    const gaps=dashSec(3,'var(--lc-color-status-error)',t('gap.h.gaps'),XP()?`Gap = a run of consecutive days with balance below Rtarget ${money(c.buffer)} (${scName}). The colour is the worst daily alert level inside the gap. Pick a gap to see its weeks, KPIs and financing ranking.`:tx('gap.h.sub.gaps',{rt:money(c.buffer)}),`<div class="eps">${EPS.map(card).join('')}</div>
   <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px">
-    <div class="card kpi k2"><div class="t">Peak shortfall · gap ${EP.k}</div><div class="v num">${mm(EP.peak)}</div><div class="f">vs Rtarget</div></div>
+    <div class="card kpi k2"><div class="t">Peak shortfall · gap ${EP.k}</div><div class="v num">${mm(EP.peak)}</div><div class="f">${tx('gap.kpi.vs')}</div></div>
     <div class="card kpi"><div class="t">Cash needed on</div><div class="v num">${fds(EP.start)}</div><div class="f">${dl} days from the cut-off</div></div>
     <div class="card kpi k3"><div class="t">Lowest balance</div><div class="v num">${money(EP.cashMin)}</div><div class="f">on ${fds(EP.peakDay)}</div></div>
     <div class="card kpi k4"><div class="t">Gap ends</div><div class="v num">${fds(EP.end)}</div><div class="f">${EP.censored?'not recovered within the period':'recovered'}</div></div>
-  </div><div class="card cfcard" data-wid="factors"><div class="card-head"><div><h3>${t('cf.title',{k:EP.k})}</h3><p>${t('cf.sub')}</p></div></div>${factorsHTML(gapFactors(EP))}</div>${blocksHTML(u)}${stuck}`);
-    const rank=dashSec(4,'var(--lc-color-action-primary)',t('gap.h.rank',{k:EP.k}),'Tier (fully covers and funds in time), then cost relative to the shortfall',
+  </div><div class="card cfcard" data-wid="factors"><div class="card-head"><div><h3>${t('cf.title',{k:EP.k})}</h3><p>${tx('cf.sub')}</p></div></div>${factorsHTML(gapFactors(EP))}</div>${blocksHTML(u)}${stuck}`);
+    const rank=dashSec(4,'var(--lc-color-action-primary)',t('gap.h.rank',{k:EP.k}),XP()?'Tier (fully covers and funds in time), then cost relative to the shortfall':tx('gap.h.sub.rank'),
       !t3?`<div class="callout"><span>ℹ</span><div>The ranking appears after the financing step of the conversation.<div style="margin-top:8px"><button class="btn primary sm" type="button" data-ask="${esc(rq)}">${esc(rq)} →</button></div></div></div>`
-      :`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div><span class="status amber"><i></i>provisional</span></div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`);
+      :`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`);
     p.innerHTML=head+forecast+daily+gaps+rank+foot;
   }
   if(!weeklyOnly){
@@ -521,7 +555,7 @@ function renderGap(){
   $$('[data-csv]',p).forEach(b=>b.onclick=()=>exportFlowCSV(c,M));window._csvCtx=()=>exportFlowCSV(c,M);
   $$('[data-ask]',p).forEach(b=>b.onclick=()=>sendChat(b.dataset.ask));
   const db=$('#dailyBtn',p);db&&(db.onclick=()=>{S.showDaily=!S.showDaily;renderGap()});
-  bindGapHeader(p);
+  bindGapHeader(p);bindExpert(p);
   setTimeout(redrawCharts,480);
   $$('[data-ep]',p).forEach(b=>b.addEventListener('click',()=>{selectGap(+b.dataset.ep);renderGap();renderDemoChips()}));
   $$('[data-try]',p).forEach(b=>b.addEventListener('click',()=>{const [inv,prod]=b.dataset.try.split('|');S.lev=freshLev();S.lev.l4_on=1;S.lev.inv_id=inv;S.lev.prod=prod;setTab('whatif');runNow('Finance '+inv+' via '+prod)}));
@@ -545,17 +579,17 @@ function openCash0Form(){
   const f=S.firm,snap=DATA.snaps[f],p=POLICY.get(f),u=uc02(),R=u.reserves,ref=R.reference,daily=essentialDailySpend();
   const sups=[...new Set((snap.purchases||[]).map(x=>x.supplier))],essSel=new Set(p.essential_suppliers||snap.firm.essential_suppliers||[]);
   const v=x=>x==null?'':Math.round(x);
-  openModal(`<form class="evid c0f" id="c0Form" novalidate><button class="settings-close" type="button" aria-label="Close">×</button><h3>${t('c0.title')}</h3><p class="sub">${t('c0.sub',{v:esc(POLICY.versionId(f))})}</p>
+  openModal(`<form class="evid c0f" id="c0Form" novalidate><button class="settings-close" type="button" aria-label="Close">×</button><h3>${tx('c0.title')}</h3><p class="sub">${tx('c0.sub',{v:esc(POLICY.versionId(f))})}</p>
    <div class="pol-form">
-    <label>${t('c0.total')}<input id="c0Total" inputmode="numeric" value="${v(p.cash0?p.cash0.total:u.cash0.total)}"></label>
-    <label>${t('c0.restricted')}<input id="c0Restr" inputmode="numeric" value="${v(p.cash0?p.cash0.restricted:0)}"></label>
+    <label>${tx('c0.total')}<input id="c0Total" inputmode="numeric" value="${v(p.cash0?p.cash0.total:u.cash0.total)}"></label>
+    <label>${tx('c0.restricted')}<input id="c0Restr" inputmode="numeric" value="${v(p.cash0?p.cash0.restricted:0)}"></label>
     <fieldset class="wide c0m"><legend>${t('c0.method')}</legend>${['industry','critical_days','direct'].map(m=>`<label><input type="radio" name="c0m" value="${m}" ${(p.reserve&&p.reserve.method||'direct')===m?'checked':''}> ${t('c0.m.'+m)}</label>`).join('')}</fieldset>
-    <label>Rmin<input id="c0Rmin" inputmode="numeric" value="${v(R.rmin)}"></label><label>Rtarget<input id="c0Rt" inputmode="numeric" value="${v(R.rtarget)}"></label><label>Rupper<input id="c0Rup" inputmode="numeric" value="${v(R.rupper)}"></label>
+    <label>${RN('rmin')}<input id="c0Rmin" inputmode="numeric" value="${v(R.rmin)}"></label><label>${RN('rt')}<input id="c0Rt" inputmode="numeric" value="${v(R.rtarget)}"></label><label>${RN('rup')}<input id="c0Rup" inputmode="numeric" value="${v(R.rupper)}"></label>
     <label>${t('c0.basis')}<select id="c0Basis"><option value="net">net</option><option value="gross">gross</option></select></label>
     <label>${t('c0.vat')}<input id="c0Vat" inputmode="decimal" placeholder="${t('c0.vat.ph')}" value="${p.vat_rate!=null?p.vat_rate*100:''}"></label>
     <fieldset class="wide c0s"><legend>${t('c0.ess')}</legend>${sups.map(s=>`<label><input type="checkbox" value="${esc(s)}" ${essSel.has(s)?'checked':''}> ${esc(s)}</label>`).join('')}</fieldset>
     <label class="wide">${t('pol.reason')}<textarea id="c0Reason" rows="2" maxlength="500" placeholder="${t('c0.reason.ph')}">${esc((p.reserve&&p.reserve.reason)||'')}</textarea></label></div>
-   <p class="c0-ref">${ref?t('c0.ref',{a:money(ref.rmin),b:money(ref.rtarget),c:money(ref.rupper),m:(uc01()||{model:{model:'FOB'}}).model.model}):''} ${t('c0.days',{d:money(daily)})}</p>
+   <p class="c0-ref">${ref?tx('c0.ref',{a:money(ref.rmin),b:money(ref.rtarget),c:money(ref.rupper),m:(uc01()||{model:{model:'FOB'}}).model.model}):''} ${tx('c0.days',{d:money(daily)})}</p>
    <div id="c0Warn"></div><p id="c0Err" class="settings-error"></p>
    <div class="acts"><button class="btn sec" type="button" id="c0Cancel">${t('pol.cancel')}</button><button class="btn primary" type="submit" id="c0Save">${t('c0.save')}</button></div></form>`,m=>{
     const q=s=>m.querySelector(s),num=s=>{const x=q(s).value.trim();return x===''?null:parseNum(x)};
@@ -566,28 +600,28 @@ function openCash0Form(){
       if(md==='critical_days'){q('#c0Rmin').value=v(daily*CFG.liq.criticalDays.rmin[0]);q('#c0Rt').value=v(daily*CFG.liq.criticalDays.rtarget[0]);q('#c0Rup').value=v(daily*CFG.liq.criticalDays.rtarget[0]*CFG.liq.rupperDefaultRatio)}
       check()});
     const check=()=>{const w=[],rt=num('#c0Rt'),rmin=num('#c0Rmin');
-      if(ref&&rt!=null&&rt<ref.rmin)w.push(t('c0.w.p25'));if(rmin!=null&&rmin<15*daily)w.push(t('c0.w.days',{d:money(15*daily)}));
+      if(ref&&rt!=null&&rt<ref.rmin)w.push(tx('c0.w.p25'));if(rmin!=null&&rmin<15*daily)w.push(tx('c0.w.days',{d:money(15*daily)}));
       q('#c0Warn').innerHTML=w.map(x=>`<div class="callout warn"><span>⚠</span><div>${x}</div></div>`).join('')};
     m.querySelectorAll('#c0Rmin,#c0Rt,#c0Rup').forEach(i=>i.oninput=check);check();
     q('#c0Form').onsubmit=e=>{e.preventDefault();const tot=num('#c0Total'),res=num('#c0Restr')??0,rmin=num('#c0Rmin'),rt=num('#c0Rt'),rup=num('#c0Rup'),vat=num('#c0Vat'),reason=q('#c0Reason').value.trim(),err=q('#c0Err');
       // Validation (UC02.3 step 5): amounts ≥ 0, restricted ≤ total, 0 ≤ Rmin ≤ Rtarget < Rupper, reason 10–500 characters when the levels differ from the reference.
       if(tot!=null&&!(tot>=0)){err.textContent=t('c0.e.total');return}if(!(res>=0)||(tot!=null&&res>tot)){err.textContent=t('c0.e.restr');return}
-      if(!(rt>0)){err.textContent=t('c0.e.rt');return}if(!(rmin>=0&&rmin<=rt)){err.textContent=t('c0.e.rmin');return}if(!(rup>rt)){err.textContent=t('c0.e.rup');return}
+      if(!(rt>0)){err.textContent=tx('c0.e.rt');return}if(!(rmin>=0&&rmin<=rt)){err.textContent=tx('c0.e.rmin');return}if(!(rup>rt)){err.textContent=tx('c0.e.rup');return}
       if(vat!=null&&!(vat>=0&&vat<100)){err.textContent=t('c0.e.vat');return}
       const differs=!ref||[rmin,rt,rup].some((x,i)=>Math.abs(x-[ref.rmin,ref.rtarget,ref.rupper][i])>1);
       if((differs&&reason.length<10)||reason.length>500){err.textContent=t('pol.reason.err');return}
       const md=(m.querySelector('input[name=c0m]:checked')||{}).value||'direct',ess=[...m.querySelectorAll('.c0s input:checked')].map(x=>x.value);
       POLICY.set(f,{cash0:tot==null?null:{total:tot,restricted:res,confirmed:true},reserve:{method:md,rmin,rtarget:rt,rupper:rup,reason},amount_basis:q('#c0Basis').value,vat_rate:vat==null?null:vat/100,essential_suppliers:ess},reason);
       closeModal();policyCases(f);S.gapRequest=null;S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];
-      toast(t('c0.saved',{v:POLICY.versionId(f)}));refreshTab();renderDemoChips()};
+      toast(tx('c0.saved',{v:POLICY.versionId(f)}));refreshTab();renderDemoChips()};
   });
 }
 function rankTable(t3){
   const G=t3.inputs.gap,maxC=Math.max(...t3.ranked.map(r=>r.cpg));
   const rows=t3.ranked.map((r,i)=>{const cat=CAT.find(c=>c.id===r.product_id),isInv=INV_PRODUCTS.includes(r.product_id)&&r.invoice_id!=='–';
-    return `<tr class="${i===0?'top1':''}"><td><span class="rank">${r.rank}</span></td><td><b>${r.product_id}</b> · ${esc(cat.provider)}<small>${TYPE_VN[cat.type]||cat.type}${cat.recourse==='Y'?' · with recourse':''}</small></td><td>${isInv?`<span class="num">${r.invoice_id}</span>`:'<span class="neu">–</span>'}</td><td><span class="tier t${r.tier}">${r.tier===0?'0 · fully covered':'1 · partly covered'}</span></td><td class="num">${mm(r.cash)}</td><td class="num">${nf(r.cost/1e6,2)}M</td><td class="num">${nf(r.cpg*100,2)}%<div class="bar"><span style="width:${Math.max(6,r.cpg/maxC*100)}%"></span></div></td><td class="num">${r.days} days</td><td class="num ${r.gap_rem>0?'neg':'pos'}">${r.gap_rem>0?mm(r.gap_rem):'0'}</td><td class="num">${nf(r.ccc_after,1)}</td><td>${isInv?`<button class="btn sec sm" data-try="${r.invoice_id}|${r.product_id}">Try →</button>`:'<span class="subtle" style="font-size:10.5px;color:var(--muted)">Not an invoice lever</span>'}</td></tr>`}).join('');
+    return `<tr class="${i===0?'top1':''}"><td><span class="rank">${r.rank}</span></td><td><b>${r.product_id}</b> · ${esc(cat.provider)}<small>${TYPE_VN[cat.type]||cat.type}${cat.recourse==='Y'?' · with recourse':''}</small></td><td>${isInv?`<span class="num">${r.invoice_id}</span>`:'<span class="neu">–</span>'}</td><td><span class="tier t${r.tier}">${r.tier===0?'0 · fully covered':'1 · partly covered'}</span></td><td class="num">${mm(r.cash)}</td><td class="num">${nf(r.cost/1e6,2)}M</td><td class="num">${nf(r.cpg*100,2)}%<div class="bar"><span style="width:${Math.max(6,r.cpg/maxC*100)}%"></span></div></td><td class="num">${r.days} days</td><td class="num ${r.gap_rem>0?'neg':'pos'}">${r.gap_rem>0?mm(r.gap_rem):'0'}</td>${XP()?`<td class="num">${nf(r.ccc_after,1)}</td>`:''}<td>${isInv?`<button class="btn sec sm" data-try="${r.invoice_id}|${r.product_id}">Try →</button>`:'<span class="subtle" style="font-size:10.5px;color:var(--muted)">Not an invoice lever</span>'}</td></tr>`}).join('');
   const rej=t3.rejected.length?`<div style="margin-top:12px"><div class="legend" style="margin-bottom:6px"><b style="color:var(--ink2)">Excluded (${t3.rejected.length})</b></div>${t3.rejected.map(r=>`<span class="status gray" style="margin:0 6px 6px 0" title="${r.reason}">${r.product_id} · ${REJ[r.reason]||r.reason}</span>`).join('')}</div>`:'';
-  return `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Option</th><th>Invoice</th><th>Tier</th><th>Cash received</th><th>Cost</th><th>Cost / shortfall</th><th>Funding</th><th>Remaining gap</th><th>CCC after</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>${rej}`;
+  return `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Option</th><th>Invoice</th><th>Tier</th><th>Cash received</th><th>Cost</th><th>Cost / shortfall</th><th>Funding</th><th>Remaining gap</th>${XP()?'<th>CCC after</th>':''}<th></th></tr></thead><tbody>${rows}</tbody></table></div>${rej}`;
 }
 
 
@@ -1079,7 +1113,7 @@ msgs=THREADS.tv1;
 function currentChips(){
   const st=S.stage|0;
   if(st>=3)return SCEN();
-  if(st===2)return [{id:'f2',ask:t('chip.f2')},{id:'f2b',ask:t('chip.f2b')},{id:'f2c',ask:t('chip.cash0')}];
+  if(st===2)return [{id:'f2',ask:t('chip.f2')},{id:'f2b',ask:t('chip.f2b')},{id:'f2c',ask:tx('chip.cash0')}];
   if(st===1)return [{id:'f1',ask:t('chip.f1')},{id:'f1b',ask:t('chip.week')}];
   return [{id:'f0',ask:t('chip.f0')},{id:'f0b',ask:t('chip.f0b')}];
 }
@@ -1193,7 +1227,7 @@ function diagCardHTML(){
   return `<div class="liq-h"><div><h4>Working-capital diagnosis</h4><p>${S.firm} · ${esc(FIRMS[S.firm].short)} · as of ${fd(c.as_of)}${S.case==='stress_7'?' · assuming customers pay 7 days later':''}</p></div><span class="status amber"><i></i>simulated</span></div>
   <div class="liq-k">${kp('','DSO · collection',b.dso)}${kp('','DIO · storage',b.dio)}${kp('','DPO · supplier pay',b.dpo)}${kp('hl','CCC · cash cycle',b.ccc)}</div>
   <div class="liq-b"><div class="lb"><span>Receivables</span><b class="num">${money(c.ar)}</b></div><div class="lb"><span>Owned inventory</span><b class="num">${money(c.invv)}</b></div><div class="lb"><span>Payables</span><b class="num">${money(c.ap)}</b></div></div>
-  ${wNoteHTML()}<div class="liq-note"><span>◎</span><div><b>Largest pocket: ${bigN}</b>, ${money(bigV)}. One day of ${arBig?'DSO':'DIO'} is about ${money(per)} of capital, not guaranteed cash.</div></div>
+  ${XP()?wNoteHTML():`<div class="liq-note"><span>◎</span><div><b>${(()=>{const d=uc01();return esc(d.wc_class==='W2'?t('s.w.W2.'+(d.main_bottleneck||'INV')):d.wc_class==='unknown'?t('s.w.unknown'):t('s.w.'+d.wc_class))})()}</b>.</div></div>`}<div class="liq-note"><span>◎</span><div><b>Largest pocket: ${bigN}</b>, ${money(bigV)}.${XP()?` One day of ${arBig?'DSO':'DIO'} is about ${money(per)} of capital, not guaranteed cash.`:''}</div></div>
   ${tb?`<div class="liq-note"><span>◷</span><div><b>Concentrated receivables</b>: ${esc(tb.k)} makes up ${nf(tb.v/tot*100,1)}% of open receivables (${money(tb.v)}).</div></div>`:''}
   ${oldest?`<div class="liq-note"><span>▤</span><div><b>Oldest owned lot</b>: ${esc(oldest.name)}, ${oldest.days} days, ${money(oldest.own)}.${slowest&&slowest!==oldest?` <b>Largest slow-moving value</b>: ${esc(slowest.name)}, ${money(slowest.own)}.`:''}</div></div>`:''}`;
 }
@@ -1204,7 +1238,7 @@ async function respondLiq(bot,{focus}={}){
   else{const ans=NARR.finalize(NARR.uc01Answer(d,FIRMS[S.firm].name),{foreign:foreignNames()});S.lastAnswer=ans;await say(bot,ans.html)}
   const card=document.createElement('div');card.className='liq';card.innerHTML=diagCardHTML()+
     `<div class="liq-act"><button class="btn primary sm" type="button" data-a="dash">▦ View detailed dashboard</button></div>
-     <p class="liq-fn">CCC uses period-end balances, period ${c.N} days; goods held for subcontracting are excluded from owned inventory. W is classified with the garment-industry thresholds (FiinTrade 2016–2025, tv1.threshold.v2) and the default 5% materiality level because no company policy is set, so the result is provisional. ${DISC}</p>`;
+     <p class="liq-fn">${XP()?`CCC uses period-end balances, period ${c.N} days; goods held for subcontracting are excluded from owned inventory. W is classified with the garment-industry thresholds (FiinTrade 2016–2025, tv1.threshold.v2) and the default 5% materiality level because no company policy is set, so the result is provisional. ${DISC}`:t('s.foot',{src:isUserFirm(S.firm)?t('s.src.own'):'Sample data'})}</p>`;
   bot.appendChild(card);scroll();
   $('[data-a=dash]',card).onclick=()=>setTab('dash');
     advance(1,bot);suggestRow(bot,nextSuggest());
@@ -1233,7 +1267,7 @@ async function respondCause(bot,{focus}={}){
   }
   const list=focus?EPS.filter(e=>e.k===focus):EPS,big=largestGap(),tb=openAR(c).top[0];
   if(focus)await say(bot,`<p>${t('cf.focus',{k:focus})} <b>gap ${focus}</b> (${fds(list[0].start)}${list[0].start!==list[0].end?'–'+fds(list[0].end):''}, peak shortfall <b>${mm(list[0].peak)}</b>).</p>`);
-  else await say(bot,`<p>There are <b>${EPS.length} gap${EPS.length>1?'s':''}</b> below Rtarget ${money(c.buffer)}:</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>${t('cf.intro')}</p>`);
+  else await say(bot,`<p>${tx('na.gaps',{n:EPS.length,rt:money(c.buffer)}).replace(' gaps</b>',EPS.length>1?' gaps</b>':' gap</b>')}</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>${t('cf.intro')}</p>`);
   S.causes=S.causes||{};
   const wrap=document.createElement('div');wrap.className='gap-accs';
   wrap.innerHTML=list.map(e=>{
@@ -1259,7 +1293,7 @@ async function respondRank(bot,{focus}={}){
   // SRS-DECISION: asking for the financing ranking in the chat is the user's explicit request; the gap_request is created here when
   // UC02.7 allows it, otherwise the reason is given and nothing is ranked.
   if(!S.gapRequest){const {u,d,chk}=gapRequestState();
-    if(!chk.ok){await say(bot,`<p>${chk.label==='idle_cash'?t('gr.idle')+': ':''}${t('gr.block.'+chk.reason)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
+    if(!chk.ok){await say(bot,`<p>${chk.label==='idle_cash'?tx('gr.idle')+': ':''}${tx('gr.block.'+chk.reason)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
     S.gapRequest=ENGINE.buildGapRequest(u,d,{scenario:S.case,health:modelHealthNow(),createdAt:new Date().toISOString()})}
   const gr=S.gapRequest,list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
   await toolCall(bot,'match_financing',1,{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},()=>{addLog({tool:'match_financing',tier:1,args:{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},status:'ok',summary:res.map(({e,t3})=>`gap ${e.k}: ${t3.ranked[0]?t3.ranked[0].product_id:'none'}`).join('; ')});return {}},{ms:520});
@@ -1267,10 +1301,10 @@ async function respondRank(bot,{focus}={}){
   res.forEach(({e,t3})=>t3.ranked.slice(0,3).forEach(x=>{if(x.invoice_id&&x.invoice_id!=='–'){if(!use.has(x.invoice_id))use.set(x.invoice_id,new Set());use.get(x.invoice_id).add(e.k)}}));
   const dups=[...use].filter(([,g])=>g.size>1);
   const cause=focus?(S.causes||{})[focus]:S.cause;
-  await say(bot,`<p>${t('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p>${cause?`<p>${t('cf.from',{k:focus||''})} ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
+  await say(bot,`<p>${tx('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p>${cause?`<p>${t('cf.from',{k:focus||''})} ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
   const rows=res.map(({e,t3})=>{const b=t3.ranked[0];return `<tr data-gap="${e.k}"><td><b>Gap ${e.k}</b></td><td class="num">${mm(e.peak)}</td><td class="num">${fd(e.start)}</td><td>${b?`<b>${b.product_id}</b>${b.invoice_id!=='–'?' · '+b.invoice_id:''}`:'—'}</td><td class="num">${b?nf(b.cost/1e6,2)+'M':'—'}</td><td>${!b?'—':b.gap_rem>0?`<span class="status amber">Partly · short ${mm(b.gap_rem)}</span>`:'<span class="status green">Yes</span>'}</td></tr>`}).join('');
   const card=document.createElement('div');card.className='liq rank-all';
-  card.innerHTML=`<div class="liq-h"><div><h4>Financing summary</h4><p>Best option per gap · ${CAT.length} products in the synthetic catalogue</p></div><span class="status amber"><i></i>provisional</span></div>
+  card.innerHTML=`<div class="liq-h"><div><h4>Financing summary</h4><p>Best option per gap · ${CAT.length} products in the synthetic catalogue</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>
    <div class="table-wrap"><table class="dtable rank-sum"><thead><tr><th>Gap</th><th>Peak</th><th>Need date</th><th>Best option</th><th>Cost</th><th>Covered</th></tr></thead><tbody>${rows}</tbody></table></div>
    ${dups.length?`<div class="liq-note"><span>⚠</span><div><b>The same invoice is proposed for more than one gap.</b> ${dups.map(([inv,g])=>`${inv} → gaps ${[...g].join(', ')}`).join('; ')}. An invoice can be financed only once: use it for one gap and take the next option for the others.</div></div>`:''}
    <div class="gap-tops">${res.map(({e,t3})=>`<details class="gap-top" data-gap-top="${e.k}"><summary>Gap ${e.k} · top 3 options · short ${mm(e.peak)}</summary><ol>${t3.ranked.slice(0,3).map(x=>`<li><b>${x.product_id}</b> (${esc(CAT.find(z=>z.id===x.product_id).provider)})${x.invoice_id!=='–'?' · '+x.invoice_id:''}: receives ${mm(x.cash)}, cost ${nf(x.cost/1e6,2)}M (${nf(x.cpg*100,2)}% of the shortfall), ${x.gap_rem>0?'still short '+mm(x.gap_rem):'fully covered'}.</li>`).join('')}</ol>${t3.rejected.length?`<p class="rej">Rejected: ${t3.rejected.map(x=>x.product_id).join(', ')}</p>`:''}</details>`).join('')}</div>
@@ -1982,7 +2016,7 @@ function flowChartSVG(c,M,ep){
   let s=`<svg viewBox="0 0 ${Wd} ${Hd}" role="img" aria-label="Cash in, out and week-end balance over ${W.length} weeks">`;
   W.forEach((x,i)=>{if(hw.has(x.w))s+=`<rect class="gapwk" x="${(l+step*i+1).toFixed(1)}" y="${t}" width="${(step-2).toFixed(1)}" height="${ih}" rx="4"/>`});
   tk.forEach(v=>{s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--lc-color-border-default)"/><text x="${l-6}" y="${Y(v)+3.5}" text-anchor="end" class="ax">${nf(Math.round(v/1e6)||0,0)}</text>`});
-  s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="var(--lc-color-status-error)" stroke-dasharray="5 4" stroke-width="1.2"/><text x="${Wd-r}" y="${Y(buf)-4}" text-anchor="end" class="ax" fill="var(--lc-color-status-error)">Rtarget ${nf(buf/1e6,0)}</text>`;
+  s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="var(--lc-color-status-error)" stroke-dasharray="5 4" stroke-width="1.2"/><text x="${Wd-r}" y="${Y(buf)-4}" text-anchor="end" class="ax" fill="var(--lc-color-status-error)">${RN('rt')} ${nf(buf/1e6,0)}</text>`;
   W.forEach((x,i)=>{const cx=l+step*(i+.5),lv=alertLevel(x.bal,buf,rmin),ml=alertLevel(x.min,buf,rmin);
     s+=`<g class="wk" data-w="${x.w}" data-tt="${esc(`<b>Week ${x.w} · ${fds(isoOf(x.start))}–${fds(isoOf(x.end))}</b><i style='background:var(--lc-color-status-success)'></i>In ${mm(x.inn)}<br><i style='background:var(--lc-color-status-error)'></i>Out ${mm(x.out)}<br><i style='background:${LV[lv].color}'></i>Week-end balance ${mm(x.bal)} · ${LV[lv].label}<br><i style='background:${LV[ml].color}'></i>Lowest in week ${mm(x.min)} on ${fds(x.minDay)} · ${LV[ml].label}${hw.has(x.w)?`<br>Part of gap ${ep.k}`:''}`)}"><rect class="wkhit" x="${l+step*i}" y="${t}" width="${step}" height="${ih}"/>
     <rect class="bx" style="--bi:${i}" x="${cx-bw-1}" y="${Y(x.inn)}" width="${bw}" height="${Math.max(0,Y(0)-Y(x.inn))}" rx="3" fill="var(--lc-color-status-success-bg)" stroke="var(--lc-color-status-success)"/>
@@ -2068,8 +2102,30 @@ function wNoteHTML(){
   if(W.w==='unknown')return `<div class="liq-note"><span>W</span><div><b>W axis: not enough data</b> to classify; no matrix cell is assigned.</div></div>`;
   return `<div class="liq-note ${W.w==='W0'?'ok':W.w==='W2'?'red':''}"><span>W</span><div><b>${W_EN[W.w]}</b> · bottleneck pattern ${W.bn} (${BN_EN[W.bn]})${W.main?` · main bottleneck: ${ITEM_EN[W.main]}`:''}${W.mar?` · capital above threshold ${money(W.mar)}, materiality ${pct(W.share)}`:''}${W.modelDeclared?'':' · default FOB thresholds – business model not confirmed'}. Provisional result.</div></div>`;
 }
+function liquidityStateSimpleHTML(){
+  const c=baseCase(),W=classifyW(c),T=computeTH(c),same=W.snapshot_id===(DATA.snaps[S.firm]||{}).snapshot_id,cell=same&&W.w!=='unknown'&&T.th!=='unknown'?MATRIX[W.w][T.th]:null;
+  const main=W.main?t('item.'+W.main).toLowerCase():'',tile=(lb,v,sub,cls='')=>`<div class="ls-tile ${cls}"><span>${lb}</span><b class="num">${v}</b>${sub?`<small>${sub}</small>`:''}</div>`;
+  const parts=['AR','INV'].filter(k=>(W.item_states.find(i=>i.item===k)||{}).c>0).map(k=>t('s.part.'+k)).join(' + ');
+  const marTile=W.mar>0?tile(t('s.mar'),money(W.mar),parts,'hl'):'';
+  let cls='unknown',icon='?',badge='',lead=t('s.ls.lead.unknown'),tiles='',acts='';
+  const body=cell&&I18N.en['s.ls.'+cell]?t('s.ls.'+cell,{main,v:money(W.mar)}):'';
+  if(T.th==='TH01'){cls='th01 '+T.level;icon='⚠';badge=t('s.ls.badge',{l:LV[T.level].label});
+    lead=t('s.ls.lead.TH01',{rt:money(T.Rt),d:fd(T.firstBelow),min:money(T.minC),low:fd(T.minD)});
+    tiles=tile(t('s.ls.peak'),money(T.peakGap),t('s.ls.on',{d:fd(T.minD)}))+tile(t('s.ls.out'),T.firstNeg?fd(T.firstNeg):t('s.ls.never'),'')+tile(t('s.ls.need'),money(T.need),'')+marTile;
+    acts=`<button class="btn primary" type="button" data-liq="fund">Find financing to cover the gap →</button>`}
+  else if(T.th==='TH02'){cls='th02';icon='✓';tiles=tile(t('s.ls.low'),money(T.minC),t('s.ls.on',{d:fd(T.minD)}))+tile(t('s.ls.room'),money(T.minC-T.Rt),'')+marTile;
+    lead=t('s.ls.lead.TH02',{rt:money(T.Rt)})}
+  else if(T.th==='TH03'){cls='th03';icon='◆';badge=t('s.ls.ref');lead=t('s.ls.lead.TH03',{rup:money(T.Rup),n:T.run,a:fd(T.window[0]),b:fd(T.window[1])});
+    tiles=tile(t('s.ls.safe'),money(T.safe),'','hl')+tile(t('s.ls.low'),money(T.minC),t('s.ls.on',{d:fd(T.minD)}))+tile(t('s.rup'),money(T.Rup),'')+marTile;
+    acts=`<div class="ls-opts"><div class="ls-opts-h">${t('s.ls.opts')}</div>${['D1','D2','D3'].map(k=>`<div class="ls-opt"><b>${k}</b><div><strong>${t('s.ls.'+k)}</strong></div></div>`).join('')}</div>`}
+  return `<section class="lstate ${cls}" data-wid="state" aria-label="Liquidity state">
+    <header class="ls-head"><span class="ls-ic" aria-hidden="true">${icon}</span><div class="ls-tt"><h2>${t('s.ls.'+(T.th||'unknown'))}</h2>${badge?`<span class="ls-badge">${badge}</span>`:''}</div></header>
+    <p class="ls-lead">${lead}</p>${tiles?`<div class="ls-tiles">${tiles}</div>`:''}${body?`<p class="ls-msg">${body}</p>`:''}${acts?`<div class="ls-acts">${acts}</div>`:''}
+    ${T.th!=='unknown'?alertLegendHTML({surplus:T.th==='TH03'}):''}</section>`;
+}
 // Liquidity-state card at the top of the dashboard: rendered by cash state TH01 / TH02 / TH03 combined with the W axis.
 function liquidityStateHTML(){
+  if(!XP())return liquidityStateSimpleHTML();
   const c=baseCase(),W=classifyW(c),T=computeTH(c),same=W.snapshot_id===(DATA.snaps[S.firm]||{}).snapshot_id,cell=same&&W.w!=='unknown'&&T.th!=='unknown'?MATRIX[W.w][T.th]:null;
   const main=W.main?ITEM_EN[W.main]:'',tile=(lb,v,sub,cls='')=>`<div class="ls-tile ${cls}"><span>${lb}</span><b class="num">${v}</b><small>${sub}</small></div>`;
   const marTile=W.mar>0?tile('Capital tied up above threshold',money(W.mar),`money_at_risk · ${main||'—'} · ${pct(W.share)} of current assets`,'hl'):tile('Capital tied up above threshold','0',`No item above its threshold (${W.bn})`);
@@ -2129,6 +2185,23 @@ function goFinancingFlow(){
    run; nothing is recalculated when the screen is drawn. ===== */
 S.dash={custOrder:'exposure',sort:{},expert:false};
 try{S.dash.expert=localStorage.getItem('lilact.expert.v1')==='1'}catch(e){}
+/* Simple view (default) and Expert mode: calculations always run; the simple view shows results in plain words and Expert mode
+   adds formulas, rule ids, codes, threshold sources, versions, ids and raw VND. The choice is remembered per browser. */
+SIMPLE=()=>!S.dash.expert;
+const XP=()=>!!S.dash.expert;
+function setExpert(on){S.dash.expert=!!on;try{localStorage.setItem('lilact.expert.v1',on?'1':'0')}catch(x){}refreshTab();renderDemoChips()}
+const expertToggleHTML=id=>`<label class="uc-exp"><input type="checkbox" id="${id}" class="xpChk" ${XP()?'checked':''}> ${t('ctl.expert')}</label>`;
+const bindExpert=p=>$$('.xpChk',p).forEach(x=>x.onchange=e=>setExpert(e.target.checked));
+const RN=k=>XP()?{rt:'Rtarget',rmin:'Rmin',rup:'Rupper'}[k]:t('s.'+k);
+// Item status from its signal level c_i (0 normal, 1 watch, 2 severe); "not applicable" without a value.
+const stOfC=it=>it.value==null?'n/a':it.c>=2?'severe':it.c===1?'watch':'normal';
+const stCls=st=>st==='severe'?'red':st==='watch'?'amber':st==='n/a'?'gray':'green';
+const estBadge=reason=>`<span class="est" tabindex="0" title="${esc(reason)}" aria-label="${esc(t('s.est')+': '+reason)}">${t('s.est')}</span>`;
+function estReasonUC01(d){const p=d.provisional||[];return p.includes('MODEL_NOT_DECLARED')?t('est.model'):p.includes('COGS_CONVERTED')?t('est.cogs'):p.includes('CURRENT_ASSETS_ASSUMED')?t('est.ca'):p.length?t('est.data'):''}
+const srcLabel=()=>isUserFirm(S.firm)?t('s.src.own'):t('s.src.sample',{f:S.firm});
+// Priority of a counterparty or lot in the simple tables: a severe finding → act now; a watch finding or anything overdue → watch.
+function prioOf(levels,overdue){const mx=Math.max(0,...levels);return mx>=2?'act':mx===1||overdue>0?'watch':'ok'}
+const prioHTML=(p,bn0)=>bn0?t('prio.'+p):`<span class="status ${p==='act'?'red':p==='watch'?'amber':'green'}">${t('prio.'+p)}</span>`;
 // SRS-DECISION: sample data is stamped with the time it is loaded into the session (fresh); uploads use their upload time, so an upload
 // older than 72 hours is expired (provisional, no request to UC03).
 function freshness(snap){
@@ -2142,6 +2215,8 @@ const daysS=v=>v==null?t('st.n/a'):nf(v,1);
 const rawVND=v=>S.dash.expert&&v!=null?` <small class="raw num" title="${esc(t('exp.raw'))}">${nf(Math.round(v),0)} VND</small>`:'';
 const lbl=k=>t('lbl.'+k);
 function dataSourceHTML(d,snap){
+  if(!XP()){const est=estReasonUC01(d),upd=snap.source.at?fd(String(snap.source.at).slice(0,10)):'—';
+    return `<div class="uc-src" data-wid="source"><div class="uc-src-l"><span>${t('s.src',{src:srcLabel(),asof:fd(d.as_of),upd})}</span>${est?estBadge(est):''}${expertToggleHTML('ucExpert')}</div></div>`}
   const fr=freshness(snap),at=snap.source.at?fdt(snap.source.at):'—',base=DATA.snaps[S.firm];
   const iss=(base.sales||[]).concat(base.purchases||[]).map(x=>x.issue).filter(Boolean).sort();
   const minAsOf=iss.length?isoOf(dn(iss[0])+1):base.data_as_of;
@@ -2150,11 +2225,27 @@ function dataSourceHTML(d,snap){
    <div class="uc-ctl"><label>${t('ctl.asof')}<input type="date" id="ucAsOf" value="${d.as_of}" min="${minAsOf}" max="${base.data_as_of}"></label>
     <label>${t('ctl.start')}<input type="date" id="ucStart" value="${d.period_start}" max="${isoOf(dn(d.as_of)-1)}"></label>
     ${S.uc01Sel?`<button class="btn sec sm" type="button" id="ucReset">${t('ctl.reset')}</button>`:''}
-    <label class="uc-exp"><input type="checkbox" id="ucExpert" ${S.dash.expert?'checked':''}> ${t('ctl.expert')}</label>
+    ${expertToggleHTML('ucExpert')}
     <button class="btn sec sm" type="button" id="ucPolicy">${t('ctl.policy')}</button></div>
    ${S.uc01Sel?`<p class="uc-note">${t('ctl.note')}</p>`:''}</div>`;
 }
+function wCardSimpleHTML(d){
+  const W=d.wc_class,main=d.main_bottleneck,est=estReasonUC01(d);
+  const head=W==='unknown'?(d.inactive?t('s.w.inactive'):t('s.w.unknown')):W==='W2'?t('s.w.W2.'+(main||'INV')):t('s.w.'+W);
+  const others=d.item_states.filter(i=>i.c>0&&i.item!==main).map(i=>`${t('item.'+i.item)} (${t('st.'+stOfC(i))})`);
+  return `<div class="card wcard ${W}" data-wid="w"><div class="wc-h"><span class="ls-w ${W}">${t('s.wl.'+W)}</span>${est?estBadge(est):''}</div>
+   <p class="wc-s">${esc(head)}</p><dl class="wc-dl">${main&&W!=='W0'&&W!=='unknown'?`<div><dt>${t('s.main')}</dt><dd>${t('item.'+main)}</dd></div>`:''}${others.length?`<div><dt>${t('s.also')}</dt><dd>${others.join(' · ')}</dd></div>`:''}</dl></div>`;
+}
+function marTilesSimpleHTML(d){
+  if(d.wc_class==='unknown')return '';
+  const ob=`<div class="card mtile ob" data-wid="ob"><span>${t('s.ob')}</span><b class="num">${money(d.obligation_overdue)}</b></div>`;
+  if(d.bn_pattern==='BN0')return `<div class="card mtile bn0" data-wid="mar"><span>✓ ${t('s.bn0')}</span></div>`+ob;
+  const parts=['AR','INV'].filter(k=>(d.item_states.find(i=>i.item===k)||{}).c>0).map(k=>t('s.part.'+k)).join(' + ');
+  return `<div class="card mtile hl" data-wid="mar"><span>${t('s.mar')}</span><b class="num">${money(d.money_at_risk)}</b>${parts?`<small>${parts}</small>`:''}</div>
+   <div class="card mtile"><span>${t('s.impact')}</span><b class="num">${pct(d.materiality_share||0,0)}</b><small>${t('s.impact.sub',{l:t('s.lvl.'+d.wc_class)})}</small></div>`+ob;
+}
 function wCardHTML(d){
+  if(!XP())return wCardSimpleHTML(d);
   const W=d.wc_class,main=d.main_bottleneck?t('item.'+d.main_bottleneck):'',share=pctS(d.materiality_share,1);
   const s=W==='unknown'?(d.inactive?t('w.s.inactive'):t('w.s.unknown',{fields:d.missing.join(', ')})):W==='W0'?t('w.s.W0')
     :W==='W1'?t('w.s.W1',{items:d.cause_items.map(k=>t('item.'+k)).join(', '),share})
@@ -2168,6 +2259,7 @@ function wCardHTML(d){
    ${S.dash.expert?`<p class="expert">${t('exp.rules')}: ${d.rule_ids.join(', ')||'—'}${d.info_rules.length?' · '+d.info_rules.join(', '):''} · ${t('exp.run')}: ${d.run_id} · ${t('exp.versions')}: ${d.formula_version}, ${d.threshold_version}, ${esc(d.policy_version)}</p>`:''}</div>`;
 }
 function marTilesHTML(d){
+  if(!XP())return marTilesSimpleHTML(d);
   if(d.wc_class==='unknown')return '';
   const ob=`<div class="card mtile ob" data-wid="ob"><span>${t('ob.t')}</span><b class="num">${money(d.obligation_overdue)}</b>${rawVND(d.obligation_overdue)}<small>${t('ob.sub')}</small></div>`;
   if(d.bn_pattern==='BN0')return `<div class="card mtile bn0" data-wid="mar"><span>✓ ${t('bn0.t')}</span><small>${t('bn0.sub')}</small></div>`+ob;
@@ -2182,9 +2274,30 @@ function tbarHTML(it){
   return `<div class="tbar" role="img" aria-label="${it.metric} ${daysS(it.value)}; ${marks.map(m=>t('mk.'+m[0])+' '+nf(m[1],1)).join(', ')}"><div class="tb-track">${zones}
     ${it.value!=null?`<span class="tb-fill" style="width:${X(it.value)}%"></span><span class="tb-val" style="left:${X(it.value)}%"></span>`:''}
     ${marks.map(m=>`<span class="tb-mk mk-${m[0]}" style="left:${X(m[1])}%" title="${t('mk.'+m[0])} ${nf(m[1],1)}"></span>`).join('')}</div>
-   <div class="tb-lbl">${marks.map((m,i)=>{const close=i>0&&X(m[1])-X(marks[i-1][1])<16;return `<span class="${close&&i%2?'r2':''}" style="left:${X(m[1])}%"><b>${nf(m[1],1)}</b>${t('mk.'+m[0]).replace(/ P\d+.*$/,'')}</span>`}).join('')}</div></div>`;
+   ${(()=>{const last=[],rows=marks.map(m=>{const x=X(m[1]);let r=0;while(last[r]!=null&&x-last[r]<26)r++;last[r]=x;return r});
+     return `<div class="tb-lbl" style="height:${16+13*Math.max(...rows)}px">${marks.map((m,i)=>`<span class="r${rows[i]}" style="left:${X(m[1])}%"><b>${nf(m[1],1)}</b>${t('mk.'+m[0]).replace(/ P\d+.*$/,'')}</span>`).join('')}</div>`})()}</div>`;
 }
+function sbarHTML(it){
+  if(it.value==null)return '';
+  const z=it.item==='AP'?[it.high,null]:[it.watch,it.severe],max=Math.max(z[1]||z[0]*1.6,it.value)*1.15,X=v=>Math.max(0,Math.min(100,v/max*100));
+  const g=X(z[0]),a=z[1]==null?100-g:X(z[1])-g,r=z[1]==null?0:100-X(z[1]);
+  return `<div class="sbar" role="img" aria-label="${it.metric} ${nf(it.value,1)} ${t('unit.days')}: ${t('st.'+stOfC(it))}"><div class="sz"><span class="g" style="width:${g}%"></span><span class="a" style="width:${a}%"></span>${r?`<span class="r" style="width:${r}%"></span>`:''}</div><i class="sv" style="left:${X(it.value)}%"></i></div>`;
+}
+function itemCardSimpleHTML(d,it){
+  const st=d.bn_pattern==='BN0'?(it.value==null?'n/a':'normal'):stOfC(it);
+  const line=it.value==null?t('s.item.missing'):it.item==='AP'?(it.c>0?t('s.ap.overdue'):it.info_high?t('s.ap.slow'):t('s.normal'))
+    :it.value>it.watch?t('s.above',{d:nf(Math.round(it.value-it.watch),0)}):t('s.normal');
+  return `<div class="card icard st-${st}" data-wid="${it.item.toLowerCase()}"><div class="ic-h"><b>${t('item.'+it.item)}</b><span class="status ${stCls(st)}"><i></i>${t('st.'+st)}</span></div>
+   <div class="ic-v"><span class="num big">${it.balance!=null?money(it.balance):'—'}</span><span class="ic-d"><b class="num">${daysS(it.value)}</b> ${t('unit.days')}</span></div>
+   ${sbarHTML(it)}<p class="ic-n">${line}</p></div>`;
+}
+// Threshold labels under the bars: each label goes on the first row where it does not overlap a label already placed (measured).
+function placeBarLabels(root=document){root.querySelectorAll('.tb-lbl').forEach(l=>{if(!l.offsetWidth)return;const ends=[];let max=0;
+  [...l.children].forEach(s=>{s.className='';const r=s.getBoundingClientRect();let row=0;while(ends[row]!=null&&r.left<ends[row]+4)row++;ends[row]=r.right;s.className='r'+row;max=Math.max(max,row)});
+  l.style.height=(16+13*max)+'px'})}
+if(window.ResizeObserver&&document.getElementById('pane-dash'))new ResizeObserver(()=>placeBarLabels(document.getElementById('pane-dash'))).observe(document.getElementById('pane-dash'));
 function itemCardHTML(d,it){
+  if(!XP())return itemCardSimpleHTML(d,it);
   const n=d.N,m=d.metrics,bn0=d.bn_pattern==='BN0',notes=[];
   if(it.item!=='AP'&&it.c===0&&it.headroom!=null)notes.push((it.near_threshold?`<b class="near">⚑ ${t('item.near',{p:pctS(it.value/it.watch,0)})}</b> · `:'')+t('item.headroom',{d:nf(it.headroom,1)}));
   if(it.item!=='AP'&&it.value!=null&&it.value>it.watch)notes.push(t('item.above',{d:nf(it.value-it.watch,1)}));
@@ -2192,9 +2305,9 @@ function itemCardHTML(d,it){
   if(it.info_high)notes.push(t('item.apinfo'));
   if(it.item!=='AR'&&m.cogs_src==='converted')notes.push(t('item.cogsprov',{n,d:m.cogs_days}));
   if(it.value==null)notes.push(t('item.missing',{f:it.balance==null?t('item.'+it.item):it.item==='AR'?'revenue':'cogs'}));
-  const cls=bn0?'gray':it.status==='severe'?'red':it.status==='watch'?'amber':it.status==='n/a'?'gray':'green';
+  const st=stOfC(it),cls=bn0?'gray':stCls(st);
   const src=thrSrcName(d.model.src==='owner_policy'?'owner_policy':'verified_reference');
-  return `<div class="card icard st-${bn0?'normal':it.status}" data-wid="${it.item.toLowerCase()}"><div class="ic-h"><b>${t('item.'+it.item)}</b><span class="status ${cls}"><i></i>${t('st.'+it.status)}</span></div>
+  return `<div class="card icard st-${bn0?'normal':st}" data-wid="${it.item.toLowerCase()}"><div class="ic-h"><b>${t('item.'+it.item)}</b><span class="status ${cls}"><i></i>${t('st.'+st)}</span></div>
    <div class="ic-v"><span class="num big">${it.balance!=null?money(it.balance):'—'}</span>${rawVND(it.balance)}<span class="ic-d"><b class="num">${daysS(it.value)}</b> ${t('unit.days')} · ${it.metric}</span></div>
    ${tbarHTML(it)}<p class="ic-cap">${t('item.cap.'+it.item,{n})}</p>${notes.map(x=>`<p class="ic-n">${x}</p>`).join('')}
    <p class="ic-src">${t('thr.src',{s:src,v:d.threshold_version})}${it.provisional?` · <span class="prov">${t('w.prov')}</span>`:''}</p>
@@ -2206,7 +2319,31 @@ function sortRows(rows,kind,cols){
   return rows.slice().sort((a,b)=>{const x=cols[s.col](a),y=cols[s.col](b);return (x>y?1:x<y?-1:0)*(s.dir==='asc'?1:-1)});
 }
 const sortTh=(kind,col,label)=>{const s=S.dash.sort[kind],on=s&&s.col===col;return `<th class="num sortable${on?' on':''}" data-sort="${kind}|${col}" aria-sort="${on?(s.dir==='asc'?'ascending':'descending'):'none'}" tabindex="0">${label}${on?(s.dir==='asc'?' ▲':' ▼'):''}</th>`};
+function detailTablesSimpleHTML(d){
+  const P=d.profiles,bn0=d.bn_pattern==='BN0',lv=pred=>d.findings.filter(pred).map(f=>f.level||1);
+  const th=(kind,col,label)=>sortTh(kind,col,label),tbl=(cls,head,rows)=>`<div class="table-wrap"><table class="dtable ${cls}"><thead><tr>${head}</tr></thead><tbody>${rows||`<tr><td colspan="6" class="empty">${t('tbl.empty')}</td></tr>`}</tbody></table></div>`;
+  const totAR=P.customers.reduce((a,c)=>a+c.ar,0)||1,byKey=new Map(P.customers.map(c=>[c.key,c]));
+  const custs=sortRows(P.exposureOrder.map(k=>byKey.get(k)).map(c=>({...c,prio:prioOf(lv(f=>f.object.key===c.key),c.overdue)})),'scust',{ar:x=>x.ar,share:x=>x.ar_share,overdue:x=>x.overdue,maxod:x=>x.max_overdue});
+  const cRows=custs.map(c=>`<tr data-ev="cust|${esc(c.key)}" tabindex="0" class="${!bn0&&c.prio!=='ok'?'flag':''}"><td><b>${esc(c.name)}</b></td><td class="num">${money(c.ar)}</td><td class="num">${pctS(c.ar_share,1)}</td>
+    <td class="num ${!bn0&&c.overdue>0?'neg':''}">${money(c.overdue)}</td><td class="num">${c.max_overdue}</td><td>${prioHTML(c.prio,bn0)}</td></tr>`).join('');
+  const own=P.lots.filter(l=>l.status!=='excluded'),totInv=own.reduce((a,l)=>a+l.value,0)||1;
+  const lots=sortRows(P.lots.map(l=>({...l,prio:l.status==='excluded'?'ok':Math.max(prioOf(lv(f=>f.object.type==='lot'&&f.object.name===l.name),0)==='act'?2:0,l.status==='slow'||l.status==='cancelled'?1:0)===2?'act':l.status==='slow'||l.status==='cancelled'?'watch':'ok'})),'slot',{value:x=>x.value,share:x=>x.value,age:x=>x.days??-1});
+  const lRows=lots.map(l=>`<tr data-ev="lot|${esc(l.name)}" tabindex="0" class="${!bn0&&l.prio!=='ok'?'flag':''}"><td><b>${esc(l.name)}</b>${l.status==='excluded'?`<small>${lbl('excluded')}</small>`:''}</td><td class="num">${money(l.value)}</td>
+    <td class="num">${l.status==='excluded'?'—':pctS(l.value/totInv,1)}</td><td class="num">${l.days==null?'—':l.days}</td><td>${prioHTML(l.prio,bn0)}</td></tr>`).join('');
+  const totAP=P.suppliers.reduce((a,s)=>a+s.ap,0)||1;
+  const sups=sortRows(P.suppliers.slice().sort((a,b)=>b.ap-a.ap).map(s=>({...s,prio:prioOf(lv(f=>f.object.key===s.key),s.overdue)})),'ssup',{ap:x=>x.ap,share:x=>x.ap,overdue:x=>x.overdue,maxod:x=>x.max_overdue});
+  const sRows=sups.map(s=>`<tr data-ev="sup|${esc(s.key)}" tabindex="0" class="${!bn0&&s.prio!=='ok'?'flag':''}"><td><b>${esc(s.name)}</b></td><td class="num">${money(s.ap)}</td><td class="num">${pctS(s.ap/totAP,1)}</td>
+    <td class="num ${!bn0&&s.overdue>0?'neg':''}">${money(s.overdue)}</td><td class="num">${s.max_overdue}</td><td>${prioHTML(s.prio,bn0)}</td></tr>`).join('');
+  return `<div class="card dtables simple" data-wid="tables">
+   <div class="dt-h"><h3>${t('tbl.customers')}</h3></div>
+   ${tbl('t-cust',`<th>${t('col.name')}</th>${th('scust','ar',t('col.amount2'))}${th('scust','share',t('col.share'))}${th('scust','overdue',t('col.overdue'))}${th('scust','maxod',t('col.longest'))}<th>${t('col.prio')}</th>`,cRows)}
+   <div class="dt-h"><h3>${t('tbl.lots')}</h3></div>
+   ${tbl('t-lot',`<th>${t('col.name')}</th>${th('slot','value',t('col.amount2'))}${th('slot','share',t('col.share'))}${th('slot','age',t('col.days2'))}<th>${t('col.prio')}</th>`,lRows)}
+   <div class="dt-h"><h3>${t('tbl.suppliers')}</h3></div>
+   ${tbl('t-sup',`<th>${t('col.name')}</th>${th('ssup','ap',t('col.amount2'))}${th('ssup','share',t('col.share'))}${th('ssup','overdue',t('col.overdue'))}${th('ssup','maxod',t('col.longest'))}<th>${t('col.prio')}</th>`,sRows)}</div>`;
+}
 function detailTablesHTML(d){
+  if(!XP())return detailTablesSimpleHTML(d);
   const P=d.profiles,bn0=d.bn_pattern==='BN0',flagged=new Set(d.findings.filter(f=>f.object.type==='customer').map(f=>f.object.key));
   const cols={ar:x=>x.ar,share:x=>x.ar_share,overdue:x=>x.overdue,maxod:x=>x.max_overdue,late:x=>x.late_pos_wavg??-1,tier:x=>x.tier};
   const order=S.dash.custOrder==='intervention'?P.interventionOrder:P.exposureOrder,byKey=new Map(P.customers.map(c=>[c.key,c]));
@@ -2242,14 +2379,16 @@ function openEvidence(kind,key){
   if(kind==='cust'){obj=P.customers.find(c=>c.key===key);rows=(snap.sales||[]).filter(s=>s.key===key);
     const f=d.findings.filter(x=>x.object.key===key);
     info=[[t('col.ar'),money(obj.ar)],[t('col.overdue'),money(obj.overdue)],['1–30 / 31–60 / 61–90 / >90',['d1_30','d31_60','d61_90','d90p'].map(k=>money(obj.buckets[k])).join(' / ')],
-      [t('col.maxod'),obj.max_overdue+' '+t('unit.days')],[t('col.late'),obj.late_pos_wavg==null?'—':nf(obj.late_pos_wavg,1)+' '+t('unit.days')+` (${obj.paid_count})`],['ρ max',rows.filter(r=>r.rho!=null&&r.open&&r.dpd>0).reduce((a,r)=>Math.max(a,r.rho),0).toFixed(2)],
-      [t('exp.rules'),f.map(x=>`${x.rule_id} (${x.level===2?t('st.severe'):t('st.watch')})`).join(', ')||'—'],['ρ',`${t('st.watch')} > ${CFG.ar.rhoWatch} · ${t('st.severe')} > ${CFG.ar.rhoSevere} (${thrSrcName('demo_assumption')})`]]}
+      [t('col.maxod'),obj.max_overdue+' '+t('unit.days')],[t('col.late'),obj.late_pos_wavg==null?'—':nf(obj.late_pos_wavg,1)+' '+t('unit.days')+` (${obj.paid_count})`]];
+    if(XP())info.push([t('col.labels'),`${lbl(obj.size)} · ${lbl(obj.relationship)} · ${lbl(obj.behaviour)}`],[t('col.debt'),lbl(obj.debt_status)],[t('col.tier'),obj.tier],
+      ...(obj.notes.length?[['Tags',obj.notes.map(x=>t('note.'+x)).join(' · ')]]:[]),['ρ max',rows.filter(r=>r.rho!=null&&r.open&&r.dpd>0).reduce((a,r)=>Math.max(a,r.rho),0).toFixed(2)],
+      [t('exp.rules'),f.map(x=>`${x.rule_id} (${x.level===2?t('st.severe'):t('st.watch')})`).join(', ')||'—'],['ρ',`${t('st.watch')} > ${CFG.ar.rhoWatch} · ${t('st.severe')} > ${CFG.ar.rhoSevere} (${thrSrcName('demo_assumption')})`])}
   else if(kind==='sup'){obj=P.suppliers.find(s=>s.key===key);rows=(snap.purchases||[]).filter(s=>s.key===key);const f=d.findings.filter(x=>x.object.key===key);
     info=[[t('col.ap'),money(obj.ap)],[t('col.overdue'),money(obj.overdue)],[t('col.maxod'),obj.max_overdue+' '+t('unit.days')],[t('col.dep'),pctS(obj.dependency,1)],[t('col.ess'),lbl(obj.essential)],
-      [t('col.concl'),lbl(obj.conclusion)],[t('exp.rules'),f.map(x=>`${x.rule_id} (${x.level===2?t('st.severe'):t('st.watch')})`).join(', ')||'—']]}
+      [t('col.concl'),lbl(obj.conclusion)],...(XP()?[[t('exp.rules'),f.map(x=>`${x.rule_id} (${x.level===2?t('st.severe'):t('st.watch')})`).join(', ')||'—']]:[])]}
   else{obj=P.lots.find(l=>l.name===key);rows=[obj];
     info=[[t('col.type'),obj.type||'—'],[t('col.age'),obj.days==null?'—':obj.days+' '+t('unit.days')],[t('col.thr'),obj.threshold==null?'—':obj.threshold+' '+t('unit.days')],[t('col.value'),money(obj.value)],
-      [t('col.status'),lbl(obj.status)],[t('col.collateral'),obj.collateral?money(obj.collateral):'—'],[t('exp.rules'),d.findings.filter(x=>x.object.type==='lot'&&x.object.name===key).map(x=>x.rule_id).join(', ')||'—']]}
+      [t('col.status'),lbl(obj.status)],[t('col.collateral'),obj.collateral?money(obj.collateral):'—'],...(XP()?[[t('exp.rules'),d.findings.filter(x=>x.object.type==='lot'&&x.object.name===key).map(x=>x.rule_id).join(', ')||'—']]:[])]}
   const PS=CFG.ui.evidencePageSize,MAX=CFG.ui.evidenceMaxRows;
   const draw=m=>{
     let r=kind==='lot'?rows:rows.filter(x=>st.filter==='all'||(st.filter==='open'&&x.open)||(st.filter==='overdue'&&x.open&&x.dpd>0)||(st.filter==='paid'&&!x.open));
@@ -2258,8 +2397,8 @@ function openEvidence(kind,key){
     const total=r.length,capped=r.slice(0,MAX),pages=Math.max(1,Math.ceil(capped.length/PS));st.page=Math.min(st.page,pages-1);
     const page=capped.slice(st.page*PS,st.page*PS+PS),th=(c,l)=>`<th class="sortable${st.sort.col===c?' on':''}" data-esort="${c}">${l}${st.sort.col===c?(st.sort.dir==='asc'?' ▲':' ▼'):''}</th>`;
     const body=kind==='lot'?`<thead><tr><th>${t('col.lot')}</th><th>${t('col.type')}</th>${th('age',t('col.age'))}${th('amount',t('col.value'))}<th>${t('col.status')}</th></tr></thead><tbody>${page.map(l=>`<tr><td>${esc(l.name)}</td><td>${l.type||'—'}</td><td class="num">${l.days??'—'}</td><td class="num">${money(l.value)}${rawVND(l.value)}</td><td>${lbl(l.status)}</td></tr>`).join('')}</tbody>`
-      :`<thead><tr><th>${t('col.inv')}</th><th>${t('col.issue')}</th>${th('due',t('col.due'))}<th>${t('col.paid')}</th>${th('amount',t('col.amount'))}<th>${t('col.open')}</th>${th('dpd',t('col.dpd'))}<th>${t('col.rho')}</th></tr></thead>
-       <tbody>${page.map(x=>`<tr class="${x.open&&x.dpd>0?'flag':''}"><td class="num">${esc(x.id)}</td><td class="num">${x.issue?fd(x.issue):'—'}</td><td class="num">${x.due?fd(x.due):'—'}</td><td class="num">${x.paid&&!x.open?fd(x.paid):'—'}</td><td class="num">${money(x.amount)}${rawVND(x.amount)}</td><td class="num">${x.open?money(x.open_amount):'0'}</td><td class="num">${x.dpd??'—'}</td><td class="num">${x.rho!=null&&x.open&&x.dpd>0?x.rho.toFixed(2):'—'}</td></tr>`).join('')}</tbody>`;
+      :`<thead><tr><th>${t('col.inv')}</th><th>${t('col.issue')}</th>${th('due',t('col.due'))}<th>${t('col.paid')}</th>${th('amount',t('col.amount'))}<th>${t('col.open')}</th>${th('dpd',t('col.dpd'))}${XP()?`<th>${t('col.rho')}</th>`:''}</tr></thead>
+       <tbody>${page.map(x=>`<tr class="${x.open&&x.dpd>0?'flag':''}"><td class="num">${esc(x.id)}</td><td class="num">${x.issue?fd(x.issue):'—'}</td><td class="num">${x.due?fd(x.due):'—'}</td><td class="num">${x.paid&&!x.open?fd(x.paid):'—'}</td><td class="num">${money(x.amount)}${rawVND(x.amount)}</td><td class="num">${x.open?money(x.open_amount):'0'}</td><td class="num">${x.dpd??'—'}</td>${XP()?`<td class="num">${x.rho!=null&&x.open&&x.dpd>0?x.rho.toFixed(2):'—'}</td>`:''}</tr>`).join('')}</tbody>`;
     m.querySelector('.ev-body').innerHTML=total?`<div class="table-wrap"><table class="dtable">${body}</table></div>${total>PS?`<div class="ev-pg"><button class="btn sec sm" data-pg="-1" ${st.page?'':'disabled'}>${t('ev.prev')}</button><span>${t('ev.page',{p:st.page+1,n:pages})}</span><button class="btn sec sm" data-pg="1" ${st.page<pages-1?'':'disabled'}>${t('ev.next')}</button></div>`:''}${total>MAX?`<p class="ev-more">${t('ev.more',{n:MAX,total,p:PS,max:MAX})}</p>`:''}`
       :`<div class="empty">${t('ev.none',{f:t('ev.'+st.filter)})}</div>`;
     $$('[data-esort]',m).forEach(h=>h.onclick=()=>{const c=h.dataset.esort;st.sort={col:c,dir:st.sort.col===c&&st.sort.dir==='asc'?'desc':'asc'};draw(m)});
@@ -2268,7 +2407,7 @@ function openEvidence(kind,key){
   openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${t('ev.title',{name:esc(kind==='lot'?obj.name:obj.name)})}</h3>
     <dl class="ev-info">${info.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
     ${kind==='lot'?'':`<label class="ev-f">${t('ev.filter')} <select id="evFilter">${['all','open','overdue','paid'].map(f=>`<option value="${f}">${t('ev.'+f)}</option>`).join('')}</select></label>`}
-    <div class="ev-body"></div><p class="ev-src">${t('ev.from',{run:d.run_id})}</p></div>`,m=>{
+    <div class="ev-body"></div>${XP()?`<p class="ev-src">${t('ev.from',{run:d.run_id})}</p>`:''}</div>`,m=>{
     m.querySelector('.settings-close').onclick=closeModal;const fsel=m.querySelector('#evFilter');if(fsel)fsel.onchange=()=>{st.filter=fsel.value;st.page=0;draw(m)};draw(m)});
   addLog({tool:'view_evidence',tier:0,args:{firm_id:S.firm,object:kind,key},status:'ok',summary:`Evidence for ${obj&&obj.name}`});
 }
@@ -2311,6 +2450,8 @@ function cccGaugesHTML(d,c){
   const T=d.thresholds,m=d.metrics,dso=m.dso,dio=m.dio,dpo=m.dpo,ccc=m.ccc,n=d.N;
   // Gauge scales follow the thresholds of the model (no fixed 90-day scale).
   const mx=(v,ref)=>Math.ceil(Math.max(v||0,ref)*1.15/10)*10;
+  if(!XP())return `<div class="gauges">${[['DSO',dso,T.dso.severe,'receivables'],['DIO',dio,T.dio.severe,'inventory'],['DPO',dpo,T.dpo.high,'payables'],['CCC',ccc,T.dso.severe+T.dio.severe,'cash']]
+    .map(([k,v,ref,col])=>v==null?'':gauge(v,mx(v,ref),`var(--lc-color-data-${col})`,t('unit.days'),k,t('s.tip.'+k))).join('')}</div>`;
   return `<div class="gauges">${dso==null?'':gauge(dso,mx(dso,T.dso.severe),'var(--lc-color-data-receivables)',t('unit.days'),'DSO',`${t('item.cap.AR',{n})} ${t('mk.watch')} ${nf(T.dso.watch,1)} · ${t('mk.severe')} ${nf(T.dso.severe,1)}`)}
    ${dio==null?'':gauge(dio,mx(dio,T.dio.severe),'var(--lc-color-data-inventory)',t('unit.days'),'DIO',`${t('item.cap.INV',{n})} ${t('mk.watch')} ${nf(T.dio.watch,1)} · ${t('mk.severe')} ${nf(T.dio.severe,1)}`)}
    ${dpo==null?'':gauge(dpo,mx(dpo,T.dpo.high),'var(--lc-color-data-payables)',t('unit.days'),'DPO',`${t('item.cap.AP',{n})} ${t('mk.low')} ${nf(T.dpo.low,1)} · ${t('mk.high')} ${nf(T.dpo.high,1)}`)}
@@ -2324,22 +2465,22 @@ function renderDash(){
   <div class="dsrc ${own?'own':''}">${own?`<span><b>${esc(f.name)}</b> · your uploaded data · version ${fs.id} · as of ${fd(fs.asOf)} · estimated figures</span><span class="dsa"><button class="btn primary sm" data-go="upd">Update data</button><button class="btn sec sm" data-go="hist">Version history</button></span>`
    :`<span>Viewing <b>sample data ${S.firm}</b>. Want to analyse your own business?</span><span class="dsa"><button class="btn primary sm" data-go="new">⇪ Upload data</button></span>`}</div>
   ${dataSourceHTML(d,snap)}
-  ${dashSec(1,'var(--lc-color-alert-orange-mark)',t('sec.w'),t('sec.w.sub'),`<div class="wgrid">${wCardHTML(d)}<div class="mtiles">${marTilesHTML(d)}</div></div>`)}
-  ${dashSec(2,'var(--lc-color-data-receivables)',t('sec.items'),t('sec.items.sub'),`<div class="icards">${d.item_states.map(it=>itemCardHTML(d,it)).join('')}</div>`)}
-  ${dashSec(3,'var(--lc-color-data-inventory)',t('sec.tables'),t('sec.tables.sub'),detailTablesHTML(d))}
+  ${dashSec(1,'var(--lc-color-alert-orange-mark)',t('sec.w'),tx('sec.w.sub'),`<div class="wgrid">${wCardHTML(d)}<div class="mtiles">${marTilesHTML(d)}</div></div>`)}
+  ${dashSec(2,'var(--lc-color-data-receivables)',t('sec.items'),tx('sec.items.sub'),`<div class="icards">${d.item_states.map(it=>itemCardHTML(d,it)).join('')}</div>`)}
+  ${dashSec(3,'var(--lc-color-data-inventory)',t('sec.tables'),tx('sec.tables.sub'),detailTablesHTML(d))}
   ${liquidityStateHTML()}
-  ${dashSec(4,'var(--lc-color-data-cash)',t('sec.ccc'),t('sec.ccc.sub'),`<div class="dmid">${cccGaugesHTML(d,c)}
+  ${dashSec(4,'var(--lc-color-data-cash)',t('sec.ccc'),tx('sec.ccc.sub'),`<div class="dmid">${cccGaugesHTML(d,c)}
    <div class="card agc" data-wid="aging"><div class="card-head"><div><h3>Receivables and payables by due bucket</h3><p>VND million · from the cut-off date</p></div></div><div class="chartbox">${agingSVG(AG)}</div>
     <div class="legend"><span><i style="background:var(--lc-color-data-receivables)"></i>Receivables</span><span><i style="background:var(--lc-color-status-error)"></i>Overdue receivables</span><span><i style="background:var(--lc-color-data-payables)"></i>Payables</span></div></div></div>`)}
-  <div class="foot-note">${t('foot.uc01')} ${d.N}-day period; goods held for subcontracting are excluded from owned inventory. Cash-flow projections, the daily balance and the cash gaps are in the Shortfall tab. Synthetic data.</div>`;
+  <div class="foot-note">${XP()?`${t('foot.uc01')} ${d.N}-day period; goods held for subcontracting are excluded from owned inventory. Cash-flow projections, the daily balance and the cash gaps are in the Shortfall tab. Synthetic data.`:t('s.foot',{src:isUserFirm(S.firm)?t('s.src.own'):'Sample data'})}</div>`;
   $$('.gv b[data-v]',p).forEach(e=>animNum(e,+e.dataset.v,v=>nf(v,1),1000));
   $$('[data-go]',p).forEach(b=>b.onclick=()=>{const g=b.dataset.go;if(g==='new')startImport(null);else if(g==='upd')startImport(S.firm);else{DW.view='hist';DW.firmId=S.firm;openDataScreen('businesses')}});
   $$('[data-liq="fund"]',p).forEach(b=>b.onclick=goFinancing);
   const ao=$('#ucAsOf',p),so=$('#ucStart',p);
   if(ao)ao.onchange=()=>uc01SelChange(ao.value,null);if(so)so.onchange=()=>uc01SelChange(ao.value,so.value);
   const rs=$('#ucReset',p);if(rs)rs.onclick=()=>{S.uc01Sel=null;renderDash()};
-  $('#ucExpert',p).onchange=e=>{S.dash.expert=e.target.checked;try{localStorage.setItem('lilact.expert.v1',S.dash.expert?'1':'0')}catch(x){}renderDash()};
-  $('#ucPolicy',p).onclick=openPolicy;
+  bindExpert(p);placeBarLabels(p);
+  const po=$('#ucPolicy',p);if(po)po.onclick=openPolicy;
   $$('[data-corder]',p).forEach(b=>b.onclick=()=>{S.dash.custOrder=b.dataset.corder;S.dash.sort.cust=null;renderDash()});
   $$('[data-sort]',p).forEach(h=>{const go=()=>{const [k,col]=h.dataset.sort.split('|'),s=S.dash.sort[k];S.dash.sort[k]={col,dir:s&&s.col===col&&s.dir==='desc'?'asc':'desc'};renderDash()};h.onclick=go;h.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}});
   $$('[data-ev]',p).forEach(r=>{const go=()=>{const i=r.dataset.ev.indexOf('|');openEvidence(r.dataset.ev.slice(0,i),r.dataset.ev.slice(i+1))};r.onclick=go;r.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();go()}}});
