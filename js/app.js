@@ -1410,7 +1410,7 @@ async function respondConc(bot){
   ${(()=>{const d=uc01(),cc=d&&d.concentration;if(!cc||!d.cause_items.includes('AR'))return '';const lim=nf(CFG.bn.concentrationShare*100,0);
     return `<div class="liq-note"><span>⚠</span><div>${cc.flag==='concentrated'?`<b>${esc(cc.top.name)}</b> holds ${nf(cc.top.share*100,1)}% of the receivables above the normal level (≥ ${lim}%): <b>concentrated</b>.`:`No customer holds ${lim}% or more of the receivables above the normal level: <b>dispersed</b>.`} Try the <b>early collection</b> lever in the What-if task.</div></div>`})()}
   ${toolLine(['diagnose_working_capital'])}<div class="liq-act"><button class="btn primary sm" type="button">▦ View detailed dashboard</button></div>`;
-  bot.appendChild(card);scroll();$('button',card).onclick=()=>openDetail('dash');
+  bot.appendChild(card);scroll();$('button',card).onclick=()=>{openDetail('dash');toggleDetails('AR',true)};
   advance(1,bot);suggestRow(bot,nextSuggest());
 }
 
@@ -2265,7 +2265,7 @@ function goFinancingFlow(){
 /* ===== UC01 dashboard (SRS 2.7.1, 2.7.3, Table 3-1): data source line and controls, W card, capital above the normal
    level, item cards with threshold bars, detail tables with evidence, cash-cycle gauges. Display only reads the cached UC01
    run; nothing is recalculated when the screen is drawn. ===== */
-S.dash={custOrder:'exposure',sort:{},expert:false};
+S.dash={custOrder:'exposure',sort:{},expert:false,open:new Set()};
 try{S.dash.expert=localStorage.getItem('lilact.expert.v1')==='1'}catch(e){}
 /* Simple view (default) and Expert mode: calculations always run; the simple view shows results in plain words and Expert mode
    adds formulas, rule ids, codes, threshold sources, versions, ids and raw VND. The choice is remembered per browser. */
@@ -2401,58 +2401,47 @@ function sortRows(rows,kind,cols){
   return rows.slice().sort((a,b)=>{const x=cols[s.col](a),y=cols[s.col](b);return (x>y?1:x<y?-1:0)*(s.dir==='asc'?1:-1)});
 }
 const sortTh=(kind,col,label)=>{const s=S.dash.sort[kind],on=s&&s.col===col;return `<th class="num sortable${on?' on':''}" data-sort="${kind}|${col}" aria-sort="${on?(s.dir==='asc'?'ascending':'descending'):'none'}" tabindex="0">${label}${on?(s.dir==='asc'?' ▲':' ▼'):''}</th>`};
-function detailTablesSimpleHTML(d){
-  const P=d.profiles,bn0=d.bn_pattern==='BN0',lv=pred=>d.findings.filter(pred).map(f=>f.level||1);
-  const th=(kind,col,label)=>sortTh(kind,col,label),tbl=(cls,head,rows)=>`<div class="table-wrap"><table class="dtable ${cls}"><thead><tr>${head}</tr></thead><tbody>${rows||`<tr><td colspan="6" class="empty">${t('tbl.empty')}</td></tr>`}</tbody></table></div>`;
-  const totAR=P.customers.reduce((a,c)=>a+c.ar,0)||1,byKey=new Map(P.customers.map(c=>[c.key,c]));
-  const custs=sortRows(P.exposureOrder.map(k=>byKey.get(k)).map(c=>({...c,prio:prioOf(lv(f=>f.object.key===c.key),c.overdue)})),'scust',{ar:x=>x.ar,share:x=>x.ar_share,overdue:x=>x.overdue,maxod:x=>x.max_overdue});
-  const cRows=custs.map(c=>`<tr data-ev="cust|${esc(c.key)}" tabindex="0" class="${!bn0&&c.prio!=='ok'?'flag':''}"><td><b>${esc(c.name)}</b></td><td class="num">${money(c.ar)}</td><td class="num">${pctS(c.ar_share,1)}</td>
-    <td class="num ${!bn0&&c.overdue>0?'neg':''}">${money(c.overdue)}</td><td class="num">${c.max_overdue}</td><td>${prioHTML(c.prio,bn0)}</td></tr>`).join('');
-  const own=P.lots.filter(l=>l.status!=='excluded'),totInv=own.reduce((a,l)=>a+l.value,0)||1;
-  const lots=sortRows(P.lots.map(l=>({...l,prio:l.status==='excluded'?'ok':Math.max(prioOf(lv(f=>f.object.type==='lot'&&f.object.name===l.name),0)==='act'?2:0,l.status==='slow'||l.status==='cancelled'?1:0)===2?'act':l.status==='slow'||l.status==='cancelled'?'watch':'ok'})),'slot',{value:x=>x.value,share:x=>x.value,age:x=>x.days??-1});
-  const lRows=lots.map(l=>`<tr data-ev="lot|${esc(l.name)}" tabindex="0" class="${!bn0&&l.prio!=='ok'?'flag':''}"><td><b>${esc(l.name)}</b>${l.status==='excluded'?`<small>${lbl('excluded')}</small>`:''}</td><td class="num">${money(l.value)}</td>
-    <td class="num">${l.status==='excluded'?'—':pctS(l.value/totInv,1)}</td><td class="num">${l.days==null?'—':l.days}</td><td>${prioHTML(l.prio,bn0)}</td></tr>`).join('');
-  const totAP=P.suppliers.reduce((a,s)=>a+s.ap,0)||1;
-  const sups=sortRows(P.suppliers.slice().sort((a,b)=>b.ap-a.ap).map(s=>({...s,prio:prioOf(lv(f=>f.object.key===s.key),s.overdue)})),'ssup',{ap:x=>x.ap,share:x=>x.ap,overdue:x=>x.overdue,maxod:x=>x.max_overdue});
-  const sRows=sups.map(s=>`<tr data-ev="sup|${esc(s.key)}" tabindex="0" class="${!bn0&&s.prio!=='ok'?'flag':''}"><td><b>${esc(s.name)}</b></td><td class="num">${money(s.ap)}</td><td class="num">${pctS(s.ap/totAP,1)}</td>
-    <td class="num ${!bn0&&s.overdue>0?'neg':''}">${money(s.overdue)}</td><td class="num">${s.max_overdue}</td><td>${prioHTML(s.prio,bn0)}</td></tr>`).join('');
-  return `<div class="card dtables simple" data-wid="tables">
-   <div class="dt-h"><h3>${t('tbl.customers')}</h3></div>
-   ${tbl('t-cust',`<th>${t('col.name')}</th>${th('scust','ar',t('col.amount2'))}${th('scust','share',t('col.share'))}${th('scust','overdue',t('col.overdue'))}${th('scust','maxod',t('col.longest'))}<th>${t('col.prio')}</th>`,cRows)}
-   <div class="dt-h"><h3>${t('tbl.lots')}</h3></div>
-   ${tbl('t-lot',`<th>${t('col.name')}</th>${th('slot','value',t('col.amount2'))}${th('slot','share',t('col.share'))}${th('slot','age',t('col.days2'))}<th>${t('col.prio')}</th>`,lRows)}
-   <div class="dt-h"><h3>${t('tbl.suppliers')}</h3></div>
-   ${tbl('t-sup',`<th>${t('col.name')}</th>${th('ssup','ap',t('col.amount2'))}${th('ssup','share',t('col.share'))}${th('ssup','overdue',t('col.overdue'))}${th('ssup','maxod',t('col.longest'))}<th>${t('col.prio')}</th>`,sRows)}</div>`;
+// Details of one item card (UC01.3): Receivables → customers, Owned inventory → stock lots, Payables → suppliers. The same six columns
+// in both modes: Name | Amount | Share | Overdue | Longest Overdue (Days) | Priority. Lots have no due date, so their Overdue and
+// Longest Overdue cells show "—" and the days in stock go under the name. Expert mode adds labels, tier, status and notes under the
+// name and keeps the exposure / intervention order of the customers. Every figure is read from the cached UC01 run (profiles).
+const DET_KIND={AR:'cust',INV:'lot',AP:'sup'};
+function itemDetailsHTML(d,item){
+  const P=d.profiles,bn0=d.bn_pattern==='BN0',xp=XP(),lv=pred=>d.findings.filter(pred).map(f=>f.level||1),sm=x=>x?`<small>${x}</small>`:'';
+  const kind=DET_KIND[item],sk='s'+kind,th=(col,label)=>sortTh(sk,col,label),dash='<td class="num">—</td>';
+  const head=`<th>${t('col.name')}</th>${th(item==='AR'?'ar':item==='AP'?'ap':'value',t('col.amount2'))}${th('share',t('col.share'))}${item==='INV'?`<th class="num">${t('col.overdue')}</th><th class="num">${t('col.longest')}</th>`:`${th('overdue',t('col.overdue'))}${th('maxod',t('col.longest'))}`}<th>${t('col.prio')}</th>`;
+  const row=(ev,flag,name,amt,share,od,maxod,prio)=>`<tr data-ev="${kind}|${esc(ev)}" tabindex="0" class="${!bn0&&flag?'flag':''}"><td>${name}</td><td class="num">${amt}</td><td class="num">${share}</td>${od}${maxod}<td>${prioHTML(prio,bn0)}</td></tr>`;
+  const odCell=v=>`<td class="num ${!bn0&&v>0?'neg':''}">${money(v)}</td>`;
+  let rows,top='';
+  if(item==='AR'){
+    const byKey=new Map(P.customers.map(c=>[c.key,c])),order=xp&&S.dash.custOrder==='intervention'?P.interventionOrder:P.exposureOrder;
+    const custs=sortRows(order.map(k=>byKey.get(k)).map(c=>({...c,prio:prioOf(lv(f=>f.object.key===c.key),c.overdue)})),sk,{ar:x=>x.ar,share:x=>x.ar_share,overdue:x=>x.overdue,maxod:x=>x.max_overdue});
+    rows=custs.map(c=>row(c.key,c.prio!=='ok',`<b>${esc(c.name)}</b>${xp?sm([...c.notes.map(x=>t('note.'+x)),`${lbl(c.size)} · ${lbl(c.relationship)} · ${lbl(c.behaviour)}${c.behaviour_status!=='ok'?` (${t('w.prov')})`:''}`,
+      `${t('col.debt')}: ${lbl(c.debt_status)}`,`${t('col.tier')} <b>${c.tier}</b>`,c.late_pos_wavg==null?'':`${t('col.late')} ${nf(c.late_pos_wavg,1)} ${t('unit.days')}`].filter(Boolean).join(' · ')):''}`,
+      money(c.ar),pctS(c.ar_share,1),odCell(c.overdue),`<td class="num">${c.max_overdue}</td>`,c.prio)).join('');
+    if(xp)top=`<div class="dt-h"><span></span><div class="seg2" role="group" aria-label="${t('tbl.customers')}">${['exposure','intervention'].map(o=>`<button type="button" data-corder="${o}" aria-pressed="${S.dash.custOrder===o}" class="${S.dash.custOrder===o?'on':''}">${t('tbl.order.'+o)}</button>`).join('')}</div></div>`;
+  }else if(item==='INV'){
+    const own=P.lots.filter(l=>l.status!=='excluded'),totInv=own.reduce((a,l)=>a+l.value,0)||1;
+    const lots=sortRows(P.lots.map(l=>({...l,prio:l.status==='excluded'?'ok':Math.max(prioOf(lv(f=>f.object.type==='lot'&&f.object.name===l.name),0)==='act'?2:0,l.status==='slow'||l.status==='cancelled'?1:0)===2?'act':l.status==='slow'||l.status==='cancelled'?'watch':'ok'})),sk,{value:x=>x.value,share:x=>x.value});
+    rows=lots.map(l=>row(l.name,l.prio!=='ok',`<b>${esc(l.name)}</b>${sm([l.days==null?'':`${l.days} ${t('unit.days')} ${t('det.instock')}`,l.status==='excluded'?lbl('excluded'):'',
+      ...(xp?[`${l.type||'—'}${l.type_src==='inferred'?` (${t('w.prov')})`:''}${l.suggested_type?` → ${l.suggested_type}`:''}`,l.status!=='excluded'?lbl(l.status)+(l.cancel_status==='proposed'?` (${lbl('proposed')})`:''):'',
+        l.collateral?`${t('col.collateral')} ${money(l.collateral)}${l.collateral_pending?` (${t('tbl.pending')})`:''}`:'',...l.checks]:[])].filter(Boolean).join(' · '))}`,
+      money(l.value),l.status==='excluded'?'—':pctS(l.value/totInv,1),dash,dash,l.prio)).join('');
+  }else{
+    const totAP=P.suppliers.reduce((a,s)=>a+s.ap,0)||1;
+    const sups=sortRows(P.suppliers.slice().sort((a,b)=>b.ap-a.ap).map(s=>({...s,prio:prioOf(lv(f=>f.object.key===s.key),s.overdue)})),sk,{ap:x=>x.ap,share:x=>x.ap,overdue:x=>x.overdue,maxod:x=>x.max_overdue});
+    rows=sups.map(s=>row(s.key,s.prio!=='ok',`<b>${esc(s.name)}</b>${xp?sm([s.discount?`${nf(s.discount.pct*100,1)}%/${s.discount.days}d · r_disc ${pctS(s.discount.r_disc,1)}`:'',`${t('col.dep')} ${pctS(s.dependency,1)}${s.dependency_high?' ⚑':''}`,
+      `${t('col.ess')}: ${lbl(s.essential)}`,lbl(s.conclusion)+(s.pending_confirmation?` (${t('tbl.pending')})`:'')].filter(Boolean).join(' · ')):''}`,
+      money(s.ap),pctS(s.ap/totAP,1),odCell(s.overdue),`<td class="num">${s.max_overdue}</td>`,s.prio)).join('');
+  }
+  return `${top}<div class="table-wrap"><table class="dtable det-table t-${kind}"><thead><tr>${head}</tr></thead><tbody>${rows||`<tr><td colspan="6" class="empty">${t('tbl.empty')}</td></tr>`}</tbody></table></div>`;
 }
-function detailTablesHTML(d){
-  if(!XP())return detailTablesSimpleHTML(d);
-  const P=d.profiles,bn0=d.bn_pattern==='BN0',flagged=new Set(d.findings.filter(f=>f.object.type==='customer').map(f=>f.object.key));
-  const cols={ar:x=>x.ar,share:x=>x.ar_share,overdue:x=>x.overdue,maxod:x=>x.max_overdue,late:x=>x.late_pos_wavg??-1,tier:x=>x.tier};
-  const order=S.dash.custOrder==='intervention'?P.interventionOrder:P.exposureOrder,byKey=new Map(P.customers.map(c=>[c.key,c]));
-  const custs=sortRows(order.map(k=>byKey.get(k)),'cust',cols);
-  const cRows=custs.map(c=>`<tr data-ev="cust|${esc(c.key)}" tabindex="0" class="${!bn0&&flagged.has(c.key)?'flag':''}"><td><b>${esc(c.name)}</b>${c.notes.length?`<small>${c.notes.map(x=>t('note.'+x)).join(' · ')}</small>`:''}</td>
-    <td class="num">${money(c.ar)}</td><td class="num">${pctS(c.ar_share,1)}</td><td class="num ${!bn0&&c.overdue>0?'neg':''}">${money(c.overdue)}</td><td class="num">${c.max_overdue}</td>
-    <td class="num">${c.late_pos_wavg==null?'—':nf(c.late_pos_wavg,1)}</td><td>${lbl(c.size)} · ${lbl(c.relationship)}<small>${lbl(c.behaviour)}${c.behaviour_status!=='ok'?` (${t('w.prov')})`:''}</small></td>
-    <td>${!bn0&&c.debt_status!=='none'?`<span class="status ${c.debt_status==='overdue_long'?'red':'amber'}">${lbl(c.debt_status)}</span>`:lbl(c.debt_status)}</td><td class="num"><b>${c.tier}</b></td></tr>`).join('');
-  const lcols={age:x=>x.days??-1,value:x=>x.value};
-  const lots=sortRows(P.lots,'lot',lcols);
-  const lRows=lots.map(l=>`<tr data-ev="lot|${esc(l.name)}" tabindex="0" class="${!bn0&&(l.status==='slow'||l.status==='cancelled')?'flag':''}"><td><b>${esc(l.name)}</b>${l.checks.length?`<small>${l.checks.join(' · ')}</small>`:''}</td>
-    <td>${l.type||'—'}${l.type_src==='inferred'?` <small>(${t('w.prov')})</small>`:''}${l.suggested_type?` → ${l.suggested_type}`:''}</td><td class="num">${l.days==null?'—':l.days}</td><td class="num">${l.threshold==null?'—':l.threshold}</td>
-    <td class="num">${money(l.value)}</td><td>${!bn0&&l.status!=='normal'&&l.status!=='excluded'?`<span class="status amber">${lbl(l.status)}</span>`:lbl(l.status)}${l.cancel_status==='proposed'?` <small>(${lbl('proposed')})</small>`:''}</td>
-    <td class="num">${l.collateral?money(l.collateral):'—'}${l.collateral_pending?` <small>(${t('tbl.pending')})</small>`:''}</td></tr>`).join('');
-  const scols={purch:x=>x.purchases,dep:x=>x.dependency,ap:x=>x.ap,overdue:x=>x.overdue,press:x=>x.pressure30};
-  const sups=sortRows(P.suppliers.slice().sort((a,b)=>b.ap-a.ap),'sup',scols);
-  const sRows=sups.map(s=>`<tr data-ev="sup|${esc(s.key)}" tabindex="0" class="${!bn0&&s.overdue>0?'flag':''}"><td><b>${esc(s.name)}</b>${s.discount?`<small>${nf(s.discount.pct*100,1)}%/${s.discount.days}d · r_disc ${pctS(s.discount.r_disc,1)}</small>`:''}</td>
-    <td class="num">${money(s.purchases)}</td><td class="num">${pctS(s.dependency,1)}${s.dependency_high?' ⚑':''}</td><td class="num">${money(s.ap)}</td><td class="num ${!bn0&&s.overdue>0?'neg':''}">${money(s.overdue)}</td>
-    <td class="num">${money(s.pressure30)}</td><td>${lbl(s.essential)}</td><td>${lbl(s.conclusion)}${s.pending_confirmation?` <small>(${t('tbl.pending')})</small>`:''}</td></tr>`).join('');
-  const tbl=(cls,head,rows)=>`<div class="table-wrap"><table class="dtable ${cls}"><thead><tr>${head}</tr></thead><tbody>${rows||`<tr><td colspan="11" class="empty">${t('tbl.empty')}</td></tr>`}</tbody></table></div>`;
-  return `<div class="card dtables" data-wid="tables">
-   <div class="dt-h"><h3>${t('tbl.customers')}</h3><div class="seg2" role="group">${['exposure','intervention'].map(o=>`<button type="button" data-corder="${o}" aria-pressed="${S.dash.custOrder===o}" class="${S.dash.custOrder===o?'on':''}">${t('tbl.order.'+o)}</button>`).join('')}</div></div>
-   ${tbl('t-cust',`<th>${t('col.customer')}</th>${sortTh('cust','ar',t('col.ar'))}${sortTh('cust','share',t('col.share'))}${sortTh('cust','overdue',t('col.overdue'))}${sortTh('cust','maxod',t('col.maxod'))}${sortTh('cust','late',t('col.late'))}<th>${t('col.labels')}</th><th>${t('col.debt')}</th>${sortTh('cust','tier',t('col.tier'))}`,cRows)}
-   <div class="dt-h"><h3>${t('tbl.lots')}</h3></div>
-   ${tbl('t-lot',`<th>${t('col.lot')}</th><th>${t('col.type')}</th>${sortTh('lot','age',t('col.age'))}<th>${t('col.thr')}</th>${sortTh('lot','value',t('col.value'))}<th>${t('col.status')}</th><th>${t('col.collateral')}</th>`,lRows)}
-   <div class="dt-h"><h3>${t('tbl.suppliers')}</h3></div>
-   ${tbl('t-sup',`<th>${t('col.supplier')}</th>${sortTh('sup','purch',t('col.purch'))}${sortTh('sup','dep',t('col.dep'))}${sortTh('sup','ap',t('col.ap'))}${sortTh('sup','overdue',t('col.overdue'))}${sortTh('sup','press',t('col.press'))}<th>${t('col.ess')}</th><th>${t('col.concl')}</th>`,sRows)}</div>`;
+// Item card followed by its Details panel (closed by default; each card opens and closes on its own, kept in S.dash.open).
+function itemBlockHTML(d,it){
+  const k=it.item,id='icd-'+k.toLowerCase(),on=S.dash.open.has(k),name=t('item.'+k);
+  const btn=`<button type="button" class="btn sec sm ic-more" data-det="${k}" aria-expanded="${on}" aria-controls="${id}">${t('det.btn')}<span aria-hidden="true">${on?' ▴':' ▾'}</span></button>`;
+  return `<div class="iblock">${itemCardHTML(d,it).replace(/<\/div>$/,`<div class="ic-foot">${btn}</div></div>`)}
+   <div class="card ic-det" id="${id}" role="region" aria-label="${esc(t('det.aria',{x:name}))}"${on?'':' hidden'}>${itemDetailsHTML(d,k)}</div></div>`;
 }
 // Evidence panel (UC01.3): object information and its invoices / lot, page size 50 (at most 200), filter and sort; read from the run.
 function openEvidence(kind,key){
@@ -2539,6 +2528,13 @@ function cccGaugesHTML(d,c){
    ${dpo==null?'':gauge(dpo,mx(dpo,T.dpo.high),'var(--lc-color-data-payables)',t('unit.days'),'DPO',`${t('item.cap.AP',{n})} ${t('mk.low')} ${nf(T.dpo.low,1)} · ${t('mk.high')} ${nf(T.dpo.high,1)}`)}
    ${ccc==null?'':gauge(ccc,mx(ccc,T.dso.severe+T.dio.severe),'var(--lc-color-data-cash)',t('unit.days'),'CCC',t('ccc.cap'))}</div>`;
 }
+// Opens or closes the Details table under one item card without re-rendering the dashboard (the other cards keep their state).
+function toggleDetails(k,open){
+  const on=open??!S.dash.open.has(k);on?S.dash.open.add(k):S.dash.open.delete(k);
+  const b=$(`#pane-dash [data-det="${k}"]`),box=$('#icd-'+k.toLowerCase());if(!b||!box)return;
+  b.setAttribute('aria-expanded',on);b.querySelector('span').textContent=on?' ▴':' ▾';box.hidden=!on;
+  if(open)box.scrollIntoView({block:'nearest',behavior:PREF.motion?'smooth':'auto'});
+}
 function renderDash(){
   const c=C(),p=$('#pane-dash'),AG=agingModel(c),d=uc01(),snap=uc01Snap();
   const own=isUserFirm(S.firm),f=own?dstore.load().firms[S.firm]:null,fs=f&&activeSnap(f);
@@ -2548,10 +2544,9 @@ function renderDash(){
    :`<span>Viewing <b>sample data ${S.firm}</b>. Want to analyse your own business?</span><span class="dsa"><button class="btn primary sm" data-go="new">⇪ Upload data</button></span>`}</div>
   ${dataSourceHTML(d,snap)}
   ${dashSec(1,'var(--lc-color-alert-orange-mark)',t('sec.w'),tx('sec.w.sub'),`<div class="wgrid">${wCardHTML(d)}<div class="mtiles">${marTilesHTML(d)}</div></div>`)}
-  ${dashSec(2,'var(--lc-color-data-receivables)',t('sec.items'),tx('sec.items.sub'),`<div class="icards">${d.item_states.map(it=>itemCardHTML(d,it)).join('')}</div>`)}
-  ${dashSec(3,'var(--lc-color-data-inventory)',t('sec.tables'),tx('sec.tables.sub'),detailTablesHTML(d))}
+  ${dashSec(2,'var(--lc-color-data-receivables)',t('sec.items'),tx('sec.items.sub'),`<div class="icards">${d.item_states.map(it=>itemBlockHTML(d,it)).join('')}</div>`)}
   ${liquidityStateHTML()}
-  ${dashSec(4,'var(--lc-color-data-cash)',t('sec.ccc'),tx('sec.ccc.sub'),`<div class="dmid">${cccGaugesHTML(d,c)}
+  ${dashSec(3,'var(--lc-color-data-cash)',t('sec.ccc'),tx('sec.ccc.sub'),`<div class="dmid">${cccGaugesHTML(d,c)}
    <div class="card agc" data-wid="aging"><div class="card-head"><div><h3>Receivables and payables by due bucket</h3><p>VND million · from the cut-off date</p></div></div><div class="chartbox">${agingSVG(AG)}</div>
     <div class="legend"><span><i style="background:var(--lc-color-data-receivables)"></i>Receivables</span><span><i style="background:var(--lc-color-status-error)"></i>Overdue receivables</span><span><i style="background:var(--lc-color-data-payables)"></i>Payables</span></div></div></div>`)}
   <div class="foot-note">${XP()?`${t('foot.uc01')} ${d.N}-day period; goods held for subcontracting are excluded from owned inventory. Cash-flow projections, the daily balance and the cash gaps are in the Shortfall tab. Synthetic data.`:t('s.foot',{src:isUserFirm(S.firm)?t('s.src.own'):'Sample data'})}</div>`;
@@ -2563,7 +2558,8 @@ function renderDash(){
   const rs=$('#ucReset',p);if(rs)rs.onclick=()=>{S.uc01Sel=null;renderDash()};
   bindExpert(p);placeBarLabels(p);
   const po=$('#ucPolicy',p);if(po)po.onclick=openPolicy;
-  $$('[data-corder]',p).forEach(b=>b.onclick=()=>{S.dash.custOrder=b.dataset.corder;S.dash.sort.cust=null;renderDash()});
+  $$('[data-corder]',p).forEach(b=>b.onclick=()=>{S.dash.custOrder=b.dataset.corder;S.dash.sort.scust=null;renderDash()});
+  $$('[data-det]',p).forEach(b=>b.onclick=()=>toggleDetails(b.dataset.det));
   $$('[data-sort]',p).forEach(h=>{const go=()=>{const [k,col]=h.dataset.sort.split('|'),s=S.dash.sort[k];S.dash.sort[k]={col,dir:s&&s.col===col&&s.dir==='desc'?'asc':'desc'};renderDash()};h.onclick=go;h.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}});
   $$('[data-ev]',p).forEach(r=>{const go=()=>{const i=r.dataset.ev.indexOf('|');openEvidence(r.dataset.ev.slice(0,i),r.dataset.ev.slice(i+1))};r.onclick=go;r.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();go()}}});
   decorateWidgets(p);
@@ -2631,14 +2627,15 @@ setTask=function(...a){const r=_setTask.apply(this,a);const t=THREADS[S.task];if
 
 
 const PINS={firms:[],prompts:[],widgets:[]};
+const RETIRED_WIDGETS=['tables']; // widgets removed from the screens; dropped from saved pins
 const pinKey=()=>'smefc.pins.v1.'+((S.user&&S.user.email)||'anon').toLowerCase();
 function loadPins(){let d={};try{d=JSON.parse(localStorage.getItem(pinKey())||'{}')}catch(e){}
-  PINS.firms=d.firms||[];PINS.prompts=d.prompts||[];PINS.widgets=d.widgets||[];renderPins();syncFirmPin()}
+  PINS.firms=d.firms||[];PINS.prompts=d.prompts||[];PINS.widgets=(d.widgets||[]).filter(w=>!RETIRED_WIDGETS.includes(w));renderPins();syncFirmPin()}
 function savePins(){try{localStorage.setItem(pinKey(),JSON.stringify(PINS))}catch(e){}renderPins();syncFirmPin()}
 const toggleIn=(arr,v)=>{const i=arr.indexOf(v);if(i>=0){arr.splice(i,1);return false}arr.push(v);return true};
 const PIN_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></svg>';
 const FS_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
-const WNAME={factors:'Contributing factors',source:'Data source',w:'W axis',mar:'Capital above the normal level',ob:'Overdue obligations',tables:'Customers, lots and suppliers',ar:'Receivables',ap:'Payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance',state:'Liquidity state'};
+const WNAME={factors:'Contributing factors',source:'Data source',w:'W axis',mar:'Capital above the normal level',ob:'Overdue obligations',ar:'Receivables',ap:'Payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance',state:'Liquidity state'};
 
 function renderPins(){
   const box=$('#pinBox'),list=$('#pinList');if(!box)return;

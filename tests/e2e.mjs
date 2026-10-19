@@ -837,12 +837,34 @@ for (const theme of ["light", "dark"]) {
     const r = await page.evaluate(() => { const p = document.querySelector("#pane-dash"), kids = [...p.children].map((e) => e.className.split(" ")[0]);
       return { order: kids, secs: [...p.querySelectorAll(".dsec h2")].map((h) => h.textContent), w: p.querySelector(".wcard .ls-w").textContent,
         src: p.querySelector(".uc-src").textContent, chip: document.querySelector(".chipdate b").textContent, gaugeMax: [...p.querySelectorAll(".gcard")].map((g) => g.querySelectorAll(".gl")[1].textContent) }; });
-    assert.deepEqual(r.secs.slice(0, 4), ["Working-capital diagnosis", "Receivables, inventory and payables", "Who holds the money", "Cash conversion cycle"]);
+    assert.deepEqual(r.secs.slice(0, 3), ["Working-capital diagnosis", "Receivables, Inventory and Payables", "Cash conversion cycle"]);
     assert.ok(r.order.indexOf("uc-src") < r.order.indexOf("dsec"));
     assert.equal(r.w, "W1 – Watch");
     assert.match(r.src, /sample:F01 · snapshot F01-20260620-SYN171-v1 · as of 20 Jun 2026 · period 1 Jan 2026–20 Jun 2026 \(171 days\)/); assert.match(r.src, /fresh/);
     assert.equal(r.chip, "20 Jun 2026");
     assert.ok(r.gaugeMax.length === 4 && !r.gaugeMax.includes("90"), "gauge scales follow the thresholds: " + r.gaugeMax.join(","));
+  });
+  await step("D · item cards are stacked; Details opens a six-column table under its own card; no 'Who holds the money' section", async () => {
+    const boxes = await page.evaluate(() => [...document.querySelectorAll("#pane-dash .icards > .iblock > .icard")].map((e) => { const r = e.getBoundingClientRect(); return [e.dataset.wid, Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }));
+    assert.deepEqual(boxes.map((b) => b[0]), ["ar", "inv", "ap"]);
+    assert.ok(boxes[0][1] === boxes[1][1] && boxes[1][1] === boxes[2][1] && boxes[0][2] < boxes[1][2] && boxes[1][2] < boxes[2][2], "one card under the other: " + JSON.stringify(boxes));
+    assert.ok(boxes.every((b) => b[3] === boxes[0][3]), "same full width");
+    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /Who holds the money/);
+    assert.equal(await page.locator('#pane-dash [data-wid="tables"]').count(), 0);
+    const btn = page.locator('#pane-dash [data-det="AR"]');
+    assert.equal(await btn.getAttribute("aria-expanded"), "false"); assert.equal(await btn.getAttribute("aria-controls"), "icd-ar");
+    assert.equal(await page.locator("#icd-ar").isVisible(), false);
+    await btn.click(); await page.waitForTimeout(200);
+    assert.equal(await btn.getAttribute("aria-expanded"), "true");
+    assert.equal(await page.evaluate(() => document.querySelector("#icd-ar").previousElementSibling.dataset.wid), "ar", "the table sits right under the Receivables card");
+    assert.deepEqual(await page.locator("#icd-ar thead th").evaluateAll((els) => els.map((e) => e.textContent.replace(/[▲▼]/g, "").trim())), ["Name", "Amount", "Share", "Overdue", "Longest Overdue (Days)", "Priority"]);
+    assert.equal(await page.locator("#icd-ar tbody tr").count(), 9);
+    await page.click('#pane-dash [data-det="INV"]'); await page.waitForTimeout(200);
+    assert.deepEqual(await page.locator("#icd-inv thead th").count(), 6);
+    assert.deepEqual(await page.locator("#icd-inv tbody tr").first().locator("td").evaluateAll((els) => els.slice(3, 5).map((e) => e.textContent)), ["—", "—"], "lots have no due date");
+    assert.equal(await page.locator("#icd-ar").isVisible(), true, "opening Inventory keeps Receivables open");
+    await page.click('#pane-dash [data-det="INV"]'); await page.waitForTimeout(200);
+    assert.equal(await page.locator("#icd-inv").isVisible(), false); assert.equal(await page.locator("#icd-ar").isVisible(), true);
   });
   await step("D · expert mode shows rule ids, versions and raw VND; tables sort and switch order", async () => {
     const t = await page.locator("#pane-dash .wcard .expert").innerText();
@@ -853,10 +875,10 @@ for (const theme of ["light", "dark"]) {
     assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /R-AR-1|tv1\.threshold|money_at_risk|\d{1,3}(\.\d{3}){2,} VND/);
     await page.click("#ucExpert"); await page.waitForTimeout(300);                 // back on (remembered)
     assert.equal(await page.evaluate(() => localStorage.getItem("lilact.expert.v1")), "1");
-    const exposure = await page.locator("#pane-dash .t-cust tbody tr td:first-child b").allInnerTexts();
+    const exposure = await page.locator("#icd-ar .t-cust tbody tr td:first-child > b").allInnerTexts();
     assert.equal(exposure[0], "Large Exporter K1");
     await page.click('[data-corder="intervention"]'); await page.waitForTimeout(200);
-    const tiers = await page.locator("#pane-dash .t-cust tbody tr td:last-child").allInnerTexts();
+    const tiers = await page.locator("#icd-ar .t-cust tbody tr td:first-child small b").allInnerTexts();   // Expert: tier under the name
     assert.deepEqual(tiers, ["1", "2", "2", "2", "2", "2", "3", "3", "5"]);
   });
   await step("D · evidence panel lists the invoices; an empty filter says no records match", async () => {
@@ -989,6 +1011,7 @@ for (const theme of ["light", "dark"]) {
     assert.deepEqual(await page.locator("#pane-dash .icard .ic-h .status").allInnerTexts(), ["Watch", "Watch", "Normal"]);   // from c_i: AR 1, INV 1, AP 0
     assert.match(await page.locator("#pane-dash .icard").first().innerText(), /About 3 days above normal/);
     assert.equal(await page.locator("#pane-dash .tb-lbl").count(), 0, "no numeric threshold labels");
+    await page.click('#pane-dash [data-det="AR"]'); await page.waitForTimeout(200);
     assert.deepEqual((await page.locator("#pane-dash .t-cust thead th").allInnerTexts()).map((x) => x.replace(/[▲▼]/g, "").trim().toLowerCase()), ["name", "amount", "share", "overdue", "longest overdue (days)", "priority"]);
     assert.equal(await page.locator("#pane-dash .foot-note").innerText(), "Sample data. Estimates only, not financial advice.");
     assert.doesNotMatch(await page.locator("#pane-dash .gcard .info").first().getAttribute("data-tip"), /[=÷×]/);
