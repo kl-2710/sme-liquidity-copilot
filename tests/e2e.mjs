@@ -642,8 +642,19 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator('#panelWrap [role="tab"], #panelWrap .tab, #panelWrap [data-tab]').count(), 0, "no way to switch views inside the panel");
     await page.click("#panelClose");
   });
+  await step(`[${theme}] Shortfall after task 2: no daily table, overview alert/outlook tiles, Forecast confidence, Two-week view or Financing match`, async () => {
+    await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(700);
+    const txt = await page.locator("#pane-gap").innerText();
+    assert.equal(await page.locator('#pane-gap :is(#dailyBtn, .fbcard, [data-wid="reliability"], [data-wid="blocks"], #finMatch)').count(), 0);
+    assert.doesNotMatch(txt, /Show the daily table|Overall alert|Cash state \(Base\)|Forecast reliability|Forecast confidence|Two-week|Funding plan|Financing ranking/);
+    assert.equal(await page.locator("#pane-gap .uc2-tiles .ls-tile").count(), 4, "four overview tiles");
+    assert.deepEqual(await page.locator("#pane-gap .dsec h2").allInnerTexts(), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
+    assert.equal(await page.locator("#pane-gap #gapChart").count(), 1, "the daily chart stays");
+    assert.equal(await last().locator(".suggest button", { hasText: "Rank the financing options that fit these factors." }).count(), 1, "the task 3 question is suggested under the last answer");
+    await page.click("#panelClose");
+  });
   await step(`[${theme}] Task 3 ranks financing for the whole shortfall (workbook v9 UC03)`, async () => {
-    await ask("Rank the financing options that fit these factors.");
+    await last().locator(".suggest button", { hasText: "Rank the financing options that fit these factors." }).click(); await page.waitForTimeout(3800);
     const card = last().locator(".liq.rank-all.uc03");
     assert.equal(await card.count(), 1);
     assert.deepEqual(await card.locator("tbody tr[data-prod]").evaluateAll((els) => els.map((e) => e.dataset.prod)),
@@ -654,6 +665,14 @@ for (const theme of ["light", "dark"]) {
     assert.doesNotMatch(await page.locator(".messages.on").innerText(), /forecast_liquidity|rank_financing|explain_liquidity_case|get_receivables/);
     assert.equal(await page.locator("#demoChips").isVisible(), false);
     assert.equal(await page.locator(".messages.on .suggest").count(), 1); assert.equal(await last().locator(".suggest").count(), 1);
+    await last().locator(".liq-act [data-a=open]").click(); await page.waitForTimeout(1200);
+    assert.equal(await page.locator("#detailTitle").innerText(), "Shortfall");
+    assert.match(await page.locator("#finMatch").innerText(), /Funding plan for the shortfall/);
+    assert.ok(await page.evaluate(() => { const f = document.querySelector("#finMatch"), g = [...document.querySelectorAll("#pane-gap .dsec h2")].find((h) => h.textContent === "Cash gaps");
+      return !!g && (g.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) > 0; }), "Financing match sits under Cash gaps");
+    assert.ok(await page.evaluate(() => Math.abs(document.querySelector("#finMatch").getBoundingClientRect().top - document.querySelector("#pane-gap").getBoundingClientRect().top) < 80), "Open scrolls to the financing match");
+    await shot(page, `${theme}-shortfall-financing`);
+    await page.click("#panelClose");
   });
   await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
     await ask("Explain gap 3");
@@ -987,7 +1006,7 @@ for (const theme of ["light", "dark"]) {
     assert.match(await page.locator("#pane-gap .c0b").innerText(), /Cash0 is provisional/);
     await page.selectOption("#scSel", "conservative"); await page.waitForTimeout(500);
     assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /-3,06B\s+18 Sep 2026 · Conservative/);
-    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /TH01 – Cash shortfall/);    // TH stays on Base
+    assert.match(await page.locator("#pane-gap .lstate").innerText(), /TH01 – Cash shortfall/);    // TH stays on Base (banner at the top)
     await page.selectOption("#scSel", "base"); await page.waitForTimeout(300);
     await page.selectOption("#wkSel", "4"); await page.waitForTimeout(500);
     assert.equal(await page.locator("#pane-gap .dsec h2").first().innerText(), "4-week cash forecast");
@@ -1088,7 +1107,8 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#pane-gap .uc2-bar .est").count(), 1);
     assert.ok((await page.locator("#pane-gap .uc2-bar .est").getAttribute("title")).length > 10, "the Estimate badge explains why (Cash0 not confirmed)");
     assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /Cash needed at the start\s+4,76B\s+Largest shortfall\s+3,56B/);
-    assert.match(await page.locator("#pane-gap .fbcard").innerText(), /Forecast confidence\s+There are not enough past forecasts/);
+    assert.equal(await page.locator("#pane-gap .fbcard, #pane-gap [data-wid=\"reliability\"]").count(), 0, "no Forecast confidence card");
+    assert.doesNotMatch(txt, /Forecast confidence|Overall alert|Cash outlook\n|Two-week view|Show the daily table/);
     assert.equal(await page.locator("#pane-gap .lv-legend").first().evaluate((e) => e.tagName), "P");
   });
   await step("Simple · chat answers use plain words, no rule codes or formulas", async () => {

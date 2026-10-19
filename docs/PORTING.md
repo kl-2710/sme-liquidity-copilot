@@ -126,3 +126,10 @@ The workbook is the reference; where the earlier engine differed, the engine fol
 ## Confirmation dialogs
 - `confirmAction` (delete chat, log out, clear data, delete account) marks the modal with `confirm-dialog`; `openModal` clears it for every other dialog.
 - `.modal.confirm-dialog` is `min(400px, 100vw − 32px)` wide, takes its height from the content (the shared `.modal-layout` would otherwise let the dialog grow across the scrim's flex row), has no footer rule and keeps Cancel / the action on the right. Settings and the dialogs with forms or text areas keep their layout.
+
+## Shortfall cleanup
+- The weekly forecast no longer has the "Show the daily table" button or the daily table (`dailyTableHTML`, `S.showDaily`, `gap.daily.*` removed). The "Daily balance and gaps" chart stays.
+- The overview keeps four tiles (lowest balance, first day below the safe level, cash needed, largest shortfall) in a 4-column grid; the "Overall alert" and "Cash outlook" / "Cash state (Base)" tiles were removed. The banner at the top already shows the alert level and the cash state. `gap.base.note` now refers to the banner.
+- The "Forecast confidence" / "Forecast reliability" card and the "Two-week view" / "Two-week blocks" card are no longer shown (`reliabilityHTML`, `blocksHTML`, `fb.*`, `blk.*` removed). `FEEDBACK` (forecast logs, reconciliation, model health in the gap_request) and the engine's blocks are unchanged.
+- The financing match (task 3) is not shown in Shortfall until the financing question has been answered (`S.stage ≥ 3`); the answer to task 2 carries that question in its suggestion row. Then the match appears under Cash gaps (`#finMatch`), and the "Open Shortfall →" / "Open ranking" buttons of the task 3 answer, and the hand-off of "Find financing" from step 3, open Shortfall scrolled to it (`openDetail(view, {scroll})`).
+- Saved pins of the removed widgets (`reliability`, `blocks`) are dropped on load.
