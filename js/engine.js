@@ -10,6 +10,9 @@ const ENGINE=(()=>{
   const normName=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/[^a-z0-9]+/g,' ').trim();
   // FNV-1a: deterministic ids (snapshot, run) so the same inputs always give the same id.
   const hash=s=>{let h=2166136261;for(const ch of String(s)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(36).toUpperCase()};
+  // Threshold comparisons on unrounded values: a relative tolerance keeps binary rounding from flipping exact decimal boundaries
+  // (5.00 % materiality is W2, T07; DSO equal to the watch threshold gives no signal, T08).
+  const EPS=1e-9,tol=b=>EPS*Math.max(1,Math.abs(b)),GT=(a,b)=>a>b+tol(b),GE=(a,b)=>a>=b-tol(b),LT=(a,b)=>a<b-tol(b);
   const tri=v=>{const s=String(v==null?'':v).trim().toLowerCase();return ['1','true','yes','y','có','co'].includes(s)?'yes':['0','false','no','n','không','khong'].includes(s)?'no':'unknown'};
 
   /* ---------- Inventory hints (suggestions only, never applied without confirmation) ---------- */
@@ -125,6 +128,172 @@ const ENGINE=(()=>{
         category:r.cat,amount:r.amt,certainty:r.certainty||'estimated',source_id:r.source_id||null}))};
   }
 
+  /* ---------- UC01 · customer tier (Table 2-40), needed for the cause breakdown ---------- */
+  // Relationship (Table 2-38): new ≤ cl.newDays of relationship; regular ≥ cl.regularMinInvoices invoices in the period and
+  // ≥ cl.regularMinMonths active months; otherwise occasional. Size by revenue share; the ±band applies only when a previous label exists.
+  function sizeLabel(share,prev){
+    const {largeShare:L,smallShare:S,bandSharePP:B}=CFG.cl;
+    if(prev==='large'&&share>=L-B)return 'large';if(prev!=='large'&&prev&&share>=L+B)return 'large';if(!prev&&share>=L)return 'large';
+    if(prev==='small'&&share<S+B)return 'small';if(prev!=='small'&&prev&&share<S-B)return 'small';if(!prev&&share<S)return 'small';
+    return 'medium';
+  }
+  function relationLabel(relDays,nInv,months){
+    if(relDays<=CFG.cl.newDays)return 'new';
+    if(nInv>=CFG.cl.regularMinInvoices&&months>=CFG.cl.regularMinMonths)return 'regular';
+    return 'occasional';
+  }
+  // Tier: 5 strategic (declared yes) → 1 new → 2 occasional or small → 4 large → 3 otherwise (A42).
+  function customerTier(rel,size,strategic){
+    if(strategic==='yes')return 5;if(rel==='new')return 1;if(rel==='occasional'||size==='small')return 2;if(size==='large')return 4;return 3;
+  }
+  function customerBase(snap,prevLabels={}){
+    const A=dnum(snap.as_of),S0=dnum(snap.period_start),sales=snap.sales||[],rev=snap.fin.revenue,arTot=sum(sales,s=>s.open_amount);
+    const strategic=new Set((snap.firm.strategic_customers||[]).map(normName)),groups=new Map();
+    sales.forEach(s=>{if(!groups.has(s.key))groups.set(s.key,[]);groups.get(s.key).push(s)});
+    return [...groups.entries()].map(([key,rows])=>{
+      const name=rows[0].customer,inPer=rows.filter(r=>r.in_period),revK=sum(inPer,r=>r.amount),share=rev>0?revK/rev:0;
+      const first=Math.min(...rows.map(r=>r.issue?dnum(r.issue):A)),relDays=A-first,months=new Set(inPer.map(r=>r.issue.slice(0,7))).size;
+      const rel=relationLabel(relDays,inPer.length,months),size=sizeLabel(share,(prevLabels[key]||{}).size),strat=strategic.has(normName(name))?'yes':'unknown';
+      const open=rows.filter(r=>r.open),ar=sum(open,r=>r.open_amount),od=open.filter(r=>r.due&&dnum(r.due)<A);
+      return {key,name,key_weak:rows[0].key_weak,rows,revenue:revK,revenue_share:share,ar,ar_share:arTot>0?ar/arTot:0,overdue:sum(od,r=>r.open_amount),
+        max_overdue:Math.max(0,...od.map(r=>r.dpd||0)),rel_days:relDays,invoices_in_period:inPer.length,active_months:months,
+        relationship:rel,size,strategic:strat,tier:customerTier(rel,size,strat),new_large:rel==='new'&&size==='large'};
+    });
+  }
+
+  /* ---------- UC01 · cause breakdown of E_AR and E_INV (section 2.7.10.7, Table 2-47) ---------- */
+  // SRS-DECISION: sources (1)–(3) take the overdue balance of invoices that carry R-AR-OD, grouped by the customer's tier, so the
+  // parts can never exceed E_AR = MAX(aggregate excess; Σ R-AR-OD overdue); (4) is the unassigned remainder. Sources (5)/(6) take the
+  // slow lots (R-INV-SLOW) split by cancelled status (confirmed or proposed by the name); (7) is the unassigned remainder of E_INV.
+  function decompose({E_AR,E_INV,arFlagged,slowLots}){
+    const p=[0,0,0,0,0,0,0,0];
+    arFlagged.forEach(x=>{p[x.tier>=4?1:x.tier<=2?2:3]+=x.amount});
+    slowLots.forEach(x=>{p[x.cancelled?6:5]+=x.amount});
+    p[4]=E_AR-(p[1]+p[2]+p[3]);p[7]=E_INV-(p[5]+p[6]);
+    const parts=[1,2,3,4,5,6,7].map(i=>({source:i,amount:p[i],item:i<=4?'AR':'INV',unassigned:i===4||i===7}));
+    const okAR=Math.abs(p[1]+p[2]+p[3]+p[4]-E_AR)<=CFG.tv2.tolerance&&p[4]>=-CFG.tv2.tolerance,okINV=Math.abs(p[5]+p[6]+p[7]-E_INV)<=CFG.tv2.tolerance&&p[7]>=-CFG.tv2.tolerance;
+    const total=E_AR+E_INV,named=parts.filter(x=>!x.unassigned&&x.amount>0).sort((a,b)=>b.amount-a.amount||a.source-b.source);
+    const free=parts.filter(x=>x.unassigned&&x.amount>0).sort((a,b)=>b.amount-a.amount);
+    let main=named[0]||null;if(free[0]&&(!main||free[0].amount>main.amount))main=free[0];   // "unassigned" wins only when larger than every named source
+    return {parts,total,ok:okAR&&okINV,main_cause_detail:main&&total>0?{...main,share:main.amount/total}:null};
+  }
+
+  /* ---------- UC01 · W axis, bottleneck pattern and hand-off (sections 2.7.6–2.7.9, 2.7.11, Appendix A) ---------- */
+  function modelOf(snap,policy){
+    const pm=policy&&policy.business_model;
+    if(pm==='CMT'||pm==='FOB')return {model:pm,declared:true,src:'owner_policy'};
+    if(pm!=='undeclared'&&snap.firm.business_model)return {model:snap.firm.business_model,declared:true,src:'firm_profile'};
+    // SRS-DECISION: an undeclared model uses the FOB defaults (Table 2-23, E3) and is labelled "not confirmed"; W is not set to unknown.
+    return {model:CFG.wc.defaultModel,declared:false,src:'demo_assumption'};
+  }
+  function diagnose(snap,policy={}){
+    const M=modelOf(snap,policy),T=CFG.wc.thr[M.model],N=snap.N,f=snap.fin,mat=policy.materiality??CFG.wc.materiality;
+    const sales=snap.sales,pur=snap.purchases,lots=snap.lots,A=dnum(snap.as_of);
+    const AR=sales?sum(sales,s=>s.open_amount):null,INV=lots?sum(lots,l=>l.value_own):null,AP=pur?sum(pur,p=>p.open_amount):null;
+    const rev=f.revenue,cogs=f.cogs;
+    // Days metrics as AR × N ÷ revenue (exact for integer inputs at the threshold boundaries, T08). Denominator 0 → not applicable (E2, T14).
+    const dso=AR!=null&&rev>0?AR*N/rev:null,dio=INV!=null&&cogs>0?INV*N/cogs:null,dpo=AP!=null&&cogs>0?AP*N/cogs:null;
+    const ccc=dso!=null&&dio!=null&&dpo!=null?dso+dio-dpo:null,twc=AR!=null&&INV!=null&&AP!=null?AR+INV-AP:null;
+    const cash=f.opening_cash;
+    const ca=f.current_assets!=null?{value:f.current_assets,src:'financials'}:cash!=null&&AR!=null&&INV!=null?{value:cash+AR+INV,src:'assumed'}:{value:null,src:'missing'};
+    const annualRev=rev>0?rev*365/N:null,cashBuffer=cash!=null&&annualRev?(cash+(f.st_investments||0))/annualRev:null;
+    const missing=[];if(rev==null)missing.push('revenue');if(cogs==null)missing.push('cogs');if(ca.value==null)missing.push('current_assets');
+    if(AR==null)missing.push('receivables');if(INV==null)missing.push('inventory');if(AP==null)missing.push('payables');
+    const inactive=(rev!=null&&rev<=0)||(cogs!=null&&cogs<=0);
+    // Aggregate signals (strictly greater than the threshold, T08).
+    const lvl=(v,t)=>v==null?0:GT(v,t.severe)?2:GT(v,t.watch)?1:0;
+    const aAR=lvl(dso,T.dso),aINV=lvl(dio,T.dio);
+    // Invoice level R-AR-OD: ρ = overdue days ÷ the invoice's own term (A12). Invoices without a due date never signal (T13).
+    const arOD=(sales||[]).filter(s=>s.open&&s.dpd>0&&s.rho!=null&&GT(s.rho,CFG.ar.rhoWatch)).map(s=>({inv:s,level:GT(s.rho,CFG.ar.rhoSevere)?2:1}));
+    // Lot level R-INV-SLOW by type (NVL/HH > 60 days, BTP/TP > 30 days); severe at twice the watch age or a confirmed cancelled order.
+    const slow=(lots||[]).filter(l=>l.owner!=='customer').map(l=>{
+      const thr=CFG.inv.slowDays[l.type]||CFG.inv.unknownTypeSlowDays,aged=l.days!=null&&l.days>thr,cancelled=l.cancelled==='yes';
+      if(!aged&&!cancelled)return null;
+      return {lot:l,thr,over:l.days!=null?l.days-thr:null,level:cancelled||(l.days!=null&&l.days>2*thr)?2:1,cancelled:cancelled||l.cancel_proposed,cancel_confirmed:cancelled};
+    }).filter(Boolean);
+    // Purchase level R-AP-OD: ρ > 0.5 is a watch signal; any overdue amount to an essential supplier is severe.
+    const apOD=(pur||[]).filter(p=>p.open&&p.dpd>0&&((p.rho!=null&&GT(p.rho,CFG.ap.rhoWatch))||p.essential==='yes')).map(p=>({inv:p,level:p.essential==='yes'?2:1}));
+    const ap1=dpo!=null&&cashBuffer!=null&&LT(dpo,T.dpo.low)&&LT(cashBuffer,T.bufThin);     // R-AP-1
+    const apInfo=dpo!=null&&GT(dpo,T.dpo.high);                                            // R-AP-INFO: note only, never a signal (T09)
+    // Capital above threshold E_i with double-count protection (Table 2-52).
+    const aggAR=aAR?(dso-T.dso.watch)*rev/N:0,odAR=sum(arOD,x=>x.inv.open_amount);
+    const aggINV=aINV?(dio-T.dio.watch)*cogs/N:0,slowV=sum(slow,x=>x.lot.value_own);
+    const E_AR=aAR||arOD.length?Math.max(aggAR,odAR):0,E_INV=aINV||slow.length?Math.max(aggINV,slowV):0,E_AP=sum(apOD,x=>x.inv.open_amount);
+    const caV=ca.value,m=E=>caV>0?E/caV:0;
+    const has={AR:!!(aAR||arOD.length),INV:!!(aINV||slow.length),AP:!!(ap1||apOD.length)};
+    const c={AR:!has.AR?0:aAR===2||GE(m(E_AR),mat)?2:1,INV:!has.INV?0:aINV===2||GE(m(E_INV),mat)?2:1,AP:!has.AP?0:GE(m(E_AP),mat)?2:1};
+    const shape=(agg,det)=>agg&&det?'HL':agg?'H':det?'L':'';
+    const status=(v,t)=>v==null?'n/a':GT(v,t.severe)?'severe':GT(v,t.watch)?'watch':'normal';
+    const near=(k,v,w)=>c[k]===0&&v!=null&&GE(v,CFG.bn.nearThresholdRatio*w);
+    const covProv={AR:snap.issues.some(i=>['AR_MISSING_DUE','AR_TERM_ASSUMED'].includes(i.code)),INV:snap.issues.some(i=>['INV_TYPE_INFERRED','INV_OWNER_UNKNOWN'].includes(i.code)),cogs:f.cogs_src==='converted'};
+    const item_states=[
+      {item:'AR',c:c.AR,E:E_AR,shape:shape(aAR,arOD.length),metric:'DSO',value:dso,ref:T.dso.ref,watch:T.dso.watch,severe:T.dso.severe,status:status(dso,T.dso),
+        headroom:dso!=null?T.dso.watch-dso:null,near_threshold:near('AR',dso,T.dso.watch),balance:AR,provisional:covProv.AR},
+      {item:'INV',c:c.INV,E:E_INV,shape:shape(aINV,slow.length),metric:'DIO',value:dio,ref:T.dio.ref,watch:T.dio.watch,severe:T.dio.severe,status:status(dio,T.dio),
+        headroom:dio!=null?T.dio.watch-dio:null,near_threshold:near('INV',dio,T.dio.watch),balance:INV,provisional:covProv.INV||covProv.cogs},
+      {item:'AP',c:c.AP,E:E_AP,shape:shape(ap1,apOD.length),metric:'DPO',value:dpo,low:T.dpo.low,high:T.dpo.high,status:dpo==null?'n/a':ap1?'watch':apOD.some(x=>x.level===2)?'severe':apOD.length?'watch':'normal',
+        headroom:null,near_threshold:false,balance:AP,provisional:covProv.cogs,info_high:apInfo}];
+    const order=CFG.bn.rankOrder,cause=item_states.filter(i=>i.c>=1).sort((a,b)=>b.c-a.c||b.E-a.E||order.indexOf(a.item)-order.indexOf(b.item));
+    const unknown=missing.length>0||inactive;
+    const set=new Set(cause.map(i=>i.item));
+    const bn=unknown?'unknown':!set.size?'BN0':set.size===3?'BN7':set.has('AR')&&set.has('INV')?'BN4':set.has('AR')&&set.has('AP')?'BN5':set.has('INV')&&set.has('AP')?'BN6':set.has('AR')?'BN1':set.has('INV')?'BN2':'BN3';
+    const share=caV>0?Math.max(E_AR,E_INV,E_AP)/caV:null;
+    const w=unknown?'unknown':cause.some(i=>i.c===2)?'W2':cause.length?'W1':'W0';
+    const rule_ids=[];if(aAR)rule_ids.push(aAR===2?'R-AR-2':'R-AR-1');if(arOD.length)rule_ids.push('R-AR-OD');if(aINV)rule_ids.push(aINV===2?'R-INV-2':'R-INV-1');
+    if(slow.length)rule_ids.push('R-INV-SLOW');if(ap1)rule_ids.push('R-AP-1');if(apOD.length)rule_ids.push('R-AP-OD');if(cause.length&&share!=null&&GE(share,mat))rule_ids.push('R-MAT');
+    // Customers and tiers (needed by the breakdown); the full profiles come from profiles() below.
+    const custs=sales?customerBase(snap,policy.prevLabels):[],tierOf=new Map(custs.map(x=>[x.key,x.tier]));
+    // Findings by object (section 2.7.9 a); BN0 → empty list.
+    const findings=[],thrSrc=M.src==='owner_policy'?'owner_policy':'verified_reference';
+    if(aAR)findings.push({id:'F-AR-AGG',item:'AR',object:{type:'firm',name:snap.firm.name},metric:'DSO',value:dso,threshold:aAR===2?T.dso.severe:T.dso.watch,deviation:dso-T.dso.watch,
+      amount:aggAR,days:null,rule_id:aAR===2?'R-AR-2':'R-AR-1',level:aAR,threshold_source:thrSrc,evidence_id:'EV-AR-AGG',data_status:covProv.AR?'provisional':'ok',direction:'review_credit_terms'});
+    const byCust=new Map();arOD.forEach(x=>{const k=x.inv.key;if(!byCust.has(k))byCust.set(k,[]);byCust.get(k).push(x)});
+    [...byCust.entries()].sort((a,b)=>sum(b[1],x=>x.inv.open_amount)-sum(a[1],x=>x.inv.open_amount)).forEach(([k,xs],i)=>{
+      const rho=Math.max(...xs.map(x=>x.inv.rho)),lv=Math.max(...xs.map(x=>x.level));
+      findings.push({id:'F-AR-'+(i+1),item:'AR',object:{type:'customer',key:k,name:xs[0].inv.customer},metric:'rho',value:rho,threshold:lv===2?CFG.ar.rhoSevere:CFG.ar.rhoWatch,deviation:rho-CFG.ar.rhoWatch,
+        amount:sum(xs,x=>x.inv.open_amount),days:Math.max(...xs.map(x=>x.inv.dpd)),rule_id:'R-AR-OD',level:lv,threshold_source:'demo_assumption',evidence_id:'EV-AR-'+(i+1),
+        invoice_ids:xs.map(x=>x.inv.id),data_status:'ok',direction:'reconcile_receivables'})});
+    if(aINV)findings.push({id:'F-INV-AGG',item:'INV',object:{type:'firm',name:snap.firm.name},metric:'DIO',value:dio,threshold:aINV===2?T.dio.severe:T.dio.watch,deviation:dio-T.dio.watch,
+      amount:aggINV,days:null,rule_id:aINV===2?'R-INV-2':'R-INV-1',level:aINV,threshold_source:thrSrc,evidence_id:'EV-INV-AGG',data_status:covProv.INV||covProv.cogs?'provisional':'ok',direction:'review_stock_levels'});
+    slow.slice().sort((a,b)=>b.lot.value_own-a.lot.value_own).forEach((x,i)=>findings.push({id:'F-INV-'+(i+1),item:'INV',object:{type:'lot',name:x.lot.name},metric:'lot_age',value:x.lot.days,threshold:x.thr,
+      deviation:x.over,amount:x.lot.value_own,days:x.lot.days,rule_id:'R-INV-SLOW',level:x.level,threshold_source:'demo_assumption',evidence_id:'EV-INV-'+(i+1),
+      data_status:x.lot.type_src==='declared'?'ok':'provisional',direction:x.cancelled?'review_cancelled_order_stock':'review_slow_stock'}));
+    const bySup=new Map();apOD.forEach(x=>{const k=x.inv.key;if(!bySup.has(k))bySup.set(k,[]);bySup.get(k).push(x)});
+    [...bySup.entries()].sort((a,b)=>sum(b[1],x=>x.inv.open_amount)-sum(a[1],x=>x.inv.open_amount)).forEach(([k,xs],i)=>{
+      const lv=Math.max(...xs.map(x=>x.level)),rho=Math.max(...xs.map(x=>x.inv.rho||0));
+      findings.push({id:'F-AP-'+(i+1),item:'AP',object:{type:'supplier',key:k,name:xs[0].inv.supplier},metric:lv===2?'essential_overdue':'rho',value:rho,threshold:CFG.ap.rhoWatch,deviation:rho-CFG.ap.rhoWatch,
+        amount:sum(xs,x=>x.inv.open_amount),days:Math.max(...xs.map(x=>x.inv.dpd)),rule_id:'R-AP-OD',level:lv,threshold_source:'demo_assumption',evidence_id:'EV-AP-'+(i+1),
+        invoice_ids:xs.map(x=>x.inv.id),essential:xs[0].inv.essential,data_status:'ok',direction:lv===2?'pay_essential_supplier_on_time':'agree_payment_schedule'})});
+    if(ap1)findings.push({id:'F-AP-AGG',item:'AP',object:{type:'firm',name:snap.firm.name},metric:'DPO',value:dpo,threshold:T.dpo.low,deviation:dpo-T.dpo.low,amount:null,days:null,
+      rule_id:'R-AP-1',level:1,threshold_source:thrSrc,evidence_id:'EV-AP-AGG',data_status:'ok',direction:'review_payment_speed',cash_buffer:cashBuffer});
+    const final=unknown?[]:(bn==='BN0'?[]:findings);
+    // Concentration (A36): one customer ≥ bn.concentration_share of E_AR. SRS-DECISION: when E_AR comes from flagged invoices the share
+    // uses each customer's flagged overdue; when E_AR is the aggregate excess it is allocated in proportion to open receivables.
+    let concentration=null;
+    if(E_AR>0&&custs.length){const fromDetail=odAR>=aggAR&&odAR>0;
+      const shares=custs.map(x=>({key:x.key,name:x.name,share:fromDetail?sum(arOD.filter(y=>y.inv.key===x.key),y=>y.inv.open_amount)/E_AR:x.ar_share})).sort((a,b)=>b.share-a.share);
+      concentration={flag:shares[0].share>=CFG.bn.concentrationShare?'concentrated':'dispersed',top:shares[0],basis:fromDetail?'flagged_overdue':'open_receivables_pro_rata'}}
+    const dec=decompose({E_AR,E_INV,arFlagged:arOD.map(x=>({amount:x.inv.open_amount,tier:tierOf.get(x.inv.key)||3})),slowLots:slow.map(x=>({amount:x.lot.value_own,cancelled:x.cancelled}))});
+    const provisional=[];if(!M.declared)provisional.push('MODEL_NOT_DECLARED');if(covProv.cogs)provisional.push('COGS_CONVERTED');if(ca.src==='assumed')provisional.push('CURRENT_ASSETS_ASSUMED');
+    if(covProv.INV)provisional.push('INVENTORY_PROVISIONAL');if(covProv.AR)provisional.push('RECEIVABLES_PROVISIONAL');if(cash==null)provisional.push('CASH_MISSING');
+    const policyVersion=policy.version_id||'CFG-default';
+    const run_id='RUN-UC01-'+hash([snap.snapshot_id,CFG.versions.formula,CFG.versions.threshold,policyVersion,M.model,mat].join('|'));
+    const result={wc_class:w,rule_ids,info_rules:apInfo?['R-AP-INFO']:[],main_bottleneck:unknown||!cause.length?null:cause[0].item,
+      money_at_risk:!unknown&&cause.length?E_AR+E_INV:0,obligation_overdue:unknown?0:E_AP,bn_pattern:bn,cause_items:unknown?[]:cause.map(i=>i.item),
+      item_states,materiality_share:share,materiality:mat,findings:final,coverage:{AR:sales?(covProv.AR?'provisional':'ok'):'missing',INV:lots?(covProv.INV?'provisional':'ok'):'missing',
+        AP:pur?'ok':'missing',revenue:rev==null?'missing':'ok',cogs:cogs==null?'missing':covProv.cogs?'provisional':'ok',current_assets:ca.src},
+      missing,inactive,provisional,model:M,thresholds:T,run_id,snapshot_id:snap.snapshot_id,as_of:snap.as_of,period_start:snap.period_start,N,
+      threshold_version:CFG.versions.threshold,policy_version:policyVersion,formula_version:CFG.versions.formula,
+      metrics:{AR,INV,AP,rev,cogs,dso,dio,dpo,ccc,twc,day_rev:rev>0?rev/N:null,day_cogs:cogs>0?cogs/N:null,cash,ca:caV,ca_src:ca.src,cash_buffer:cashBuffer,annual_revenue:annualRev,
+        rev_src:f.revenue_src,cogs_src:f.cogs_src,cogs_days:f.cogs_days,cogs_raw:f.cogs_raw,agg:{AR:aggAR,INV:aggINV},detail:{AR:odAR,INV:slowV},
+        total_overdue_ar:sum((sales||[]).filter(s=>s.open&&s.dpd>0),s=>s.open_amount),missing_due_ar:sum((sales||[]).filter(s=>s.open&&s.missing_due),s=>s.open_amount)},
+      signals:{arOD,slow,apOD,ap1},concentration,customers:custs,stuck_breakdown:dec.ok?dec.parts:null,main_cause_detail:dec.ok?dec.main_cause_detail:null,
+      breakdown_ok:dec.ok,status:!dec.ok?'rejected':unknown?'missing_data':provisional.length?'provisional':'ok'};
+    // A breakdown that does not reconcile within 1 VND rejects the run (operational error, Table 2-50).
+    if(!dec.ok)result.error='BREAKDOWN_MISMATCH';
+    return result;
+  }
+
   /* ---------- Interim cash schedule (replaced by the SRS v1.3 delay model in phase E) ---------- */
   function lateWavg(rows){const w=sum(rows,r=>r.amount);return w?sum(rows,r=>r.amount*Math.max(0,dnum(r.paid)-dnum(r.due)))/w:null}
   function schedule(snap,scenario){
@@ -166,6 +335,6 @@ const ENGINE=(()=>{
     ['base','stress_7'].forEach(sc=>{const ev=schedule(snap,sc);out[sc]=legacyCase(snap,sc,{rtarget:rt,cash0,ev,days:ledger(cash0,ev,A)})});
     return out;
   }
-  return {dnum,diso,sum,round,hash,normName,tri,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
-    schedule,ledger,legacyCase,buildCases};
+  return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
+    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,schedule,ledger,legacyCase,buildCases};
 })();

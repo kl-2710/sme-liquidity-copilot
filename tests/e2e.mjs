@@ -177,6 +177,103 @@ await step("A · the analysis period follows the chosen cut-off (default start =
   assert.deepEqual(r, { N: 183, start: "2026-03-02", sid: "SNP-F01-20260930-01@2026-08-31/183d" });
 });
 
+// TCASE builds an input that reaches given DSO/DIO/DPO exactly, plus overdue invoices, slow lots and overdue payables.
+await enginePage.addScriptTag({ content: `window.TCASE=(o={})=>{
+  const N=o.N||90,asOf='2026-09-30',A=ENGINE.dnum(asOf),d=x=>ENGINE.diso(A+x),rev=o.rev??30e9,cogs=o.cogs??24e9,ca=o.ca===undefined?20e9:o.ca;
+  const cash=(o.buffer??0.08)*rev*365/N,AR=(o.dso??40)*rev/N,INV=(o.dio??70)*cogs/N,AP=(o.dpo??30)*cogs/N,sales=[],pur=[],inv=[];
+  let od=0;(o.arOverdue||[]).forEach((x,i)=>{sales.push({id:'OD'+i,customer:x.customer||'K'+(i+1),amount:x.amount,issue:d(-(x.dpd+x.term)),due:d(-x.dpd),paid:null});od+=x.amount});
+  if(AR-od>0)sales.push({id:'S0',customer:o.mainCustomer||'K9',amount:AR-od,issue:d(-10),due:d(20),paid:null});
+  let sl=0;(o.slowLots||[]).forEach((x,i)=>{inv.push({name:'Slow lot '+(i+1),type:x.type||'NVL',qty:1,unit_cost:x.amount,days:x.days,owner:'own',cancelled:x.cancelled||'unknown',pledged:'unknown'});sl+=x.amount});
+  if(INV-sl>0)inv.push({name:'Fabric stock',type:'NVL',qty:1,unit_cost:INV-sl,days:10,owner:o.invOwner||'own',cancelled:'unknown',pledged:'unknown'});
+  let po=0;(o.apOverdue||[]).forEach((x,i)=>{pur.push({id:'PO'+i,supplier:x.supplier||'S'+(i+1),amount:x.amount,issue:d(-(x.dpd+x.term)),due:d(-x.dpd),paid:null,essential:x.essential||null});po+=x.amount});
+  if(AP-po>0)pur.push({id:'P0',supplier:'S9',amount:AP-po,issue:d(-5),due:d(25),paid:null});
+  const fin=[{period_start:d(-(N-1)),period_end:asOf,revenue:rev,cogs,opening_cash:cash,current_assets:ca}];
+  const input=TMK({firm:{business_model:o.model||'FOB'},fin,sales,purchases:pur,inventory:inv,tables:o.tables});
+  return ENGINE.diagnose(ENGINE.makeSnapshot(input,{periodStart:d(-(N-1))}),{materiality:o.materiality});
+};
+window.SUMMARY=(r)=>({w:r.wc_class,bn:r.bn_pattern,main:r.main_bottleneck,rules:r.rule_ids,mar:Math.round(r.money_at_risk/1e6),ob:Math.round(r.obligation_overdue/1e6),
+  share:r.materiality_share==null?null:Math.round(r.materiality_share*10000)/100,shape:Object.fromEntries(r.item_states.map(i=>[i.item,i.shape])),c:Object.fromEntries(r.item_states.map(i=>[i.item,i.c]))});` });
+const B = (o) => ev((x) => SUMMARY(TCASE(x)), o);
+await step("B · T01–T06 public-company cases", async () => {
+  // DM7: DSO 112.9, revenue 741.1 bn a year, current assets 406.3 bn (FOB) → W2, money_at_risk 114.1 bn.
+  let r = await B({ N: 365, rev: 741.1e9, cogs: 600e9, dso: 112.9, ca: 406.3e9 });
+  assert.equal(r.w, "W2"); assert.ok(r.rules.includes("R-AR-2") && r.rules.includes("R-MAT")); assert.equal(Math.round(r.mar / 100) / 10, 114.1); assert.equal(r.main, "AR");
+  r = await B({ N: 365, rev: 980.3e9, cogs: 800e9, dso: 63.3, ca: 624.4e9 });                  // HNI
+  assert.equal(r.w, "W1"); assert.deepEqual(r.rules, ["R-AR-1"]); assert.equal(Math.round(r.share * 10) / 10, 2.8);
+  r = await B({ N: 365, rev: 365e9, cogs: 300e9, dso: 67.1, ca: 10.4e9 / 0.054 });             // NJC 5.4 %
+  assert.equal(r.w, "W2"); assert.deepEqual(r.rules, ["R-AR-1", "R-MAT"]);
+  r = await B({ N: 365, rev: 500e9, cogs: 400e9, dio: 255, ca: 2000e9 });                     // TDT
+  assert.equal(r.w, "W2"); assert.ok(r.rules.includes("R-INV-2")); assert.equal(r.main, "INV");
+  r = await B({ model: "CMT", N: 365, rev: 500e9, cogs: 400e9, dso: 30.2, dio: 3.2, dpo: 4.3, buffer: 0.507 });  // PTG
+  assert.equal(r.w, "W0"); assert.equal(r.bn, "BN0");
+  r = await B({ rev: 0, dso: 40 });                                                              // G20: no revenue
+  assert.equal(r.w, "unknown"); assert.equal(r.bn, "unknown");
+});
+await step("B · T07 materiality boundary, T08 threshold boundary, T09 high DPO, T10 low DPO with a thin buffer", async () => {
+  // E_AR = (60 − 56.7) × 100 M/day = 330 M; current assets 330 M ÷ share.
+  const at = (share) => B({ rev: 9e9, cogs: 8e9, dso: 60, ca: 330e6 / share });
+  assert.equal((await at(0.0499)).w, "W1"); assert.equal((await at(0.05)).w, "W2");
+  let r = await B({ dso: 56.7 }); assert.equal(r.w, "W0"); assert.deepEqual(r.rules, []);
+  r = await ev(() => { const x = TCASE({ dpo: 70 }); return [x.wc_class, x.info_rules]; }); assert.deepEqual(r, ["W0", ["R-AP-INFO"]]);
+  r = await B({ dpo: 10, buffer: 0.04 }); assert.equal(r.w, "W1"); assert.deepEqual(r.rules, ["R-AP-1"]); assert.equal(r.bn, "BN3");
+});
+await step("B · T11 small overdue invoice, T12 customer-owned stock, T13 missing due dates, T14 zero revenue", async () => {
+  let r = await B({ arOverdue: [{ amount: 100e6, dpd: 45, term: 30 }] });                      // ρ = 1.5, 0.5 % of current assets
+  assert.equal(r.w, "W1"); assert.equal(r.bn, "BN1"); assert.equal(r.shape.AR, "L");
+  r = await ev(() => { const x = TCASE({ dio: 150, invOwner: "customer" }); return [x.metrics.INV, x.metrics.dio, x.wc_class]; });
+  assert.deepEqual(r, [0, 0, "W0"]);
+  r = await ev(() => { const input = TMK({ sales: [{ id: "A", customer: "K1", amount: 800e6, issue: "2026-08-01", due: "2026-08-10", paid: null }, { id: "B", customer: "K2", amount: 200e6, issue: "2026-08-01", due: null, paid: null }] });
+    const x = ENGINE.diagnose(ENGINE.makeSnapshot(input)); return [x.metrics.missing_due_ar, x.coverage.AR, x.signals.arOD.map((y) => y.inv.id)]; });
+  assert.deepEqual(r, [200e6, "provisional", ["A"]]);
+  r = await ev(() => { const x = TCASE({ rev: 0 }); return [x.metrics.dso, x.metrics.twc > 0, x.wc_class]; });
+  assert.deepEqual(r, [null, true, "unknown"]);
+});
+await step("B · T21–T27 single-item patterns (FOB reference company)", async () => {
+  let r = await ev(() => { const x = TCASE({ dso: 40, dio: 70, dpo: 30 }); return { s: SUMMARY(x), h: x.item_states.map((i) => i.headroom == null ? null : Math.round(i.headroom * 10) / 10), f: x.findings.length }; });
+  assert.equal(r.s.bn, "BN0"); assert.equal(r.s.w, "W0"); assert.equal(r.s.main, null); assert.equal(r.s.mar, 0); assert.equal(r.f, 0); assert.deepEqual(r.h.slice(0, 2), [16.7, 28.4]);
+  r = await ev(() => { const x = TCASE({ dso: 52 }); return [x.bn_pattern, x.item_states[0].near_threshold, x.findings.length]; }); assert.deepEqual(r, ["BN0", true, 0]);
+  r = await B({ dso: 58 }); assert.deepEqual([r.bn, r.w, r.mar, r.share, r.main, r.shape.AR], ["BN1", "W1", 433, 2.17, "AR", "H"]);
+  r = await B({ dso: 80 }); assert.deepEqual([r.bn, r.w, r.mar, r.share], ["BN1", "W2", 7767, 38.83]);
+  r = await B({ dio: 150 }); assert.deepEqual([r.bn, r.w, r.mar], ["BN2", "W2", 13760]);
+  r = await B({ apOverdue: [{ amount: 1200e6, dpd: 40, term: 30 }] }); assert.deepEqual([r.bn, r.w, r.mar, r.ob], ["BN3", "W2", 0, 1200]);
+  r = await B({ dpo: 10, buffer: 0.04 }); assert.deepEqual([r.bn, r.w, r.mar, r.ob], ["BN3", "W1", 0, 0]);
+});
+await step("B · T28–T34 combined patterns, double counting and tie order", async () => {
+  let r = await B({ dso: 58, dio: 100 }); assert.deepEqual([r.bn, r.w, r.main, r.mar], ["BN4", "W1", "AR", 860]);
+  r = await B({ dso: 80, dio: 100 }); assert.deepEqual([r.bn, r.w, r.main, r.mar], ["BN4", "W2", "AR", 8193]);
+  r = await B({ dso: 58, apOverdue: [{ amount: 300e6, dpd: 40, term: 30 }] }); assert.deepEqual([r.bn, r.w, r.main, r.mar, r.ob], ["BN5", "W1", "AR", 433, 300]);
+  r = await B({ dio: 90, slowLots: [{ amount: 600e6, days: 90 }], apOverdue: [{ amount: 400e6, dpd: 40, term: 30 }] });
+  assert.deepEqual([r.bn, r.w, r.main, r.mar, r.ob, r.shape.INV, r.shape.AP], ["BN6", "W1", "INV", 600, 400, "L", "L"]);
+  r = await ev(() => { const x = TCASE({ N: 183, rev: 20e9, cogs: 16e9, ca: 18977.6e6, dso: 7061.3e6 * 183 / 20e9, dio: 10716.3e6 * 183 / 16e9, dpo: 1941.2e6 * 183 / 16e9, buffer: 0.03,
+    apOverdue: [{ amount: 370.8e6, dpd: 40, term: 30 }] }); return { s: SUMMARY(x), e: x.item_states.map((i) => Math.round(i.E / 1e5) / 10) }; });
+  assert.deepEqual([r.s.bn, r.s.w, r.s.main], ["BN7", "W2", "INV"]); assert.deepEqual(r.e, [864.6, 2113, 370.8]); assert.equal(Math.round(r.s.mar * 10) / 10, 2978);
+  r = await B({ dso: 62, arOverdue: [{ amount: 600e6, dpd: 40, term: 30 }] }); assert.deepEqual([r.bn, r.w, r.mar, r.shape.AR], ["BN1", "W2", 1767, "HL"]);
+  r = await B({ arOverdue: [{ amount: 500e6, dpd: 40, term: 30 }], slowLots: [{ amount: 500e6, days: 90 }] }); assert.deepEqual([r.bn, r.w, r.main, r.mar], ["BN4", "W1", "AR", 1000]);
+});
+await step("B · T35 missing payables, T36 provisional stock, T37 concentrated receivables", async () => {
+  let r = await ev(() => { const x = TCASE({ dso: 58, tables: { purchases: false } }); return [x.wc_class, x.bn_pattern, x.item_states.map((i) => i.value == null ? null : Math.round(i.value))]; });
+  assert.deepEqual(r, ["unknown", "unknown", [58, 70, null]]);
+  r = await ev(() => { const input = TMK({ fin: [{ period_start: "2026-07-03", period_end: "2026-09-30", revenue: 30e9, cogs: 24e9, opening_cash: 1e9, current_assets: 20e9 }],
+    sales: [{ id: "S", customer: "K", amount: 40 * 30e9 / 90, issue: "2026-09-20", due: "2026-10-20", paid: null }], purchases: [{ id: "P", supplier: "S", amount: 30 * 24e9 / 90, issue: "2026-09-20", due: "2026-10-20", paid: null }],
+    inventory: [{ name: "Unlabelled stock", type: null, qty: 1, unit_cost: 70 * 24e9 / 90, days: 10, owner: null }] });
+    const x = ENGINE.diagnose(ENGINE.makeSnapshot(input, { periodStart: "2026-07-03" })); return [x.bn_pattern, x.wc_class, x.coverage.INV, x.item_states[1].provisional, x.status]; });
+  assert.deepEqual(r, ["BN0", "W0", "provisional", true, "provisional"]);
+  r = await ev(() => TCASE({ arOverdue: [{ customer: "K1", amount: 600e6, dpd: 40, term: 30 }, { customer: "K2", amount: 400e6, dpd: 40, term: 30 }] }).concentration);
+  assert.equal(r.flag, "concentrated"); assert.equal(r.top.name, "K1"); assert.equal(Math.round(r.top.share * 100), 60);
+});
+await step("B · T47 F01 cash cycle and T48/T49 cause breakdowns", async () => {
+  const r = await ev(() => { const d = uc01("F01"); return { dso: d.metrics.dso.toFixed(1), dio: d.metrics.dio.toFixed(1), dpo: d.metrics.dpo.toFixed(1), ccc: d.metrics.ccc.toFixed(1), cogs: d.coverage.cogs }; });
+  assert.deepEqual(r, { dso: "49.6", dio: "43.9", dpo: "24.8", ccc: "68.7", cogs: "provisional" });
+  // T48 assumes E_AR equals the total overdue: K1 tier 4 817,756,000; K3 tier 2 53,809,000; cancelled lot 430,000,000.
+  const t48 = await ev(() => ENGINE.decompose({ E_AR: 871565000, E_INV: 430000000, arFlagged: [{ amount: 817756000, tier: 4 }, { amount: 53809000, tier: 2 }], slowLots: [{ amount: 430000000, cancelled: true }] }));
+  assert.equal(t48.ok, true); assert.deepEqual(t48.parts.filter((p) => p.amount).map((p) => [p.source, p.amount]), [[1, 817756000], [2, 53809000], [6, 430000000]]);
+  assert.equal(t48.total, 1301565000); assert.equal(t48.main_cause_detail.source, 1); assert.equal((t48.main_cause_detail.share * 100).toFixed(1), "62.8");
+  const t49 = await ev(() => ENGINE.decompose({ E_AR: 860267000, E_INV: 1450000000, arFlagged: [{ amount: 248943000, tier: 4 }, { amount: 611324000, tier: 3 }], slowLots: [{ amount: 1450000000, cancelled: false }] }));
+  assert.equal(t49.total, 2310267000); assert.equal(t49.main_cause_detail.source, 5); assert.equal((t49.main_cause_detail.share * 100).toFixed(1), "62.8");
+  const bad = await ev(() => ENGINE.decompose({ E_AR: 100, E_INV: 0, arFlagged: [{ amount: 300, tier: 4 }], slowLots: [] }));   // T56
+  assert.equal(bad.ok, false);
+});
+
 for (const theme of ["light", "dark"]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
