@@ -585,6 +585,16 @@ for (const theme of ["light", "dark"]) {
     const chips = await page.locator("#demoChips button").count();
     assert.ok(chips > 0 && chips <= 4, `chips: ${chips}`);
   });
+  await step(`[${theme}] Open on the UC02 answer shows only Shortfall, on the gap clicked`, async () => {
+    const btn = last().locator("[data-gap-open]").last();
+    const k = Number(await btn.getAttribute("data-gap-open"));
+    await btn.evaluate((el) => el.click()); await page.waitForTimeout(800);
+    assert.equal(await page.locator("#detailTitle").innerText(), "Shortfall");
+    assert.equal(await page.evaluate(() => EP.k), k, "the clicked gap is selected");
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".detail-pane")].filter((p) => !p.hidden || p.innerHTML.trim()).map((p) => p.id)), ["pane-gap"]);
+    assert.equal(await page.locator('#panelWrap [role="tab"], #panelWrap .tab, #panelWrap [data-tab]').count(), 0, "no way to switch views inside the panel");
+    await page.click("#panelClose");
+  });
   await step(`[${theme}] Task 3 ranks financing for every gap`, async () => {
     await ask("Rank the financing options that fit these factors.");
     assert.equal(await last().locator(".rank-sum tbody tr").count(), 5);
@@ -627,18 +637,27 @@ for (const theme of ["light", "dark"]) {
     await ask("Explain gap 9");
     assert.match(await last().innerText(), /There is no gap 9/);
   });
-  await step(`[${theme}] dashboard tabs render`, async () => {
-    for (const t of ["dash", "gap", "whatif"]) {
-      await page.click(`.tab[data-tab=${t}]`); await page.waitForTimeout(500);
+  await step(`[${theme}] each detail view renders alone, with its own title and no tabs`, async () => {
+    const titles = { dash: "Dashboard", gap: "Shortfall", whatif: "What-if", appr: "Approvals" };
+    for (const t of ["dash", "gap", "whatif", "appr"]) {
+      await page.evaluate((v) => openDetail(v), t); await page.waitForTimeout(500);
+      assert.equal(await page.locator("#detailTitle").innerText(), titles[t]);
       assert.ok((await page.locator(`#pane-${t}`).innerText()).length > 40, t);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".detail-pane")].filter((p) => !p.hidden || p.innerHTML.trim()).map((p) => p.id)), [`pane-${t}`]);
     }
+    assert.equal(await page.locator('#panelWrap [role="tab"], #panelWrap .tab, #tabs').count(), 0);
+    await page.keyboard.press("2"); await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => S.detail), "appr", "number keys no longer switch views");
+    await page.click("#panelClose"); assert.equal(await page.evaluate(() => S.panel), false);
+    await page.click("#panelBtn"); await page.waitForTimeout(300);
+    assert.equal(await page.locator("#detailTitle").innerText(), "Approvals", "the header button reopens the last detail view");
   });
   await step(`[${theme}] dashboard has no forecast; Shortfall holds forecast, daily chart, gaps and ranking`, async () => {
-    await page.click(".tab[data-tab=dash]"); await page.waitForTimeout(500);
+    await page.evaluate(() => openDetail("dash")); await page.waitForTimeout(500);
     assert.equal(await page.locator('#pane-dash :is([data-wid="flow"], [data-wid="daily"], .fch, #gapChart, #dashChart)').count(), 0);
     assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /13-week cash forecast/);
     assert.match(await page.locator("#pane-dash .lstate .lv-pill").innerText(), /Highest alert: Red/);
-    await page.click(".tab[data-tab=gap]"); await page.waitForTimeout(700);
+    await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(700);
     const h2 = await page.locator("#pane-gap .dsec h2").allInnerTexts();
     assert.deepEqual(h2.slice(0, 3), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
     assert.match(h2[3], /^Financing ranking/);
@@ -664,9 +683,9 @@ for (const theme of ["light", "dark"]) {
   });
   await step(`[${theme}] F02/F03 base render without errors`, async () => {
     for (const fm of ["F02", "F03"]) {
-      await page.evaluate((f) => { switchContext(f, "base", { silent: true }); advance(3); setTab("dash"); }, fm); await page.waitForTimeout(500);
+      await page.evaluate((f) => { switchContext(f, "base", { silent: true }); advance(3); openDetail("dash"); }, fm); await page.waitForTimeout(500);
       assert.match(await page.locator("#pane-dash .lv-pill").innerText(), /Blue/);
-      await page.evaluate(() => setTab("gap")); await page.waitForTimeout(500);
+      await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(500);
       assert.match(await page.locator("#pane-gap").innerText(), /No cash shortfall/);
     }
     await page.evaluate(() => switchContext("F01", defCase("F01"), { silent: true }));
@@ -762,7 +781,7 @@ for (const theme of ["light", "dark"]) {
   await page.goto(URL0);
   await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light"})); localStorage.setItem("lilact.expert.v1", "1"); });
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
-  const dash = async () => { await page.evaluate(() => { setTab("dash"); setWide(true); }); await page.waitForTimeout(700); };
+  const dash = async () => { await page.evaluate(() => { openDetail("dash"); setWide(true); }); await page.waitForTimeout(700); };
   await step("D · dashboard order, data source line and gauge scales follow Table 3-1", async () => {
     await dash();
     const r = await page.evaluate(() => { const p = document.querySelector("#pane-dash"), kids = [...p.children].map((e) => e.className.split(" ")[0]);
@@ -830,7 +849,7 @@ for (const theme of ["light", "dark"]) {
         config: { amount_basis: "net", vat_rate: null }, tables: { sales: true, purchases: true, inventory: true, planned: true }, sales: many,
         purchases: [{ id: "P", supplier: "Mill", amount: 30 * 24e9 / 90, issue: d(-5), due: d(25), paid: null }],
         inventory: [{ name: "Fabric", type: "NVL", qty: 1, unit_cost: 70 * 24e9 / 90, days: 10, owner: "own" }], planned: [] });
-      FIRMS.X99 = { name: "BN0 Test Co", short: "BN0 Test" }; switchContext("X99", "base", { silent: true }); setTab("dash"); setWide(true);
+      FIRMS.X99 = { name: "BN0 Test Co", short: "BN0 Test" }; switchContext("X99", "base", { silent: true }); openDetail("dash"); setWide(true);
     });
     await page.waitForTimeout(500);
     const r = await page.evaluate(() => { const p = document.querySelector("#pane-dash"); return { w: p.querySelector(".wcard .ls-w").textContent, bn0: !!p.querySelector(".mtile.bn0"), mar: !!p.querySelector(".mtile.hl"),
@@ -843,7 +862,7 @@ for (const theme of ["light", "dark"]) {
   });
 
   await step("F · Shortfall header: run status, scenario and horizon selectors, Cash0 form with validation and a new configuration version", async () => {
-    await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(3); setTab("gap"); setWide(true); }); await page.waitForTimeout(700);
+    await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(3); openDetail("gap"); setWide(true); }); await page.waitForTimeout(700);
     assert.match(await page.locator("#pane-gap .uc2-bar").innerText(), /Run status: provisional/);
     assert.match(await page.locator("#pane-gap .c0b").innerText(), /Cash0 is provisional/);
     await page.selectOption("#scSel", "conservative"); await page.waitForTimeout(500);
@@ -866,7 +885,7 @@ for (const theme of ["light", "dark"]) {
   });
 
   await step("G · Find financing shows the gap_request summary; the chat ranking uses the confirmed request; wording is 'contributing factors'", async () => {
-    await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(2); setTab("gap"); setWide(true); }); await page.waitForTimeout(700);
+    await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(2); openDetail("gap"); setWide(true); }); await page.waitForTimeout(700);
     assert.match(await page.locator("#pane-gap .cfcard h3").innerText(), /Contributing factors · gap \d/);
     await page.click("#grBtn"); await page.waitForTimeout(300);
     const need = await page.evaluate(() => fd(uc02().summary.base.first_below_rtarget));
@@ -883,7 +902,7 @@ for (const theme of ["light", "dark"]) {
     assert.ok((await page.locator(".messages.on .msg.bot").last().innerText()).includes(`Request ${id}: cash needed from ${need}`));
   });
   await step("G · F02 (Base TH03): the button offers idle-cash options and no request is created", async () => {
-    await page.evaluate(() => { switchContext("F02", "base", { silent: true }); advance(2); setTab("gap"); setWide(true); }); await page.waitForTimeout(700);
+    await page.evaluate(() => { switchContext("F02", "base", { silent: true }); advance(2); openDetail("gap"); setWide(true); }); await page.waitForTimeout(700);
     assert.match(await page.locator("#grBtn").innerText(), /View options for idle cash \(phase 2\)/);
     await page.click("#grBtn"); await page.waitForTimeout(300);
     assert.match(await page.locator("#modal").innerText(), /cash surplus \(TH03\)/); assert.equal(await page.locator("#grSend").count(), 0);
@@ -905,7 +924,7 @@ for (const theme of ["light", "dark"]) {
   const TECH = /\b(W[0-2] –|BN\d|TH0\d|M[1-9]|R-AR|R-INV|R-AP|R-MAT|c_i|E_AR|E_INV|E_i|money_at_risk|tv1\.threshold|SNP-|RUN-|SRS|Rtarget|Rmin|Rupper|demo assumption|90-day)\b|[÷×]|\d{1,3}(\.\d{3}){2,} VND/;
   const plain = (x) => x.replace(/Tools used:.*/g, "").replace(/\{[\s\S]*?\}/g, "");
   await step("Simple · dashboard shows plain results; Expert mode is off by default", async () => {
-    await page.evaluate(() => { setTab("dash"); setWide(true); }); await page.waitForTimeout(700);
+    await page.evaluate(() => { openDetail("dash"); setWide(true); }); await page.waitForTimeout(700);
     assert.equal(await page.isChecked("#ucExpert"), false);
     const txt = await page.locator("#pane-dash").innerText();
     assert.doesNotMatch(txt, TECH);
@@ -939,7 +958,7 @@ for (const theme of ["light", "dark"]) {
     await page.click("#ucExpert"); await page.waitForTimeout(300);
   });
   await step("Simple · Shortfall tab uses plain names and shows only the main Cash0 figure", async () => {
-    await page.evaluate(() => { advance(3); setTab("gap"); setWide(true); }); await page.waitForTimeout(900);
+    await page.evaluate(() => { advance(3); openDetail("gap"); setWide(true); }); await page.waitForTimeout(900);
     const txt = await page.locator("#pane-gap").innerText();
     assert.doesNotMatch(txt, TECH); assert.doesNotMatch(txt, /PeakZero|Need\(0\)|to stay ≥ 0/);
     assert.match(txt, /Minimum cash 250,0M · Safe cash level 500,0M · Surplus level 1,00bn/);
@@ -959,7 +978,7 @@ for (const theme of ["light", "dark"]) {
   });
   await step("Modals · at a short viewport the Cash0 form scrolls inside, Save stays reachable, the page is locked, Esc restores focus", async () => {
     await page.setViewportSize({ width: 1280, height: 420 });
-    await page.evaluate(() => { setWide(true); setTab("gap"); }); await page.waitForTimeout(700);
+    await page.evaluate(() => { setWide(true); openDetail("gap"); }); await page.waitForTimeout(700);
     await page.focus("#cash0Btn"); await page.click("#cash0Btn"); await page.waitForTimeout(400);
     const r = await page.evaluate(() => { const b = document.querySelector("#modal .modal-b"), m = document.querySelector("#modal").getBoundingClientRect();
       return { scrollable: b.scrollHeight > b.clientHeight, overflow: getComputedStyle(b).overflowY, modalFits: m.top >= 0 && m.bottom <= innerHeight, locked: getComputedStyle(document.documentElement).overflow }; });

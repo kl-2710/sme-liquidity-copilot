@@ -5,7 +5,7 @@
 
 ## Single-flow interface
 - The four task navigation modules have been replaced by one continuous conversation with a four-step progress bar.
-- Step status is presented from the existing `S.stage` and `unlockedTask()` state. Selecting an available step scrolls to its conversation divider (or the welcome hero for Step 1 before its first divider exists) and opens its dashboard tab; it does not change the stage or rerun calculations.
+- Step status is presented from the existing `S.stage` and `unlockedTask()` state; it does not change the stage or rerun calculations.
 - Advancing the conversation adds one divider per reached step. New chat and company changes clear the dividers with the conversation.
 - Only the interface and its browser tests changed for this presentation. Routing, calculations, data, and the order of the four business steps are preserved.
 
@@ -78,3 +78,13 @@ The interface hides the audit log while keeping `addLog` and its in-memory event
 ## Modals
 - Every dialog opened with `openModal` gets the shared layout from `layoutModal`: a fixed header (close button and title), a body that scrolls on its own (`overflow-y:auto; min-height:0; overscroll-behavior:contain`) and a fixed footer with the `.acts` buttons. The modal is at most `calc(100dvh - 2rem)` high (100vh fallback), so Save and Cancel stay reachable on short screens.
 - While a modal is open the page behind is locked; Esc closes it, Tab stays inside it and focus returns to the element that opened it. The Settings window keeps its own two-pane layout.
+
+## Detail views (one at a time)
+- The right-hand panel shows exactly one detail view: Dashboard, Shortfall, What-if or Approvals. It has a header with the view title, the company line, Full screen and a close button (×); there is no tab bar and the 1–4 keyboard shortcuts were removed.
+- `openDetail(view, opts)` replaces `setTab`: it sets `S.detail` (formerly `S.tab`), renders only that view, empties the other panes and opens the panel. `opts.gap` selects a gap first; the gap buttons of the UC02 answer still call `selectGap` (`data-gap-open`). Shortfall and What-if fall back to Dashboard before the conversation reaches step 2 / 3, as before.
+- A detail view opens only from the "Open…" button of a chat answer: UC01 → Dashboard, UC02 / gap → Shortfall on that gap, UC03 / UC04 options → What-if with the scenario already loaded (`loadScenario`), drafts → Approvals. The sidebar "Approval queue" and the Pending chip also open Approvals.
+- Buttons inside a view that used to jump to another view now hand off to the chat (`detailHandoff`): a short note with the Open button of the target view. This covers "Try" in the Shortfall ranking, "Create draft" in What-if, "Find financing" once step 3 is reached, and the empty Approvals view (its "Open What-if" button became a hint).
+- `#panelBtn` stays in the chat header but only reopens the most recent detail view (`S.detail`) and shows its name; it never switches to another view. Kept rather than removed so the panel can be reopened after closing it without scrolling back to the answer.
+- When the stage advances, an open detail view is re-rendered in place; it no longer switches to the step's view. New chat closes the panel if it showed Shortfall or What-if.
+- The pending-draft badge `#apprBadge` moved from the old Approvals tab to the sidebar "Approval queue" item (it replaces the duplicate `#sideBadge`); the Pending chip in the header still shows the count.
+- The four-step progress bar is no longer in the interface on this branch, so there is no step click to wire.

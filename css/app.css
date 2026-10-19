@@ -106,15 +106,8 @@ button{cursor:pointer;border:0;background:none}
 .send:disabled{filter:grayscale(.6) opacity(.6);cursor:progress}
 
 
-.tabs{position:relative;display:flex;gap:2px;padding:8px 10px 0;border-bottom:1px solid var(--line);background:var(--lc-color-bg-surface);overflow:auto;flex-shrink:0}
-.tab{position:relative;padding:11px 14px;font-weight:700;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:7px;white-space:nowrap;border-radius:10px 10px 0 0;transition:color .2s}
-.tab:hover{color:var(--ink)}.tab.on{color:var(--blue)}
-.tab .badge{background:var(--lc-color-status-warning);color:var(--lc-color-text-onAction);border-radius:20px;font-size:10px;min-width:18px;height:18px;padding:0 5px;display:grid;place-items:center}
-.tab .badge.zero{display:none}
-.tab kbd{font:700 9.5px ui-monospace,monospace;color:var(--lc-color-text-muted);border:1px solid var(--line);border-radius:5px;padding:0 4px}
-.ink{position:absolute;bottom:0;height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--blue),var(--cyan));transition:left .35s var(--ease),width .35s var(--ease)}
-.tabpane{flex:1;min-height:0;overflow:auto;padding:18px 20px 22px;display:none}
-.tabpane.on{display:block;animation:floatIn .32s var(--ease) both}
+.detail-pane{flex:1;min-height:0;overflow:auto;padding:18px 20px 22px;display:none}
+.detail-pane.on{display:block;animation:floatIn .32s var(--ease) both}
 
 
 .row{display:flex;gap:12px;flex-wrap:wrap}
@@ -410,9 +403,8 @@ body{background:var(--paper);overflow:hidden}
 .work.panel-open .wsp{opacity:1;transform:none}
 .phead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 14px 6px 20px;flex-shrink:0}
 .phead b{display:block;font-size:14px;letter-spacing:-.2px}.phead small{display:block;font-size:11.5px;color:var(--muted);margin-top:1px}
-.tabs{background:var(--lc-color-bg-surface)}
 @container (max-width:720px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.wi{grid-template-columns:1fr}.impact{grid-template-columns:repeat(2,1fr)}.bigs{grid-template-columns:repeat(2,1fr)}}
-@container (max-width:600px){#dashLow{grid-template-columns:1fr!important}.tabpane [style*="repeat(4,minmax"]{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@container (max-width:600px){#dashLow{grid-template-columns:1fr!important}.detail-pane [style*="repeat(4,minmax"]{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 
 
 .auth{position:fixed;inset:0;z-index:100;display:grid;grid-template-columns:minmax(380px,1.05fr) minmax(420px,1fr);background:var(--paper);overflow:auto}
@@ -519,7 +511,6 @@ body{background:var(--paper);overflow:hidden}
 .dsave{display:flex;gap:12px;align-items:center;margin:14px 0 24px;flex-wrap:wrap}
 .callout.warn{margin-top:10px}
 @media(max-width:560px){.dform{grid-template-columns:1fr}}
-.tabs{overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tabs .tab kbd{display:none}
 
 
 .work.wide .chatcol{display:none}.work.wide.panel-open .panelwrap{width:100%;flex:1}.work.wide .wsp{width:100%}
@@ -559,7 +550,7 @@ table.ft{border-collapse:separate;border-spacing:0;font-size:12px;width:max-cont
 
 
 html,body{transition:background-color .35s,color .35s}
-.card,.topbar,.panelwrap,.wsp,.composer,.sidebar,.side,.modal,.tabs,.phead,.sel,input,textarea,.btn{transition:background-color .35s,border-color .3s,color .25s,box-shadow .25s,transform .18s var(--ease)}
+.card,.topbar,.panelwrap,.wsp,.composer,.sidebar,.side,.modal,.phead,.sel,input,textarea,.btn{transition:background-color .35s,border-color .3s,color .25s,box-shadow .25s,transform .18s var(--ease)}
 
 
 .dsec{background:var(--zone);border:1px solid var(--zline);border-radius:20px;padding:14px 14px 16px;margin-top:18px;position:relative;animation:secIn .55s var(--ease) both;animation-delay:calc(var(--i,0)*90ms)}
@@ -582,8 +573,8 @@ html,body{transition:background-color .35s,color .35s}
 .fcc{--sc:var(--lc-color-action-primary)}.agc{--sc:var(--lc-color-action-primary)}
 
 
-.tabpane .card,.gcard,.kc{box-shadow:0 1px 2px rgba(27,22,56,.05),0 10px 24px -14px rgba(27,22,56,.22);transition:transform .22s var(--ease),box-shadow .25s,border-color .25s,background-color .35s}
-.tabpane .card:hover,.gcard:hover,.kc:hover{transform:translateY(-3px);box-shadow:0 2px 4px rgba(27,22,56,.06),0 22px 38px -16px rgba(27,22,56,.32);border-color:color-mix(in srgb,var(--kc,var(--gc,var(--sc,var(--lc-color-action-primary)))) 55%,var(--line))}
+.detail-pane .card,.gcard,.kc{box-shadow:0 1px 2px rgba(27,22,56,.05),0 10px 24px -14px rgba(27,22,56,.22);transition:transform .22s var(--ease),box-shadow .25s,border-color .25s,background-color .35s}
+.detail-pane .card:hover,.gcard:hover,.kc:hover{transform:translateY(-3px);box-shadow:0 2px 4px rgba(27,22,56,.06),0 22px 38px -16px rgba(27,22,56,.32);border-color:color-mix(in srgb,var(--kc,var(--gc,var(--sc,var(--lc-color-action-primary)))) 55%,var(--line))}
 .ftw .card:hover{transform:none}
 .btn{position:relative;overflow:hidden}
 .btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 18px -8px rgba(27,22,56,.45)}
@@ -635,7 +626,7 @@ html[data-motion=off] *,html[data-motion=off] *:before,html[data-motion=off] *:a
 .tog[aria-checked=true]{background:var(--lc-color-status-success)}.tog[aria-checked=true]:after{transform:translateX(18px)}
 .stset .acc{display:flex;align-items:center;gap:10px;font-size:13px}.stset .acc small{color:var(--muted);display:block}
 
-html[data-density=compact] .card{padding:11px}html[data-density=compact] .tabpane{padding:12px 14px 16px}html[data-density=compact] .kc{min-height:92px;padding-top:10px}html[data-density=compact] .dsec{padding:10px;margin-top:12px}
+html[data-density=compact] .card{padding:11px}html[data-density=compact] .detail-pane{padding:12px 14px 16px}html[data-density=compact] .kc{min-height:92px;padding-top:10px}html[data-density=compact] .dsec{padding:10px;margin-top:12px}
 html[data-density=compact] .ft th,html[data-density=compact] .ft td{padding:4px 8px}html[data-density=compact] .bubble{font-size:13.5px;line-height:1.55}
 .fch .wk.hot .wkhit{fill:color-mix(in srgb,var(--lc-color-action-primary) 14%,transparent)}
 .agc{display:flex;flex-direction:column}.agc .chartbox{flex:1;display:flex;align-items:center}
@@ -704,7 +695,6 @@ html[data-density=compact] .ft th,html[data-density=compact] .ft td{padding:4px 
 .fsclone .fch svg{max-height:52vh}
 
 
-.tab[hidden]{display:none!important}
 .tnav.locked{opacity:.42}.tnav.locked .ti{filter:grayscale(1)}
 .cause-list{margin:6px 0 0;padding-left:18px}.cause-list li{margin:3px 0}
 
@@ -760,12 +750,11 @@ html[data-theme=dark] .auth-copy h1 em{color:var(--lc-color-brand-accent)}
 .tnav.on .ti{background:var(--lc-color-action-primary);color:var(--lc-color-text-onAction)}
 .tnav.on .ti svg .kn{fill:var(--lc-color-action-primary)}
 .tnav .ti svg .kn{fill:var(--lc-color-bg-subtle)}
-.ink{background:var(--lc-color-action-primary)}
 .result{background:var(--lc-color-bg-brand);color:var(--lc-color-text-onBrand)}
 .toast{background:var(--lc-color-bg-brand);color:var(--lc-color-text-onBrand)}
 .tip,#tt,.info:hover:after,.info:focus:after{background:var(--lc-color-bg-brand);color:var(--lc-color-text-onBrand)}
 .status.amber,.tier.t1,.tl.t2,.pending-chip{color:var(--lc-color-status-warning)}
-.pending-chip b,.tab .badge,.tnav .badge{background:var(--lc-color-status-warning);color:var(--lc-color-text-onAction)}
+.pending-chip b,.tnav .badge{background:var(--lc-color-status-warning);color:var(--lc-color-text-onAction)}
 .simtag{color:var(--lc-color-status-success);background:var(--lc-color-status-success-bg);border-color:transparent}
 .avatar{background:var(--lc-color-bg-selected);color:var(--lc-color-text-link)}
 .tog[aria-checked=true],.sw[aria-checked=true]{background:var(--lc-color-action-primary)}
@@ -1071,3 +1060,12 @@ html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
 .modal-f{flex:0 0 auto;padding-top:12px;margin-top:8px;border-top:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface)}
 .modal .modal-f.acts,.modal .modal-f .acts{margin-top:0}
 .modal:has(.settings-shell){display:block}
+
+/* Detail panel header: one view at a time, its title and a close button (no tabs) */
+.detail-head{padding:14px 12px 12px 20px;border-bottom:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface)}
+.detail-tt{min-width:0;flex:1}
+.detail-tt h2{margin:0;font:600 17px/1.25 var(--lc-font-display,inherit);letter-spacing:-.2px;color:var(--lc-color-text-primary)}
+.detail-tt small{display:block;margin-top:2px;font-size:11.5px;color:var(--lc-color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.detail-close{font-size:22px;line-height:1;color:var(--lc-color-text-secondary)}
+.detail-close:hover{color:var(--lc-color-text-primary);background:var(--lc-color-bg-hover)}
+.detail-pane[hidden]{display:none!important}

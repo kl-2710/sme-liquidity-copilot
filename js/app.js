@@ -92,7 +92,7 @@ function uc02(firm=S.firm){
 // Rmin of the current configuration for the daily colours (alertLevel falls back to 50 % of Rtarget when it is missing).
 const RMIN=()=>{const u=uc02();return u&&u.reserves.rmin!=null?u.reserves.rmin:undefined};
 Object.entries(DATA.raw).forEach(([id,raw])=>registerCases(id,ENGINE.inputFromRaw(raw,SESSION_LOADED_AT)));
-const S={uc01Sel:null,weeks:13,firm:'F01',case:'base',tab:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
+const S={uc01Sel:null,weeks:13,firm:'F01',case:'base',detail:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
 const C=()=>{const c=DATA.cases[S.firm+'|'+S.case];if(!c||!(S.weeks<CFG.tv2.horizonWeeks))return c;
   const k=[S.firm,S.case,S.weeks,DATA.caseVersion[S.firm]].join('|');if(!VIEW.has(k))VIEW.set(k,viewCase(c,S.weeks));return VIEW.get(k)};
 function viewCase(c,H){const last=dn(c.as_of)+7*H,v={...c,days:c.days.slice(0,7*H),ev:c.ev.filter(e=>dn(e[5])<=last),defk:null,tv3:null,weeks:H};setDefaultGap(v);return v}
@@ -212,8 +212,6 @@ document.addEventListener('keydown',e=>{
   if($('#scrim').classList.contains('show')){const m=$('#modal'),f=[...m.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])')].filter(x=>!x.hidden&&x.getClientRects().length);if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeModal();return}if(e.key==='Tab'&&f.length){if(e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===f.at(-1)){e.preventDefault();f[0].focus()}}return}
   const tag=(e.target.tagName||'').toLowerCase();
   if(['input','textarea','select'].includes(tag)||e.metaKey||e.ctrlKey)return;
-  const map={'1':'dash','2':'gap','3':'whatif','4':'appr'};
-  if(map[e.key])setTab(map[e.key]);
   if(e.key==='/'){e.preventDefault();$('#chatInput').focus()}
 });
 
@@ -281,12 +279,10 @@ function bindHover(box){
 }
 // Daily charts size themselves to their box, so redraw them after a resize or once a panel transition has settled.
 function redrawCharts(){$$('.chartbox').forEach(b=>{if(b._o){const o=b._o;b._prev=null;b._drawn=1;cashChart(b,o)}})}
-let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{redrawCharts();placeInk();placeBarLabels()},120)});
+let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{redrawCharts();placeBarLabels()},120)});
 
 
-function placeInk(){const t=$(`.tab[data-tab="${S.tab}"]`),ink=$('#ink');if(!t)return;ink.style.left=t.offsetLeft+'px';ink.style.width=t.offsetWidth+'px'}
 
-$('#tabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)setTab(t.dataset.tab)});
 
 
 function switchContext(firm,cs,{silent}={}){
@@ -329,7 +325,7 @@ function foreignNames(){const out=new Set();Object.entries(DATA.snaps).forEach((
 async function respondPolicy(bot,r){
   addLog({tool:'chat_guard',tier:0,args:{firm_id:S.firm,request:'change_'+r.kind},status:'blocked',summary:'Threshold or reserve change requested in the chat',reason:'E7'});
   await say(bot,`<p>${tx('rt.policy')}</p>`,'warn');
-  suggestRow(bot,[{t:tx('rt.policy.thr'),f:()=>{setTab('dash');if(!XP())setExpert(true);setTimeout(openPolicy,300)}},{t:tx('rt.policy.c0'),f:()=>{if(S.stage<2)advance(2);setTab('gap');setTimeout(openCash0Form,300)}}]);
+  suggestRow(bot,[{t:tx('rt.policy.thr'),f:()=>{openDetail('dash');if(!XP())setExpert(true);setTimeout(openPolicy,300)}},{t:tx('rt.policy.c0'),f:()=>{if(S.stage<2)advance(2);openDetail('gap');setTimeout(openCash0Form,300)}}]);
 }
 // Causal claims are not confirmed; the answer describes the numbers and calls them contributing factors (T18).
 async function respondCausal(bot,text){
@@ -571,7 +567,7 @@ function renderGap(){
   bindGapHeader(p);bindExpert(p);
   setTimeout(redrawCharts,480);
   $$('[data-ep]',p).forEach(b=>b.addEventListener('click',()=>{selectGap(+b.dataset.ep);renderGap();renderDemoChips()}));
-  $$('[data-try]',p).forEach(b=>b.addEventListener('click',()=>{const [inv,prod]=b.dataset.try.split('|');S.lev=freshLev();S.lev.l4_on=1;S.lev.inv_id=inv;S.lev.prod=prod;setTab('whatif');runNow('Finance '+inv+' via '+prod)}));
+  $$('[data-try]',p).forEach(b=>b.addEventListener('click',()=>{const [inv,prod]=b.dataset.try.split('|');S.lev=freshLev();S.lev.l4_on=1;S.lev.inv_id=inv;S.lev.prod=prod;runNow('Finance '+inv+' via '+prod);detailHandoff(`What-if is ready: finance <b>${esc(inv)}</b> via <b>${esc(prod)}</b>.`,'whatif')}));
 }
 function bindGapHeader(p){
   const ss=$('#scSel',p);ss&&(ss.onchange=()=>setScenario(ss.value));
@@ -678,7 +674,7 @@ let wiTimer;
 function scheduleRun(){const r=$('#wiRes');r&&r.classList.add('loading');clearTimeout(wiTimer);wiTimer=setTimeout(()=>runNow(),420)}
 function runNow(label){
   const l={...S.lev},res=runSim(l);commit(l,res,label||describeLev(l));
-  if(S.tab==='whatif'){renderWhatIf(true)}
+  if(S.detail==='whatif'){renderWhatIf(true)}
   return S.last;
 }
 function renderWhatIf(keep){
@@ -779,7 +775,7 @@ function syncWI(soft){
 function loadScenario(sc,run){
   const l={...offLev(),inv_id:defaultInvoice(),...sc.lev};S.lev=l;
   if($('#pane-whatif').querySelector('#wiRes')){syncWI();$$('#presets button').forEach(b=>b.classList.toggle('on',b.dataset.sc===sc.id))}
-  if(run){const r=runNow(sc.name);if(S.tab==='whatif')$$('#presets button').forEach(b=>b.classList.toggle('on',b.dataset.sc===sc.id));return r}
+  if(run){const r=runNow(sc.name);if(S.detail==='whatif')$$('#presets button').forEach(b=>b.classList.toggle('on',b.dataset.sc===sc.id));return r}
 }
 function saveCmp(){
   const l={...S.lev};if(!anyOn(l)){toast('Switch on at least one lever');return}
@@ -836,22 +832,23 @@ function createDrafts(run,{silent}={}){
   }
   updatePending();
   if(!silent&&made.length)toast(`Drafted ${made.filter(x=>x.status==='pending_approval').length} drafts, awaiting your approval`);
-  if(S.tab==='appr')renderAppr();
+  if(S.detail==='appr')renderAppr();
   return made;
 }
 function draftFromLast(){
   if(!S.last||JSON.stringify(S.last.lev)!==JSON.stringify(S.lev)){runNow()}
   const made=createDrafts(S.last);
   if(!made.length){toast('No valid lever to draft (inventory reduction is simulation only)');return}
-  setTab('appr');const first=$('#pane-appr .ac');first&&first.classList.add('open');
+  if(S.panel&&S.detail==='appr'){renderAppr();const first=$('#pane-appr .ac');first&&first.classList.add('open')}
+  else detailHandoff(`${made.length} draft${made.length===1?'':'s'} created and waiting for your approval.`,'appr','Open Approvals →');
 }
 function updatePending(){
   const n=S.drafts.filter(d=>d.status==='pending_approval'&&d.firm===S.firm).length,chip=$('#pendChip'),nEl=$('#pendN');
   const prev=+nEl.textContent;nEl.textContent=n;chip.classList.toggle('zero',n===0);
   if(n>prev){chip.classList.remove('bump');void chip.offsetWidth;chip.classList.add('bump')}
-  const b=$('#apprBadge');b.textContent=n;b.classList.toggle('zero',n===0);const sb=$('#sideBadge');sb.textContent=n;sb.classList.toggle('zero',n===0);
+  const b=$('#apprBadge');b.textContent=n;b.classList.toggle('zero',n===0); // badge sits on the sidebar "Approval queue" item
 }
-$('#pendChip').addEventListener('click',()=>setTab('appr'));
+$('#pendChip').addEventListener('click',()=>openDetail('appr'));
 const DT={payment_reminder:['✉','Payment reminder'],term_extension_request:['⏱','Terms extension request'],financing_application:['◈','Pre-filled financing application']};
 function renderAppr(){
   const p=$('#pane-appr'),f=S.apprFilter,list=S.drafts.filter(d=>d.firm===S.firm&&(f==='all'||d.status===f||(f==='executed'&&d.status.startsWith('executed'))));
@@ -859,10 +856,9 @@ function renderAppr(){
   const pend=list.filter(d=>d.status==='pending_approval'),hist=list.filter(d=>d.status!=='pending_approval');
   p.innerHTML=`<div class="card-head"><div><h3>Approval queue</h3><p>Only here does a draft become a simulated action. Nothing is sent outside.</p></div>
   <div class="seg" id="apprSeg">${[['all','All'],['pending_approval','Pending'],['executed','Executed'],['rejected','Rejected'],['blocked','Blocked']].map(([k,t])=>`<button data-f="${k}" class="${f===k?'on':''}">${t} ${cnt(k)}</button>`).join('')}</div></div>
-  ${!list.length?`<div class="card"><div class="empty"><div class="big">☑</div><b>No drafts yet${f!=='all'?' in this status':''}</b><br>Try a lever in What-if or ask Copilot to draft.<br><br><button class="btn primary" id="goWI">Open What-if →</button></div></div>`:`<div class="appr">${[...pend,...hist].map(draftCard).join('')}</div>`}
+  ${!list.length?`<div class="card"><div class="empty"><div class="big">☑</div><b>No drafts yet${f!=='all'?' in this status':''}</b><br>Ask Copilot in the chat to test a lever, then create a draft from its answer.</div></div>`:`<div class="appr">${[...pend,...hist].map(draftCard).join('')}</div>`}
   <div class="callout" style="margin-top:14px"><span>⛨</span><div><b>Approval does not mean a real send.</b> When you press Approve, the UI only calls <code>submit_action</code> in simulation mode and writes the log (tier 3).</div></div>`;
   $$('#apprSeg button',p).forEach(b=>b.addEventListener('click',()=>{S.apprFilter=b.dataset.f;renderAppr()}));
-  const g=$('#goWI');g&&g.addEventListener('click',()=>setTab('whatif'));
   p.onclick=e=>{
     const card=e.target.closest('.ac');if(!card)return;const d=S.drafts.find(x=>x.id===card.dataset.id);
     if(e.target.closest('[data-tg]')){d.open=!d.open;card.classList.toggle('open',d.open);e.target.closest('[data-tg]').textContent=d.open?'Collapse':'Show full text';return}
@@ -1046,7 +1042,7 @@ async function runLevInChat(bot,L,sc,text){
     S.lev={...L};const res=runSim(L),run=commit(L,res,label);if(sc){run.scId=sc.id;S.done.add(sc.id)}return {run,bad:run.st.k==='bl'&&!res.l.some(Boolean)};
   });
   const run=out.run,r=run.res,st=run.st;advance(4,bot);renderDemoChips();
-  if(S.tab==='whatif')renderWhatIf(true);if(S.tab==='gap')renderGap();
+  if(S.detail==='whatif')renderWhatIf(true);if(S.detail==='gap')renderGap();
   const note=sc&&sc.note&&sc.note.startsWith('Note:')?sc.note.slice(5).trim():'';
   if(st.k==='bl'){
     await say(bot,`<p><b class="k">A lever is blocked.</b> ${st.all.map(esc).join('; ')}.</p>${r.l.some(Boolean)?`<p>The remaining levers are still calculated: CCC ${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}, shortfall now ${mm(r.gap_epi)}.</p>`:'<p>I do not calculate figures for this combination.</p>'}${r.status4==='BLOCKED'?'<p>You can drop one of the two levers and try again.</p>':''}`,'warn');
@@ -1060,7 +1056,7 @@ async function runLevInChat(bot,L,sc,text){
     <div class="rgrid"><div class="rg"><span>CCC</span><strong class="num">${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}</strong><small>days</small></div><div class="rg"><span>Remaining gap</span><strong class="num ${r.gap_epi<1?'pos':'neg'}">${mm(r.gap_epi)}</strong><small>before ${mm(BASE.gap_epi)}</small></div><div class="rg"><span>Cost</span><strong class="num">${nf(r.cost/1e6,2)}M</strong><small>${r.newDays} new shortfall days</small></div></div>
     <div class="rcact"><button class="btn sec sm" data-a="wi" type="button">Open in What-if</button><button class="btn primary sm" data-a="dr" type="button">✎ Create draft</button></div>`;
     bot.appendChild(card);scroll();
-    $('[data-a=wi]',card).onclick=()=>setTab('whatif');
+    $('[data-a=wi]',card).onclick=()=>openDetail('whatif');
     $('[data-a=dr]',card).onclick=async()=>{S.lev={...L};S.last=run;const b2=newBot();await draftInChat(b2,run)};
   }
   const nx=nextSuggest();
@@ -1076,7 +1072,7 @@ async function draftInChat(bot,run){
   if(!m.length){await say(bot,'This scenario has no draft: cutting inventory is simulation only, and the other levers are not valid.','warn');return}
   const ok=m.filter(x=>x.status==='pending_approval'),bl=m.filter(x=>x.status==='blocked');
   await say(bot,`${ok.length?`<p>I have drafted <b>${ok.length} draft(s)</b>, status <b>pending_approval</b> (not sent):</p><ul>${ok.map(x=>`<li>${x.id} · ${DT[x.type][1]} → ${esc(x.to)}</li>`).join('')}</ul><p>Read the full text and click <b>Approve</b> or <b>Rejected</b> in the Approvals tab.</p>`:''}${bl.length?`<p><b class="k">Blocked:</b> ${bl.map(x=>x.id+' ('+esc(x.reason)+')').join('; ')}. This draft does not enter the queue.</p>`:''}`,bl.length&&!ok.length?'warn':'');
-  suggestRow(bot,[{t:'Open Approvals →',f:()=>setTab('appr')}]);
+  suggestRow(bot,[{t:'Open Approvals →',f:()=>openDetail('appr')}]);
   if(ok.length)toast('A new draft is awaiting approval')
 }
 function suggestAlternative(d){
@@ -1086,7 +1082,7 @@ function suggestAlternative(d){
     const b=newBot();
     if(!best){await say(b,`Noted that you rejected <b>${d.id}</b>. I could not find an alternative that fully covers the gap; try adjusting it yourself in What-if.`);return}
     await say(b,`Noted that you rejected <b>${d.id}</b> (${esc(d.reasonTxt)}). Cheapest alternative that still covers the gap: <b>${esc(best.s.name)}</b>, CCC ${nf(BASE.ccc,1)} → ${nf(best.res.ccc,1)}, cost ${nf(best.res.cost/1e6,2)} million VND.`);
-    suggestRow(b,[{t:'Try in What-if',f:()=>{loadScenario(best.s,true);setTab('whatif')}},{t:'Draft this option',f:()=>{loadScenario(best.s,true);const bb=newBot();userMsg('Draft this option');draftInChat(bb,S.last)}}]);
+    suggestRow(b,[{t:'Try in What-if',f:()=>{loadScenario(best.s,true);openDetail('whatif')}},{t:'Draft this option',f:()=>{loadScenario(best.s,true);const bb=newBot();userMsg('Draft this option');draftInChat(bb,S.last)}}]);
   })();
 }
 
@@ -1096,7 +1092,6 @@ function bootApp(){
   addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of 30 Sep 2026'});
   switchContext('F01','base',{silent:true});
   updatePending();
-  requestAnimationFrame(()=>{placeInk();document.fonts&&document.fonts.ready.then(placeInk)});
 }
 
 
@@ -1131,18 +1126,13 @@ function currentChips(){
   return [{id:'f0',ask:t('chip.f0')},{id:'f0b',ask:t('chip.f0b')}];
 }
 const unlockedTask=k=>k===1||(S.stage|0)>=(k===4?3:k);
-function applyStage(){
-  const g=$('.tab[data-tab="gap"]'),w=$('.tab[data-tab="whatif"]');
-  if(g)g.hidden=S.stage<2;if(w)w.hidden=S.stage<3;
-}
 function advance(n,bot){
   const previous=S.stage;S.stage=Math.max(S.stage,n);S.task='tv'+n;
 
   $('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';
-  applyStage();
-  if(S.panel){if(S.tab!==TASKS[S.task].tab)setTab(TASKS[S.task].tab);else renderTab()}
+  refreshTab(); // the open detail view keeps its view; only the Open button of another answer changes it
 }
-function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.gapRequest=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';applyStage();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
+function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.gapRequest=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';if(S.panel&&(S.detail==='gap'||S.detail==='whatif'))closePanel()}
 function userFirst(){const n=(S.user&&S.user.name||'you').trim().split(/\s+/);return n[n.length-1]}
 
 
@@ -1156,7 +1146,7 @@ function closePanel(){
   $('#panelBtn').classList.remove('on');$('#panelBtn').setAttribute('aria-pressed','false');syncViewNav();
 }
 // Main-screen navigation uses an explicit S.view state:
-//   'chat' – the conversation (the detailed dashboard can open beside it on tab S.tab)
+//   'chat' – the conversation (the detailed dashboard can open beside it on tab S.detail)
 //   'data' – the Company data screen (hides the whole chat workspace)
 // Every navigation item goes through showView(), so the target screen appears immediately, without a Back click.
 S.view='chat';
@@ -1164,25 +1154,35 @@ function showView(view,{tab}={}){
   if(view==='data'){openDataScreen('files');return}
   if(!$('#dataScreen').hidden)closeDataScreen();
   S.view='chat';
-  if(tab)setTab(tab);else syncViewNav();
+  if(tab)openDetail(tab);else syncViewNav();
 }
-function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?S.view==='data':S.view==='chat'&&S.panel&&b.dataset.view===S.tab))}
-function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr})[S.tab]()}
+function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?S.view==='data':S.view==='chat'&&S.panel&&b.dataset.view===S.detail))}
+function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr})[S.detail]()}
 function refreshTab(){if(S.panel)renderTab()}
-function setTab(id){
-  if(id==='data'){openDataScreen('businesses');return}
-  if(!$('#dataScreen').hidden)closeDataScreen(); // the dashboard lives inside the chat workspace, so show it first
-  if((id==='gap'&&S.stage<2)||(id==='whatif'&&S.stage<3))id='dash';
-  S.tab=id;$$('.tab').forEach(t=>{const on=t.dataset.tab===id;t.classList.toggle('on',on);t.setAttribute('aria-selected',on)});
-  $$('.tabpane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+id));
+// One detail view at a time (Dashboard / Shortfall / What-if / Approvals). It opens only from the "Open…" button of a
+// chat answer (or the sidebar / Pending chip for Approvals); the panel has no tabs, so it cannot switch views itself.
+const DETAIL_TITLES={dash:'Dashboard',gap:'Shortfall',whatif:'What-if',appr:'Approvals'};
+function openDetail(view,opts={}){
+  if(view==='data'){openDataScreen('files');return}
+  if(!$('#dataScreen').hidden)closeDataScreen(); // the detail panel lives inside the chat workspace, so show it first
+  if(!DETAIL_TITLES[view])view='dash';
+  if((view==='gap'&&S.stage<2)||(view==='whatif'&&S.stage<3))view='dash';
+  if(opts.gap!=null)selectGap(opts.gap);
+  S.detail=view;
+  $$('.detail-pane').forEach(p=>{const on=p.id==='pane-'+view;p.classList.toggle('on',on);p.hidden=!on;if(!on)p.replaceChildren()});
+  $('#detailTitle').textContent=DETAIL_TITLES[view];pWrap.dataset.detail=view;
   openPanel();$('#panelSub').textContent=`${S.firm} · ${FIRMS[S.firm].name}`;
-  renderTab();placeInk();setTimeout(placeInk,480);
+  renderTab();syncPanelBtn();
 }
+// #panelBtn reopens the most recent detail view (it never switches to another one).
+function syncPanelBtn(){$('#panelBtn span').textContent=DETAIL_TITLES[S.detail]||'Dashboard'}
+// In-panel actions that lead to another view hand off to the chat: a short note with that view's Open button.
+function detailHandoff(html,view,label){if(innerWidth<900)closePanel();botNote(html,{suggest:[{t:label||`Open ${DETAIL_TITLES[view]} →`,f:()=>openDetail(view)}]})}
 $('#panelClose').addEventListener('click',closePanel);
-$('#panelBtn').addEventListener('click',()=>S.panel?closePanel():setTab(S.tab&&S.tab!=='appr'?S.tab:TASKS[S.task].tab));
+$('#panelBtn').addEventListener('click',()=>S.panel?closePanel():openDetail(S.detail||'dash'));
 $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{const v=b.dataset.view;
   if(v==='data')showView('data');
-  else if(S.view==='chat'&&S.panel&&S.tab===v)closePanel(); // clicking the open item again closes the panel
+  else if(S.view==='chat'&&S.panel&&S.detail===v)closePanel(); // clicking the open item again closes the panel
   else showView('chat',{tab:v});
   closeSide()}));
 
@@ -1199,7 +1199,7 @@ function setTask(id,{force}={}){
   $('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';
   if(msgs.dataset.init!=='1'||force)welcome(id);
   renderDemoChips();
-  if(S.panel&&!same)setTab(TASKS[id].tab);
+  if(S.panel&&!same)openDetail(TASKS[id].tab);
 closeSide();scroll();
 }
 
@@ -1253,7 +1253,7 @@ async function respondLiq(bot,{focus}={}){
     `<div class="liq-act"><button class="btn primary sm" type="button" data-a="dash">▦ View detailed dashboard</button></div>
      <p class="liq-fn">${XP()?`CCC uses period-end balances, period ${c.N} days; goods held for subcontracting are excluded from owned inventory. W is classified with the garment-industry thresholds (FiinTrade 2016–2025, tv1.threshold.v2) and the default 5% materiality level because no company policy is set, so the result is provisional. ${DISC}`:t('s.foot',{src:isUserFirm(S.firm)?t('s.src.own'):'Sample data'})}</p>`;
   bot.appendChild(card);scroll();
-  $('[data-a=dash]',card).onclick=()=>setTab('dash');
+  $('[data-a=dash]',card).onclick=()=>openDetail('dash');
     advance(1,bot);suggestRow(bot,nextSuggest());
 }
 const CAUSE_LBL={payroll:'payroll',tax:'tax',debt_service:'loan repayments',supplier_payment:'supplier payments',new_materials:'new materials',rent:'rent',utilities:'utilities',capex:'capex'};
@@ -1297,7 +1297,7 @@ async function respondCause(bot,{focus}={}){
   S.cause=S.causes[focus||big.k];
   bot.appendChild(wrap);scroll();
   advance(2,bot);
-  $$('[data-gap-open]',wrap).forEach(b=>b.onclick=()=>{selectGap(+b.dataset.gapOpen);setTab('gap');renderDemoChips()});
+  $$('[data-gap-open]',wrap).forEach(b=>b.onclick=()=>{selectGap(+b.dataset.gapOpen);openDetail('gap');renderDemoChips()});
   suggestRow(bot,nextSuggest());
 }
 // Financing for every gap (or one named gap): a summary table, then the top 3 per gap, collapsed.
@@ -1324,7 +1324,7 @@ async function respondRank(bot,{focus}={}){
    <p class="liq-fn">${DISC}</p>${toolLine(['match_financing'])}
    <div class="liq-act"><button class="btn sec sm" type="button" data-a="open">Open ranking</button></div>`;
   bot.appendChild(card);scroll();
-  $('[data-a=open]',card).onclick=()=>setTab('gap');
+  $('[data-a=open]',card).onclick=()=>openDetail('gap');
   advance(3,bot);suggestRow(bot,nextSuggest());
 }
 async function gateMsg(bot){
@@ -1341,7 +1341,7 @@ async function respondConc(bot){
   ${(()=>{const d=uc01(),cc=d&&d.concentration;if(!cc||!d.cause_items.includes('AR'))return '';const lim=nf(CFG.bn.concentrationShare*100,0);
     return `<div class="liq-note"><span>⚠</span><div>${cc.flag==='concentrated'?`<b>${esc(cc.top.name)}</b> holds ${nf(cc.top.share*100,1)}% of the receivables above the normal level (≥ ${lim}%): <b>concentrated</b>.`:`No customer holds ${lim}% or more of the receivables above the normal level: <b>dispersed</b>.`} Try the <b>early collection</b> lever in the What-if task.</div></div>`})()}
   ${toolLine(['diagnose_working_capital'])}<div class="liq-act"><button class="btn primary sm" type="button">▦ View detailed dashboard</button></div>`;
-  bot.appendChild(card);scroll();$('button',card).onclick=()=>setTab('dash');
+  bot.appendChild(card);scroll();$('button',card).onclick=()=>openDetail('dash');
   advance(1,bot);suggestRow(bot,nextSuggest());
 }
 
@@ -2187,7 +2187,7 @@ function liquidityStateHTML(){
 // "Find financing" (UC03): solutions only open after diagnosis → contributing factors → ranking, so Copilot runs the next step in the chat.
 function goFinancing(){openGapRequest(()=>goFinancingFlow())}
 function goFinancingFlow(){
-  if(S.stage>=3){setTab('gap');return}
+  if(S.stage>=3){detailHandoff('Financing options for each gap are ranked in Shortfall.','gap','Open Shortfall →');return}
   const list=currentChips(),next=list.find(x=>!S.done.has(x.id))||list[0];
   if(innerWidth<900)closePanel();
   toast('Copilot goes step by step: diagnosis → contributing factors → financing ranking.',2800);
@@ -2582,10 +2582,10 @@ function renderPins(){
 }
 $('#pinList').addEventListener('click',e=>{
   const row=e.target.closest('.pinrow');if(!row)return;const t=row.dataset.t,k=row.dataset.k;
-  if(e.target.closest('.pinx')){const arr=t==='firm'?PINS.firms:t==='widget'?PINS.widgets:PINS.prompts;toggleIn(arr,k);savePins();if(S.tab==='dash'&&S.panel)renderDash();return}
+  if(e.target.closest('.pinx')){const arr=t==='firm'?PINS.firms:t==='widget'?PINS.widgets:PINS.prompts;toggleIn(arr,k);savePins();if(S.detail==='dash'&&S.panel)renderDash();return}
   closeSide();
   if(t==='firm'){if(S.firm!==k)switchContext(k,defCase(k));toast('Switched to '+FIRMS[k].short,1600)}
-  else if(t==='widget'){setTab('dash');setTimeout(()=>{const el=document.querySelector(`#pane-dash [data-wid="${k}"]`);el&&openFS(el)},350)}
+  else if(t==='widget'){openDetail('dash');setTimeout(()=>{const el=document.querySelector(`#pane-dash [data-wid="${k}"]`);el&&openFS(el)},350)}
   else{$('#chatInput').value=k;$('#chatForm').requestSubmit()}
 });
 function syncFirmPin(){const b=$('#firmPin');if(!b)return;const on=PINS.firms.includes(S.firm);b.setAttribute('aria-pressed',on);b.classList.toggle('on',on);b.title=on?'Unpin this company':'Pin this company'}
@@ -2618,7 +2618,7 @@ function decorateWidgets(p){
 }
 document.addEventListener('click',e=>{
   const pb=e.target.closest&&e.target.closest('.wb[data-pin]');
-  if(pb){const id=pb.dataset.pin,on=toggleIn(PINS.widgets,id);savePins();toast(on?'Pinned to top of dashboard':'Unpinned',1400);if(S.tab==='dash')renderDash();return}
+  if(pb){const id=pb.dataset.pin,on=toggleIn(PINS.widgets,id);savePins();toast(on?'Pinned to top of dashboard':'Unpinned',1400);if(S.detail==='dash')renderDash();return}
   const fb=e.target.closest&&e.target.closest('.wb[data-fs]');
   if(fb){const w=fb.closest('[data-wid]');w&&openFS(w)}
 });
@@ -2640,7 +2640,7 @@ function closeFS(){if(!fsEl)return;const o=fsEl;fsEl=null;o.classList.remove('on
 
 function setWide(on){
   $('#work').classList.toggle('wide',on);$('#app').classList.toggle('fs-mode',on);
-  const b=$('#panelWide');b.setAttribute('aria-pressed',on);b.querySelector('span').textContent=on?'Exit full screen':'Full screen';setTimeout(()=>{placeInk();redrawCharts()},500);
+  const b=$('#panelWide');b.setAttribute('aria-pressed',on);b.querySelector('span').textContent=on?'Exit full screen':'Full screen';setTimeout(redrawCharts,500);
 }
 $('#panelWide').addEventListener('click',()=>setWide(!$('#work').classList.contains('wide')));
 function setSide(open,persist=true){
@@ -2648,7 +2648,6 @@ function setSide(open,persist=true){
   $('#sideToggle').setAttribute('aria-pressed',!open);
   $('#sideToggle').setAttribute('aria-label',open?'Hide sidebar':'Show sidebar');
   $('#sideToggle').setAttribute('title',(open?'Hide':'Show')+' sidebar (Ctrl+B)');
-  setTimeout(placeInk,400);
 }
 const toggleSideDesk=()=>setSide($('#app').classList.contains('side-collapsed'));
 $('#sideToggle').addEventListener('click',toggleSideDesk);$('#sideFold').addEventListener('click',toggleSideDesk);

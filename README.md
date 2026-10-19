@@ -23,7 +23,7 @@ python3 -m http.server 8000        # or any static file server
   2. Cash-flow forecast (13 weeks, shortfall windows)
   3. Financing match (ranked catalogue products)
   4. What-if and drafts (levers, then drafts awaiting approval)
-- **Detailed dashboard:** tabs for Dashboard, Shortfall, What-if, Approvals. Audit events remain available internally but are not displayed. Company data is a single full-page Files screen.
+- **Detail views:** Dashboard, Shortfall, What-if and Approvals open one at a time in the right-hand panel, from the "Open…" button of the matching chat answer; there is no tab bar. Audit events remain available internally but are not displayed. Company data is a single full-page Files screen.
 - **Company files:** upload CSV, XLSX, XLS and DOCX files. Files stay in this browser's IndexedDB; Word files are reference-only. Recognised tables (sales and purchase invoices, inventory, 13-week plan, financial statements) are read and checked in the background; once financial statements and at least one cash-flow table are present, the company data is updated automatically and each file shows *Used in analysis* (or what is still missing). The newest file of each type wins. Deleting a file keeps the data already in use.
 - **Permission tiers:** T0 Read · T1 Advise · T2 Draft · T3 Approve. Only the Approve click in the UI runs a *simulated* execution.
 - **Data:** three synthetic companies (F01–F03), one per demo account, over a half-year analysis period (N = 183 days). Every figure is computed in the browser by `js/engine.js` (SRS v1.3 UC01/UC02 rules) from the raw invoices, lots and plans in `js/data.js`; uploaded files go through the same engine. This is not a credit decision.
