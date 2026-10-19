@@ -25,7 +25,7 @@
 ## Navigation, formatting and SRS v1.3 states
 - Numbers use the Vietnamese convention `1.234.567,89`, money is shown in `M` (million VND) / `B` (billion VND, e.g. `11,85B`), dates in `dd/mm/yyyy`; the shared helpers are in `js/formatters.js` (loaded before `js/app.js`).
 - Navigation uses an explicit `S.view` (`chat` / `data`) through `showView()`, so New chat, Approval queue and chat history switch screens directly.
-- The dashboard opens with a liquidity-state banner (SRS v1.3: W axis, TH01/TH02/TH03, M1–M9). It always uses the Base case; Rmin = 50% and Rupper = 200% of Rtarget, the FOB thresholds and a 30-day invoice term are demo assumptions, so the result is labelled provisional.
+- The liquidity-state banner (SRS v1.3: W axis, TH01/TH02/TH03, M1–M9) leads the Shortfall view once step 2 has run (see below). It always uses the Base case; Rmin = 50% and Rupper = 200% of Rtarget, the FOB thresholds and a 30-day invoice term are demo assumptions, so the result is labelled provisional.
 
 ## Every gap, chips and alert colours
 - Cause and ranking cover every gap, not only `c.defk`. `tv3For(ep)` wraps `rankFor` with a cache per firm|case|gap; the default gap reuses `c.tv3`. `simulate`, `episodes`, `rankFor` and `data.js` are unchanged.
@@ -118,3 +118,7 @@ The workbook is the reference; where the earlier engine differed, the engine fol
 - From then on there is a single suggestion row, under the latest answer only (`placeSuggest`). It merges the answer's own items (`suggestRow`, kept on the element as `_sug`), the flow chips (`chipList`) and the next steps (`nextSuggest`), drops duplicates and the question just asked, and holds at most four questions. When a new answer arrives, the row of the previous answer is removed.
 - New chat goes back to the empty state with the chips by the composer. A chat reopened from history gets a fresh row under its last answer; the stored rows are dropped.
 - Fixed with it: reopening a chat from history threw `applyStage is not defined` (the function was removed with the tab bar).
+
+## Liquidity-state banner on Shortfall
+- The banner ("Cash shortfall ahead" / "Liquidity Shortfall Alert", and the TH02, TH03 and unknown states) moved from the Dashboard to the top of the Shortfall view (`renderGap`). It is shown only when `S.stage ≥ 2`, i.e. after a forecast question has been answered.
+- Content, tiles and states are unchanged; the UC01 tiles (capital above the normal level from `money_at_risk`) still read the cached UC01 run. Its "Find financing to cover the gap" button is bound in `bindGapHeader`.

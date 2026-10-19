@@ -711,8 +711,12 @@ for (const theme of ["light", "dark"]) {
     await page.evaluate(() => openDetail("dash")); await page.waitForTimeout(500);
     assert.equal(await page.locator('#pane-dash :is([data-wid="flow"], [data-wid="daily"], .fch, #gapChart, #dashChart)').count(), 0);
     assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /13-week cash forecast/);
-    assert.match(await page.locator("#pane-dash .lstate .lv-pill").innerText(), /Highest alert: Red/);
+    assert.equal(await page.locator("#pane-dash .lstate").count(), 0, "the liquidity-state banner is no longer on the Dashboard");
+    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /Liquidity Shortfall Alert|Cash shortfall ahead/);
     await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(700);
+    assert.equal(await page.evaluate(() => document.querySelector("#pane-gap").firstElementChild.classList.contains("lstate")), true, "the banner leads the Shortfall view");
+    assert.match(await page.locator("#pane-gap .lstate .lv-pill").innerText(), /Highest alert: Red/);
+    assert.equal(await page.evaluate(() => { const s = S.stage; S.stage = 1; renderGap(); const n = document.querySelectorAll("#pane-gap .lstate").length; S.stage = s; renderGap(); return n; }), 0, "no banner before step 2");
     const h2 = await page.locator("#pane-gap .dsec h2").allInnerTexts();
     assert.deepEqual(h2.slice(0, 3), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
     assert.match(h2[3], /^Funding plan for the shortfall/);
@@ -740,8 +744,9 @@ for (const theme of ["light", "dark"]) {
     await loadLegacy(page);
     for (const fm of ["X02", "X03"]) {
       await page.evaluate((f) => { switchContext(f, "base", { silent: true }); advance(3); openDetail("dash"); }, fm); await page.waitForTimeout(500);
-      assert.match(await page.locator("#pane-dash .lv-pill").innerText(), /Blue/);
+      assert.equal(await page.locator("#pane-dash .lstate").count(), 0);
       await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(500);
+      assert.match(await page.locator("#pane-gap .lstate .lv-pill").innerText(), /Blue/);   // TH03 banner leads Shortfall
       assert.match(await page.locator("#pane-gap").innerText(), /No cash shortfall/);
     }
     await page.evaluate(() => switchContext("F01", defCase("F01"), { silent: true }));
@@ -910,10 +915,16 @@ for (const theme of ["light", "dark"]) {
   });
   await step("D · an earlier cut-off re-runs UC01 only; the matrix cell is not routed across snapshots", async () => {
     await page.fill("#ucAsOf", "2026-05-31"); await page.dispatchEvent("#ucAsOf", "change"); await page.waitForTimeout(500);
-    const r = await page.evaluate(() => ({ src: document.querySelector("#pane-dash .uc-src").textContent, chips: document.querySelector("#pane-dash .lstate .ls-chips").textContent, n: uc01().N }));
-    assert.match(r.src, /as of 31 May 2026 · period 30 Nov 2025–31 May 2026 \(183 days\)/); assert.match(r.chips, /Not routed · W and TH use different snapshots/);
+    const src = await page.locator("#pane-dash .uc-src").textContent();
+    assert.match(src, /as of 31 May 2026 · period 30 Nov 2025–31 May 2026 \(183 days\)/);
+    // The liquidity-state banner now leads the Shortfall view (from step 2).
+    await page.evaluate(() => { advance(2); openDetail("gap"); }); await page.waitForTimeout(600);
+    assert.match(await page.locator("#pane-gap .lstate .ls-chips").innerText(), /Not routed · W and TH use different snapshots/);
+    await page.evaluate(() => openDetail("dash")); await page.waitForTimeout(400);
     await page.click("#ucReset"); await page.waitForTimeout(400);
-    assert.match(await page.locator("#pane-dash .lstate .ls-chips").innerText(), /Cell M4/);
+    await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(600);
+    assert.match(await page.locator("#pane-gap .lstate .ls-chips").innerText(), /Cell M4/);
+    await page.evaluate(() => { openDetail("dash"); setWide(true); }); await page.waitForTimeout(500);
   });
   await step("D · threshold policy needs a reason, previews the impact and creates a new configuration version", async () => {
     await page.click("#ucPolicy"); await page.waitForTimeout(300);

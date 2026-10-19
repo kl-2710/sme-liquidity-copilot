@@ -550,7 +550,8 @@ function dailyTableHTML(c){
 function renderGap(){
   const c=C(),p=$('#pane-gap'),u=uc02(),M=weeklyModel(c),big=largestGap(),asOf=dn(c.as_of),H=u.weeks;
   const ov=!!(S.last&&S.overlay&&!EP.none),weeklyOnly=u.weekly_only,sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
-  const head=uc02HeaderHTML(u,c);
+  // The liquidity-state banner (TH01 / TH02 / TH03 × W) leads the Shortfall view once the forecast step has run.
+  const head=(S.stage>=2?liquidityStateHTML():'')+uc02HeaderHTML(u,c);
   if(u.status==='invalid_data'){p.innerHTML=head;bindGapHeader(p);return}
   const scName=tx('sc.'+S.case);
   const forecast=dashSec(1,'var(--lc-color-data-cash)',t('gap.h.forecast',{h:H}),`${XP()?'Cash in, cash out and week-end balance vs Rtarget':tx('gap.h.sub.forecast')} · ${scName}`,`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${scName} · VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
@@ -607,6 +608,7 @@ function bindGapHeader(p){
   const ws=$('#wkSel',p);ws&&(ws.onchange=()=>setWeeks(+ws.value));
   $$('#cash0Btn,#cash0Btn2',p).forEach(b=>b.onclick=openCash0Form);
   const gb=$('#grBtn',p);gb&&(gb.onclick=()=>openGapRequest(()=>renderGap()));
+  $$('[data-liq="fund"]',p).forEach(b=>b.onclick=goFinancing);
 }
 // The scenario selector changes the displayed scenario only; the chat, the stage and TH (Base) stay as they are.
 function setScenario(sc){if(!SC_KEYS.includes(sc))return;S.case=sc;S.epIdx=0;const c=C();if(c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];refreshTab();renderDemoChips()}
@@ -2218,7 +2220,7 @@ function liquidityStateSimpleHTML(){
     <p class="ls-lead">${lead}</p>${tiles?`<div class="ls-tiles">${tiles}</div>`:''}${body?`<p class="ls-msg">${body}</p>`:''}${acts?`<div class="ls-acts">${acts}</div>`:''}
     ${T.th!=='unknown'?alertLegendHTML({surplus:T.th==='TH03'}):''}</section>`;
 }
-// Liquidity-state card at the top of the dashboard: rendered by cash state TH01 / TH02 / TH03 combined with the W axis.
+// Liquidity-state card at the top of the Shortfall view (from step 2): rendered by cash state TH01 / TH02 / TH03 combined with the W axis.
 function liquidityStateHTML(){
   if(!XP())return liquidityStateSimpleHTML();
   const c=baseCase(),W=classifyW(c),T=computeTH(c),same=W.snapshot_id===(DATA.snaps[S.firm]||{}).snapshot_id,cell=same&&W.w!=='unknown'&&T.th!=='unknown'?MATRIX[W.w][T.th]:null;
@@ -2558,14 +2560,12 @@ function renderDash(){
   ${dataSourceHTML(d,snap)}
   ${dashSec(1,'var(--lc-color-alert-orange-mark)',t('sec.w'),tx('sec.w.sub'),`<div class="wgrid">${wCardHTML(d)}<div class="mtiles">${marTilesHTML(d)}</div></div>`)}
   ${dashSec(2,'var(--lc-color-data-receivables)',t('sec.items'),tx('sec.items.sub'),`<div class="icards">${d.item_states.map(it=>itemBlockHTML(d,it)).join('')}</div>`)}
-  ${liquidityStateHTML()}
   ${dashSec(3,'var(--lc-color-data-cash)',t('sec.ccc'),tx('sec.ccc.sub'),`<div class="dmid">${cccGaugesHTML(d,c)}
    <div class="card agc" data-wid="aging"><div class="card-head"><div><h3>Receivables and payables by due bucket</h3><p>VND million · from the cut-off date</p></div></div><div class="chartbox">${agingSVG(AG)}</div>
     <div class="legend"><span><i style="background:var(--lc-color-data-receivables)"></i>Receivables</span><span><i style="background:var(--lc-color-status-error)"></i>Overdue receivables</span><span><i style="background:var(--lc-color-data-payables)"></i>Payables</span></div></div></div>`)}
   <div class="foot-note">${XP()?`${t('foot.uc01')} ${d.N}-day period; goods held for subcontracting are excluded from owned inventory. Cash-flow projections, the daily balance and the cash gaps are in the Shortfall tab. Synthetic data.`:t('s.foot',{src:isUserFirm(S.firm)?t('s.src.own'):'Sample data'})}</div>`;
   $$('.gv b[data-v]',p).forEach(e=>animNum(e,+e.dataset.v,v=>nf(v,1),1000));
   $$('[data-go]',p).forEach(b=>b.onclick=()=>{const g=b.dataset.go;if(g==='new')startImport(null);else if(g==='upd')startImport(S.firm);else{DW.view='hist';DW.firmId=S.firm;openDataScreen('businesses')}});
-  $$('[data-liq="fund"]',p).forEach(b=>b.onclick=goFinancing);
   const ao=$('#ucAsOf',p),so=$('#ucStart',p);
   if(ao)ao.onchange=()=>uc01SelChange(ao.value,null);if(so)so.onchange=()=>uc01SelChange(ao.value,so.value);
   const rs=$('#ucReset',p);if(rs)rs.onclick=()=>{S.uc01Sel=null;renderDash()};
