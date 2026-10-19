@@ -58,6 +58,19 @@ const TYPE_VN={invoice_factoring:'Invoice factoring',reverse_factoring:'Reverse 
 const INV_PRODUCTS=['FAC-001','FAC-002','FAC-003','RF-001','DD-001'];
 
 
+/* Sample companies: every case is computed here from the raw snapshots in DATA.raw with the same engine that
+   processes uploaded files (BR-02.18). Nothing computed is stored in data.js. */
+const SESSION_LOADED_AT=new Date().toISOString();
+DATA.cases={};DATA.snaps={};
+function registerCases(id,input){
+  const snap=ENGINE.makeSnapshot(input),cases=ENGINE.buildCases(snap);DATA.snaps[id]=snap;
+  Object.keys(DATA.cases).filter(k=>k.split('|')[0]===id).forEach(k=>delete DATA.cases[k]);
+  Object.entries(cases).forEach(([k,c])=>{DATA.cases[id+'|'+k]=c;const eps=episodes(c);
+    // Default gap for financing: the largest gap that has ended within the horizon (a still-open gap has no known end), else the largest.
+    if(eps.length){const ended=eps.filter(e=>!e.censored),pool=ended.length?ended:eps,e=pool.reduce((a,x)=>x.peak>a.peak?x:a,pool[0]);c.defk=e.k;c.tv3=rankFor(c,e,eps.length)}});
+  return snap;
+}
+Object.entries(DATA.raw).forEach(([id,raw])=>registerCases(id,ENGINE.inputFromRaw(raw,SESSION_LOADED_AT)));
 const S={firm:'F01',case:'base',tab:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
 const C=()=>DATA.cases[S.firm+'|'+S.case];
 let EPS=[],EP=null,BASE=null;
@@ -214,7 +227,7 @@ function renderGap(){
   const c=C(),p=$('#pane-gap'),M=weeklyModel(c),big=largestGap(),asOf=dn(c.as_of);
   const sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
   const ov=!!(S.last&&S.overlay&&!EP.none);
-  const forecast=dashSec(1,'var(--lc-color-data-cash)','13-week cash forecast','Cash in, cash out and week-end balance vs buffer',`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${S.case==='s7'?'Assuming customers pay 7 days later · ':''}VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
+  const forecast=dashSec(1,'var(--lc-color-data-cash)','13-week cash forecast','Cash in, cash out and week-end balance vs buffer',`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${S.case==='stress_7'?'Assuming customers pay 7 days later · ':''}VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
    <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(openingCash(c))}</b><small>Cash at cut-off</small></div>
     <div class="fst"><b class="num pos">+${money(sumIn)}</b><small>Expected cash in</small><b class="num neg" style="margin-top:8px">−${money(sumOut)}</b><small>Expected cash out</small></div>
     <div class="fst"><b class="num ${minB<c.buffer?'neg':''}">${money(minB)}</b><small>Lowest week-end, week ${minW.w}</small></div></div>
@@ -223,7 +236,7 @@ function renderGap(){
    ${alertLegendHTML()}
    ${flowTableHTML(c,M,EP)}
    <p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.</p></div>`);
-  const daily=dashSec(2,'var(--lc-color-status-error)','Daily cash balance','Every gap below the buffer is shaded; each dot shows that day’s alert level',`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${S.case==='s7'?'assuming customers pay 7 days later':'base forecast'}</p></div>
+  const daily=dashSec(2,'var(--lc-color-status-error)','Daily cash balance','Every gap below the buffer is shaded; each dot shows that day’s alert level',`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${S.case==='stress_7'?'assuming customers pay 7 days later':'base forecast'}</p></div>
       <label class="legend" style="cursor:pointer;user-select:none;${S.last&&!EP.none?'':'display:none'}" id="ovLbl"><input type="checkbox" id="ovChk" ${S.overlay?'checked':''} style="accent-color:var(--lc-color-status-success)"> Show latest scenario</label></div>
     <div class="chartbox" id="gapChart"></div>
     <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Base balance</span>${ov?'<span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span>':''}<span><i class="ds"></i>Buffer ${money(c.buffer)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 30%,transparent);border:1px dashed var(--lc-color-status-error)"></i>Gap (selected gap is darker)</span></div>
@@ -842,7 +855,7 @@ function liqCardHTML(){
   const c=C(),b=BASE,{tot,top}=openAR(c),tb=top[0],minPt=c.days.reduce((a,x)=>x[1]<a[1]?x:a,c.days[0]);
   const worst=EPS.length?EPS.reduce((a,e)=>e.peak>a.peak?e:a,EPS[0]):null,below=minPt[1]<c.buffer;
   const kp=(cls,t,v)=>`<div class="lk ${cls}"><span>${t}</span><strong class="num">${nf(v,1)}<small>days</small></strong></div>`;
-  return `<div class="liq-h"><div><h4>Liquidity diagnosis</h4><p>${S.firm} · ${esc(FIRMS[S.firm].short)} · as of ${fd(c.as_of)}${S.case==='s7'?' · assuming customers pay 7 days later':''}</p></div><span class="status amber"><i></i>simulated</span></div>
+  return `<div class="liq-h"><div><h4>Liquidity diagnosis</h4><p>${S.firm} · ${esc(FIRMS[S.firm].short)} · as of ${fd(c.as_of)}${S.case==='stress_7'?' · assuming customers pay 7 days later':''}</p></div><span class="status amber"><i></i>simulated</span></div>
   <div class="liq-k">${kp('','DSO · collection',b.dso)}${kp('','DIO · storage',b.dio)}${kp('','DPO · supplier pay',b.dpo)}${kp('hl','CCC · cash cycle',b.ccc)}</div>
   <div class="liq-b"><div class="lb"><span>Receivables</span><b class="num">${money(c.ar)}</b></div><div class="lb"><span>Owned inventory</span><b class="num">${money(c.invv)}</b></div><div class="lb"><span>Payables</span><b class="num">${money(c.ap)}</b></div></div>
   <div class="liq-s"><div class="cap"><span>13-week cash balance vs buffer ${money(c.buffer)}</span><b class="num">lowest ${money(minPt[1])} · ${fds(minPt[0])}</b></div>${spark(c)}</div>
@@ -854,7 +867,7 @@ function diagCardHTML(){
   const kp=(cls,t,v)=>`<div class="lk ${cls}"><span>${t}</span><strong class="num">${nf(v,1)}<small>days</small></strong></div>`;
   const arBig=c.ar>=c.invv,bigN=arBig?'Receivables':'Owned inventory',bigV=arBig?c.ar:c.invv,per=(arBig?c.rev:c.cogs)/c.N;
   const own=c.inv.filter(x=>x.own>0),oldest=own.slice().sort((x,y)=>y.days-x.days)[0],slowest=own.filter(x=>x.slow===1).sort((x,y)=>y.own-x.own)[0];
-  return `<div class="liq-h"><div><h4>Working-capital diagnosis</h4><p>${S.firm} · ${esc(FIRMS[S.firm].short)} · as of ${fd(c.as_of)}${S.case==='s7'?' · assuming customers pay 7 days later':''}</p></div><span class="status amber"><i></i>simulated</span></div>
+  return `<div class="liq-h"><div><h4>Working-capital diagnosis</h4><p>${S.firm} · ${esc(FIRMS[S.firm].short)} · as of ${fd(c.as_of)}${S.case==='stress_7'?' · assuming customers pay 7 days later':''}</p></div><span class="status amber"><i></i>simulated</span></div>
   <div class="liq-k">${kp('','DSO · collection',b.dso)}${kp('','DIO · storage',b.dio)}${kp('','DPO · supplier pay',b.dpo)}${kp('hl','CCC · cash cycle',b.ccc)}</div>
   <div class="liq-b"><div class="lb"><span>Receivables</span><b class="num">${money(c.ar)}</b></div><div class="lb"><span>Owned inventory</span><b class="num">${money(c.invv)}</b></div><div class="lb"><span>Payables</span><b class="num">${money(c.ap)}</b></div></div>
   ${wNoteHTML()}<div class="liq-note"><span>◎</span><div><b>Largest pocket: ${bigN}</b>, ${money(bigV)}. One day of ${arBig?'DSO':'DIO'} is about ${money(per)} of capital, not guaranteed cash.</div></div>
@@ -1115,7 +1128,7 @@ async function initAuth(){
 const DK='smefc.data.v1.';
 const DAYMS=86400000, isoOf=n=>new Date(n*DAYMS).toISOString().slice(0,10);
 REJ.TOO_SLOW='Disbursement later than the cash-needed date';
-const defCase=f=>(f==='F01'||String(f)[0]==='U')?'base':'s7';
+const defCase=f=>(f==='F01'||String(f)[0]==='U')?'base':'stress_7';
 const isUserFirm=f=>String(f)[0]==='U';
 const dstore={
   key:()=>DK+((S.user&&S.user.email)||'anon').toLowerCase(),
@@ -1139,26 +1152,26 @@ function parseCSV(text){
   return rows;
 }
 const hnorm=h=>String(h).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-const ALIAS={so_tien:'amount_vnd',amount:'amount_vnd',gia_tri:'amount_vnd',khach_hang:'buyer',customer:'buyer',nha_cung_cap:'supplier',ngay_phat_hanh:'issue_date',ngay_lap:'issue_date',han_thanh_toan:'due_date',ngay_den_han:'due_date',ngay_thanh_toan:'paid_date',so_hoa_don:'invoice_id',ma_hoa_don:'invoice_id',ten_hang:'product_line',mat_hang:'product_line',so_luong:'qty',don_gia:'unit_cost_vnd',so_ngay_ton:'days_in_stock',doanh_thu:'revenue_vnd',gia_von:'cogs_vnd',tien_dau_ky:'opening_cash_vnd',tuan:'week',hang_muc:'category',ten:'name',nganh:'industry',tien_dem_toi_thieu:'min_cash_buffer_vnd'};
+const ALIAS={ma_so_thue:'tax_code',mst:'tax_code',loai_hang:'inventory_type',loai_ton_kho:'inventory_type',chu_so_huu:'owner',da_huy:'cancelled',cam_co:'pledged',thiet_yeu:'essential',so_tien_da_thu:'paid_amount',so_tien_da_tra:'paid_amount',ngay:'date',muc_chac_chan:'certainty',tai_san_ngan_han:'current_assets_vnd',mo_hinh_kinh_doanh:'business_model',so_tien:'amount_vnd',amount:'amount_vnd',gia_tri:'amount_vnd',khach_hang:'buyer',customer:'buyer',nha_cung_cap:'supplier',ngay_phat_hanh:'issue_date',ngay_lap:'issue_date',han_thanh_toan:'due_date',ngay_den_han:'due_date',ngay_thanh_toan:'paid_date',so_hoa_don:'invoice_id',ma_hoa_don:'invoice_id',ten_hang:'product_line',mat_hang:'product_line',so_luong:'qty',don_gia:'unit_cost_vnd',so_ngay_ton:'days_in_stock',doanh_thu:'revenue_vnd',gia_von:'cogs_vnd',tien_dau_ky:'opening_cash_vnd',tuan:'week',hang_muc:'category',ten:'name',nganh:'industry',tien_dem_toi_thieu:'min_cash_buffer_vnd'};
 const canon=h=>{const n=hnorm(h);return ALIAS[n]||n};
 const TYPES={
-  sales:{label:'Sales invoices (receivable)',file:'sales_invoices.csv',cols:['invoice_id','buyer','amount_vnd','issue_date','due_date','paid_date'],need:['invoice_id','buyer','amount_vnd','due_date'],key:r=>r.id,
+  sales:{label:'Sales invoices (receivable)',file:'sales_invoices.csv',cols:['invoice_id','buyer','amount_vnd','issue_date','due_date','paid_date'],opt:['tax_code','paid_amount','status'],need:['invoice_id','buyer','amount_vnd','due_date'],key:r=>r.id,
     sample:['INV-S-0101,Customer K1,1200000000,2026-08-10,2026-10-12,','INV-S-0102,Customer K2,800000000,2026-09-01,2026-09-20,2026-09-22']},
-  purchases:{label:'Purchase invoices (payable)',file:'purchase_invoices.csv',cols:['invoice_id','supplier','amount_vnd','issue_date','due_date','paid_date','early_discount_pct','discount_days'],need:['invoice_id','supplier','amount_vnd','due_date'],key:r=>r.id,
+  purchases:{label:'Purchase invoices (payable)',file:'purchase_invoices.csv',cols:['invoice_id','supplier','amount_vnd','issue_date','due_date','paid_date','early_discount_pct','discount_days'],opt:['tax_code','paid_amount','essential','status'],need:['invoice_id','supplier','amount_vnd','due_date'],key:r=>r.id,
     sample:['INV-P-0101,Supplier P1,1400000000,2026-09-10,2026-10-10,,2,10']},
-  inventory:{label:'Inventory',file:'inventory.csv',cols:['product_line','qty','unit_cost_vnd','days_in_stock'],need:['product_line','qty','unit_cost_vnd'],key:r=>r.name.toLowerCase(),
+  inventory:{label:'Inventory',file:'inventory.csv',cols:['product_line','qty','unit_cost_vnd','days_in_stock'],opt:['inventory_type','owner','cancelled','pledged','supplier_id'],need:['product_line','qty','unit_cost_vnd'],key:r=>r.name.toLowerCase(),
     sample:['Cotton fabric,25000,80000,25','Aged stock (slow-moving),10000,90000,95']},
-  planned:{label:'13-week planned cash flow',file:'planned_flows.csv',cols:['week','flow_type','category','amount_vnd'],need:['week','flow_type','amount_vnd'],key:r=>r.week+'|'+r.type+'|'+r.cat.toLowerCase(),
+  planned:{label:'13-week planned cash flow',file:'planned_flows.csv',cols:['week','flow_type','category','amount_vnd'],opt:['date','certainty','flow_id','source_id'],need:['flow_type','amount_vnd'],needOne:['week','date'],key:r=>r.week+'|'+r.type+'|'+r.cat.toLowerCase(),
     sample:['1,inflow,Retail sales,400000000','1,outflow,Payroll and operations,300000000']},
-  financials:{label:'90-day financial statements',file:'financials.csv',cols:['period','revenue_vnd','cogs_vnd','opening_cash_vnd'],need:['revenue_vnd','cogs_vnd'],sample:['Q3-2026 (90 days),9000000000,7200000000,1200000000']},
-  firms:{label:'Company information',file:'firms.csv',cols:['name','industry','min_cash_buffer_vnd'],need:['min_cash_buffer_vnd'],sample:['ABC Company,Textiles,500000000']}
+  financials:{label:'Financial statements for the period',file:'financials.csv',cols:['period','revenue_vnd','cogs_vnd','opening_cash_vnd'],opt:['current_assets_vnd','period_start','period_end','st_investments_vnd'],need:['revenue_vnd','cogs_vnd'],sample:['Q3-2026 (90 days),9000000000,7200000000,1200000000']},
+  firms:{label:'Company information',file:'firms.csv',cols:['name','industry','min_cash_buffer_vnd'],opt:['business_model','supply_chain_position'],need:['min_cash_buffer_vnd'],sample:['ABC Company,Textiles,500000000']}
 };
 function detectType(hdr){
   const s=new Set(hdr);
   if(s.has('invoice_id')&&s.has('buyer'))return 'sales';
   if(s.has('invoice_id')&&s.has('supplier'))return 'purchases';
   if(s.has('product_line')&&s.has('qty'))return 'inventory';
-  if(s.has('week')&&s.has('flow_type'))return 'planned';
+  if(s.has('flow_type')&&(s.has('week')||s.has('date')))return 'planned';
   if(s.has('revenue_vnd')&&s.has('cogs_vnd'))return 'financials';
   if(s.has('min_cash_buffer_vnd'))return 'firms';
   return null;
@@ -1203,35 +1216,48 @@ function normTable(type,hdr,rows,fmt){
   rows.forEach((r,i)=>{
     if(type==='sales'||type==='purchases'){
       const id=get(r,'invoice_id'),party=get(r,type==='sales'?'buyer':'supplier'),amt=parseNum(get(r,'amount_vnd'));
-      const due=toIso(get(r,'due_date'),fmt),iss=get(r,'issue_date')?toIso(get(r,'issue_date'),fmt):due,pd=get(r,'paid_date');
-      const paid=pd?toIso(pd,fmt):'';
+      const dueRaw=get(r,'due_date'),issRaw=get(r,'issue_date'),pd=get(r,'paid_date');
+      const due=dueRaw?toIso(dueRaw,fmt):'',iss=issRaw?toIso(issRaw,fmt):'',paid=pd?toIso(pd,fmt):'';
       if(!id)return bad(i,'missing invoice_id');if(!party)return bad(i,`${id}: missing ${type==='sales'?'buyer':'supplier'}`);
       if(!(amt>0))return bad(i,`${id}: invalid amount`);
-      if(!due)return bad(i,`${id}: due date unreadable`);
+      if(dueRaw&&!due)return bad(i,`${id}: due date unreadable`);
       if(pd&&!paid)return bad(i,`${id}: payment date unreadable`);
-      if(!iss)return bad(i,`${id}: issue date unreadable`);
+      if(issRaw&&!iss)return bad(i,`${id}: issue date unreadable`);
       if(seen.has(id))return bad(i,`${id}: duplicate invoice ID, keeping the first row`);seen.add(id);
-      if(due<iss)issues.push({line:i+2,msg:`${id}: due date is before issue date`,fatal:false});
-      const o={id,amt,issue:iss,due,paid:paid||''};o[type==='sales'?'buyer':'supplier']=party;out.push(o);
+      if(!due)issues.push({line:i+2,msg:`${id}: no due date; counted in the balance but not aged`,fatal:false});
+      if(!iss)issues.push({line:i+2,msg:`${id}: no issue date; a ${CFG.ar.termFallbackDays}-day term is assumed for the overdue ratio`,fatal:false});
+      if(due&&iss&&due<iss)issues.push({line:i+2,msg:`${id}: due date is before issue date`,fatal:false});
+      const pa=get(r,'paid_amount')===''?null:parseNum(get(r,'paid_amount'));
+      if(pa!=null&&!(pa>=0))return bad(i,`${id}: invalid paid amount`);
+      const o={id,amt,issue:iss,due,paid:paid||'',paid_amount:pa,tax_code:get(r,'tax_code')||null,status:get(r,'status')||null};o[type==='sales'?'buyer':'supplier']=party;
+      if(type==='purchases'){o.disc_pct=parseNum(get(r,'early_discount_pct'))||0;if(o.disc_pct>1)o.disc_pct/=100;o.disc_days=parseNum(get(r,'discount_days'))||0;o.essential=get(r,'essential')||null}
+      out.push(o);
     }else if(type==='inventory'){
       const name=get(r,'product_line'),qty=parseNum(get(r,'qty')),uc=parseNum(get(r,'unit_cost_vnd')),dd=get(r,'days_in_stock')===''?NaN:parseNum(get(r,'days_in_stock'));
       if(!name)return bad(i,'missing product_line');if(!(qty>=0)||!(uc>=0))return bad(i,`${name}: invalid quantity or unit cost`);
       if(seen.has(name.toLowerCase()))return bad(i,`${name}: duplicate product line name, keeping the first row`);seen.add(name.toLowerCase());
-      if(isNaN(dd))issues.push({line:i+2,msg:`${name}: missing days_in_stock, assuming 30 days`,fatal:false});
-      out.push({name,qty,unit:uc,days:isNaN(dd)?30:dd});
+      if(isNaN(dd))issues.push({line:i+2,msg:`${name}: missing days_in_stock, the lot cannot be aged`,fatal:false});
+      const it=get(r,'inventory_type').toUpperCase(),ow=get(r,'owner').toLowerCase();
+      if(!it)issues.push({line:i+2,msg:`${name}: no inventory_type; the type is inferred from the name (provisional)`,fatal:false});
+      out.push({name,qty,unit:uc,days:isNaN(dd)?null:dd,inventory_type:it||null,owner:/^(customer|khach)/.test(ow)?'customer':/^(own|doanh)/.test(ow)?'own':(ow?'unknown':null),cancelled:get(r,'cancelled')||null,pledged:get(r,'pledged')||null,supplier_id:get(r,'supplier_id')||null});
     }else if(type==='planned'){
-      const w=parseNum(get(r,'week')),ft=get(r,'flow_type').toLowerCase(),amt=parseNum(get(r,'amount_vnd')),cat=get(r,'category')||'(unnamed)';
-      if(!(w>=1&&w<=13&&Number.isInteger(w)))return bad(i,`week "${get(r,'week')}" outside 1–13`);
+      const wr=get(r,'week'),w=wr===''?null:parseNum(wr),dr=get(r,'date'),dt=dr?toIso(dr,fmt):null,ft=get(r,'flow_type').toLowerCase(),amt=parseNum(get(r,'amount_vnd')),cat=get(r,'category')||'(unnamed)';
+      if(dr&&!dt)return bad(i,`date "${dr}" unreadable`);
+      if(!dt&&!(w>=1&&w<=13&&Number.isInteger(w)))return bad(i,`week "${wr}" outside 1–13 and no date`);
       const t=/^(in|inflow|thu)/.test(ft)?'in':/^(out|outflow|chi)/.test(ft)?'out':'';
       if(!t)return bad(i,`flow_type "${ft}" must be inflow or outflow`);if(!(amt>0))return bad(i,`week ${w}: invalid amount`);
-      out.push({week:w,type:t,cat,amt});
+      const cert=get(r,'certainty').toLowerCase();
+      out.push({week:dt?null:w,date:dt,type:t,cat,amt,certainty:/^confirm/.test(cert)?'confirmed':'estimated',id:get(r,'flow_id')||null,source_id:get(r,'source_id')||null});
     }else if(type==='financials'){
       const rev=parseNum(get(r,'revenue_vnd')),cogs=parseNum(get(r,'cogs_vnd')),op=parseNum(get(r,'opening_cash_vnd')),per=get(r,'period');
       if(!(rev>0)||!(cogs>0))return bad(i,'invalid revenue or COGS');
-      const dm=per.match(/(\d+)\s*(days|days)/i);
-      out.push({rev,cogs,opening:isNaN(op)?null:op,period:per,days:dm?+dm[1]:90});
+      const dm=per.match(/(\d+)\s*(?:days?|ngày)/i),rg=per.match(/(\d{4}-\d{2}-\d{2})\s*\.\.\s*(\d{4}-\d{2}-\d{2})/);
+      const ps=get(r,'period_start')?toIso(get(r,'period_start'),fmt):rg?rg[1]:null,pe=get(r,'period_end')?toIso(get(r,'period_end'),fmt):rg?rg[2]:null;
+      const ca=parseNum(get(r,'current_assets_vnd')),sti=parseNum(get(r,'st_investments_vnd'));
+      out.push({rev,cogs,opening:isNaN(op)?null:op,period:per,days:ps&&pe?dn(pe)-dn(ps)+1:dm?+dm[1]:null,period_start:ps,period_end:pe,current_assets:isNaN(ca)?null:ca,st_investments:isNaN(sti)?null:sti});
     }else if(type==='firms'){
-      out.push({name:get(r,'name'),industry:get(r,'industry'),buffer:parseNum(get(r,'min_cash_buffer_vnd'))});
+      const bm=get(r,'business_model').toUpperCase();
+      out.push({name:get(r,'name'),industry:get(r,'industry'),buffer:parseNum(get(r,'min_cash_buffer_vnd')),business_model:/^(CMT|GIA)/.test(bm)?'CMT':/^FOB/.test(bm)?'FOB':null,position:get(r,'supply_chain_position')||null});
     }
   });
   return {rows:out,issues,skipped};
@@ -1248,28 +1274,12 @@ function mergeTable(type,base,up,mode){
 }
 
 
-function buildCase(f,snap){
-  const T=snap.tables,A=dn(snap.asOf),N=90,fin=T.fin[0],buf=f.buffer||0,scale=N/(fin.days||90);
-  const inPer=iso=>{const d=dn(iso);return d>A-N&&d<=A};
-  const ev=[],sales=[],pur=[];let ar=0,ap=0;
-  T.sales.forEach(s=>{const open=!s.paid,dpd=open?Math.max(0,A-dn(s.due)):null;
-    sales.push([s.id,s.buyer,s.amt,inPer(s.issue)?1:0,open?1:0,dpd]);
-    if(open){ar+=s.amt;let d=dn(s.due);if(d<=A)d=A+7;if(d<=A+91)ev.push([s.id,'IN','invoice_receipt',s.buyer,s.amt,isoOf(d)])}});
-  T.purchases.forEach(p=>{const open=!p.paid;pur.push([p.supplier,p.amt,inPer(p.issue)?1:0,open?1:0]);
-    if(open){ap+=p.amt;let d=dn(p.due);if(d<=A)d=A+1;if(d<=A+91)ev.push([p.id,'OUT','supplier_payment',p.supplier,p.amt,isoOf(d)])}});
-  T.planned.forEach((p,i)=>{const d=A+(p.week-1)*7+4;ev.push(['PF-'+p.week+'-'+(i+1),p.type==='in'?'IN':'OUT',p.type==='in'?'planned_inflow':'planned_outflow',p.cat,p.amt,isoOf(d)])});
-  const inv=T.inventory.map(x=>{const value=x.qty*x.unit,excl=/subcontract|customer.?owned|consign|supplied by|held for/i.test(x.name)?1:0;
-    return {name:x.name,type:'NVL',days:x.days,value,own:excl?0:value,slow:(x.days>=60||/slow|aged|old stock/i.test(x.name))?1:0,excl}});
-  const rev=fin.rev*scale,cogs=fin.cogs*scale,cash0=fin.cash0!=null?fin.cash0:(fin.opening||0);
-  const invv=inv.reduce((a,x)=>a+x.value,0);
-  const dl=ev.slice().sort((a,b)=>dn(a[5])-dn(b[5]));let k=0,run=cash0,days=[];
-  const byDay=new Map();ev.forEach(e=>{const d=dn(e[5]);byDay.set(d,(byDay.get(d)||0)+(e[1]==='IN'?e[4]:-e[4]))});
-  for(let t=A+1;t<=A+91;t++){run+=byDay.get(t)||0;days.push([isoOf(t),run])}
-  const c={firm:f.id,case:'base',as_of:snap.asOf,N,buffer:buf,days,ev,sales,pur,inv,rev,cogs,ar,invv,ap,
-    ccc0:ar/rev*N+invv/cogs*N-ap/cogs*N,dso0:null,defk:null,opening:[f.id,'uploaded · '+snap.id],est:true,cash0};
-  const eps=episodes(c);
-  if(eps.length){const i=eps.reduce((a,e,j)=>e.peak>eps[a].peak?j:a,0);c.defk=eps[i].k;c.tv3=rankFor(c,eps[i],eps.length)}
-  return c;
+// Uploaded snapshot → engine input (period length from the file or, failing that, from the invoice dates).
+function uploadInput(f,snap){
+  const input=ENGINE.inputFromUpload(f,snap),r=input.fin[0];
+  if(!r.days&&!r.period_start){const iss=input.sales.concat(input.purchases).map(x=>x.issue).filter(Boolean).sort();
+    if(iss.length){r.period_start=iss[0];r.period_end=snap.asOf;r.days=dn(snap.asOf)-dn(iss[0])+1;input.fin_period_from_invoices=true}}
+  return input;
 }
 
 
@@ -1311,7 +1321,7 @@ function rankFor(c,ep,neps){
 function activeSnap(f){return f.snaps.find(s=>s.id===f.active)||f.snaps[f.snaps.length-1]}
 function registerFirm(f){
   const snap=activeSnap(f);if(!snap)return;
-  DATA.cases[f.id+'|base']=buildCase(f,snap);
+  registerCases(f.id,uploadInput(f,snap));
   FIRMS[f.id]={name:f.name,short:f.name.length>24?f.name.slice(0,23)+'…':f.name};
 }
 function syncUserFirms(clear){
@@ -1401,7 +1411,7 @@ function evalImport(){
   Object.entries(fs).forEach(([t,f])=>{
     const fi=f.hdr.indexOf('firm_id');
     const rows=fi>=0&&ids.length>1?f.rows.filter(r=>String(r[fi]||'').trim()===pick):f.rows;
-    const miss=TYPES[t].need.filter(h=>!f.hdr.includes(h));
+    const miss=TYPES[t].need.filter(h=>!f.hdr.includes(h));if(TYPES[t].needOne&&!TYPES[t].needOne.some(h=>f.hdr.includes(h)))miss.push(TYPES[t].needOne.join(' or '));
     if(miss.length){res.issues[t]={fatalMissing:miss,list:[],skipped:rows.length};return}
     const n=normTable(t,f.hdr,rows,fmt);res.tables[t]=n.rows;res.issues[t]={list:n.issues,skipped:n.skipped,total:rows.length};
   });
@@ -1473,7 +1483,7 @@ function exportFirm(id){
   setTimeout(()=>dlFile(`${id}_purchase_invoices.csv`,csvOf(TYPES.purchases.cols,T.purchases.map(r=>[r.id,r.supplier,r.amt,r.issue,r.due,r.paid,'',''])) ),250);
   setTimeout(()=>dlFile(`${id}_inventory.csv`,csvOf(TYPES.inventory.cols,T.inventory.map(r=>[r.name,r.qty,r.unit,r.days]))),500);
   setTimeout(()=>dlFile(`${id}_planned_flows.csv`,csvOf(TYPES.planned.cols,T.planned.map(r=>[r.week,r.type==='in'?'inflow':'outflow',r.cat,r.amt]))),750);
-  setTimeout(()=>dlFile(`${id}_financials.csv`,csvOf(TYPES.financials.cols,[[fin.period||'90 days',fin.rev,fin.cogs,fin.cash0!=null?fin.cash0:fin.opening]])),1000);
+  setTimeout(()=>dlFile(`${id}_financials.csv`,csvOf(TYPES.financials.cols,[[fin.period||(fin.period_start&&fin.period_end?fin.period_start+'..'+fin.period_end:fin.days?fin.days+' days':''),fin.rev,fin.cogs,fin.cash0!=null?fin.cash0:fin.opening]])),1000);
   toast('Loading the 5 CSV files of version '+s.id);
 }
 const SAMPLE_FILES=()=>({
@@ -1500,8 +1510,8 @@ function renderImport(p){
     <label>Industry<input id="fInd" value="${esc(F.industry)}"></label>
     <label>Minimum buffer (VND)<input id="fBuf" inputmode="numeric" value="${F.buffer===''?'':F.buffer}" placeholder="500000000"></label>
     <label>Data cut-off date<input id="fAsOf" type="date" value="${F.asOf||''}"></label>
-    <label>90-day revenue (VND)<input id="fRev" inputmode="numeric" value="${F.rev===''?'':F.rev}"></label>
-    <label>90-day COGS (VND)<input id="fCogs" inputmode="numeric" value="${F.cogs===''?'':F.cogs}"></label>
+    <label>Revenue for the period (VND)<input id="fRev" inputmode="numeric" value="${F.rev===''?'':F.rev}"></label>
+    <label>COGS for the period (VND)<input id="fCogs" inputmode="numeric" value="${F.cogs===''?'':F.cogs}"></label>
     <label>Cash at cut-off (VND)<input id="fCash" inputmode="numeric" value="${F.cash0===''?'':F.cash0}"></label>
     <label>Date format in file<select id="fFmt"><option value="auto">Auto-detect</option><option value="dmy">DD/MM/YYYY</option><option value="mdy">MM/DD/YYYY</option></select></label>
    </div><div id="dMsg"></div></div>
@@ -1549,22 +1559,24 @@ function saveImport(ev){
   if(!name)return fail('Enter a business name');
   if(!(buf>=0))return fail('Enter the minimum buffer (a number ≥ 0)');
   if(!F.asOf||isNaN(dn(F.asOf)))return fail('Choose the data cut-off date');
-  if(!(rev>0)||!(cogs>0))return fail('Enter 90-day revenue and COGS (greater than 0)');
+  if(!(rev>=0)||!(cogs>=0)||F.rev===''||F.cogs==='')return fail('Enter revenue and COGS for the period (0 or more)');
   if(isNaN(cash))return fail('Enter cash at the cut-off date');
   const mode=upd?DW.mode:'replace',T={};
   [['sales','sales'],['purchases','purchases'],['inventory','inventory'],['planned','planned']].forEach(([t,k])=>{
     const up=ev.tables[t];T[k]=up?mergeTable(t,base?base.tables[k]:[],up,mode).rows:(base?base.tables[k]:[])});
   if(!T.sales.length&&!T.purchases.length&&!T.planned.length)return fail('At least one of these is required: sales invoices, purchase invoices, 13-week plan');
   const fin0=ev.tables.financials&&ev.tables.financials[0];
-  T.fin=[{rev,cogs,opening:cash,cash0:cash,period:(fin0&&fin0.period)||(base&&base.tables.fin[0].period)||'90 days',days:(fin0&&fin0.days)||90}];
+  const pf=fin0||(base&&base.tables.fin[0])||{};
+  T.fin=[{rev,cogs,opening:cash,cash0:cash,period:pf.period||'',days:pf.days||null,period_start:pf.period_start||null,period_end:pf.period_end||null,current_assets:pf.current_assets??null,st_investments:pf.st_investments??null}];
   const id=upd?f.id:nextFirmId(d),fn=f||{id,created:Date.now(),snaps:[]};
   fn.name=name;fn.industry=String(F.industry||'').trim();fn.buffer=buf;
+  const fx=ev.tables.firms&&ev.tables.firms[0];if(fx){if(fx.business_model)fn.business_model=fx.business_model;if(fx.position)fn.position=fx.position}
   const n=(fn.snaps.reduce((a,s)=>Math.max(a,s.n),0))+1;
-  const snap={id:'v'+n,n,ts:Date.now(),asOf:F.asOf,label:upd?(mode==='upsert'?'Merge by key':'Replace by table')+' · '+Object.keys(ev.tables).filter(t=>t!=='financials'&&t!=='firms').map(t=>TYPES[t].label.split(' (')[0]).join(', ')||'Edit details':'First load',tables:T};
+  const snap={id:'v'+n,n,ts:Date.now(),asOf:F.asOf,files:Object.values(DW.files).map(x=>x.name),label:upd?(mode==='upsert'?'Merge by key':'Replace by table')+' · '+Object.keys(ev.tables).filter(t=>t!=='financials'&&t!=='firms').map(t=>TYPES[t].label.split(' (')[0]).join(', ')||'Edit details':'First load',tables:T};
   fn.snaps.push(snap);fn.active=snap.id;
   if(fn.snaps.length>10)fn.snaps=fn.snaps.filter((s,i)=>i>=fn.snaps.length-10||s.id===fn.active);
 
-  try{const c=buildCase(fn,snap);if(!c.days.length)throw new Error('empty')}catch(e){console.error(e);return fail('Could not build data from these files. Check the columns and dates.')}
+  try{const s=ENGINE.makeSnapshot(uploadInput(fn,snap)),c=ENGINE.buildCases(s).base;if(!c.days.length)throw new Error('empty')}catch(e){console.error(e);return fail('Could not build data from these files. Check the columns and dates.')}
   d.firms[id]=fn;if(!dstore.save(d))return;
   void FILES.markUsed(DW.registryIds,snap.id);void FILES.setFirm(DW.registryIds,id);DW.registryIds=[];
   syncUserFirms();DW.view='list';
@@ -1596,7 +1608,7 @@ function agingModel(c){
   const A=dn(c.as_of),od=new Set(c.sales.filter(s=>s[4]===1&&(s[5]||0)>0).map(s=>s[0]));
   const B=['Overdue','≤ 7 days','8–14','15–30','31–60','61–91'],ar=Array(6).fill(0),ap=Array(6).fill(0);
   const ix=d=>d<=7?1:d<=14?2:d<=30?3:d<=60?4:5;
-  c.sales.forEach(s=>{if(s[4]===1&&(s[5]||0)>0)ar[0]+=s[2]});
+  c.sales.forEach(s=>{if(s[4]===1&&(s[5]||0)>0)ar[0]+=s[9]!=null?s[9]:s[2]});
   c.ev.forEach(e=>{const d=dn(e[5])-A;if(d<=0&&e[1]==='OUT'){ap[1]+=e[4];return}
     if(e[1]==='IN'&&e[2]==='invoice_receipt'){if(od.has(e[0]))return;ar[ix(d)]+=e[4]}
     else if(e[1]==='OUT'&&e[2]==='supplier_payment')ap[ix(d)]+=e[4]});
@@ -1737,7 +1749,7 @@ function computeTH(c){
   const th=firstBelow?'TH01':best.len>=LIQ.th03Days?'TH03':'TH02';
   const level=worstLevel(lvls); // overall level = highest daily level in the Base case
   const out={th,Rt,Rmin,Rup,op,minC,minD,firstBelow,firstNeg,peakGap:Math.max(0,Rt-minC),need:Math.max(0,Rt-Math.min(0,minCum)),run:best.len,level,shown:th==='TH03'?'blue':level};
-  if(th==='TH03'){const i0=best.end-best.len+1,scen=[c,DATA.cases[c.firm+'|s7']].filter(Boolean),gap=x=>x.days.slice(i0,best.end+1).map(([,v])=>v-Rt);
+  if(th==='TH03'){const i0=best.end-best.len+1,scen=[c,DATA.cases[c.firm+'|stress_7']].filter(Boolean),gap=x=>x.days.slice(i0,best.end+1).map(([,v])=>v-Rt);
     out.safe=Math.max(0,Math.min(...scen.flatMap(gap)));   // SafeCash under the most adverse scenario (SRS 2.9.5.7)
     out.safeBase=Math.max(0,Math.min(...gap(c)));          // reference: Base case only
     out.window=[D[i0][0],D[best.end][0]];out.scenN=scen.length}
@@ -1789,7 +1801,7 @@ function liquidityStateHTML(){
   }else{
     lead=W.w==='unknown'?'Core data is missing to classify the W axis (revenue, COGS, receivables, inventory or payables).':'Rtarget or the cash-flow sources are missing, so the cash state cannot be determined.';
   }
-  const foot=`Rtarget = the company's minimum buffer ${money(T.Rt||0)}; Rmin = ${nf(LIQ.rminRatio*100,0)}% and Rupper = ${nf(LIQ.rupperRatio*100,0)}% of Rtarget (demo assumption, SRS 2.8.10.2). The W axis uses garment-industry thresholds for the ${W.model||'FOB'} model (tv1.threshold.v2), an assumed ${LIQ.termDays}-day invoice term, and current assets ≈ cash + receivables + inventory. TH is determined from the Base case.${S.case==='s7'?' The chart below shows the 7-day-late scenario; it does not change the Base matrix cell.':''} Provisional result.`;
+  const foot=`Rtarget = the company's minimum buffer ${money(T.Rt||0)}; Rmin = ${nf(LIQ.rminRatio*100,0)}% and Rupper = ${nf(LIQ.rupperRatio*100,0)}% of Rtarget (demo assumption, SRS 2.8.10.2). The W axis uses garment-industry thresholds for the ${W.model||'FOB'} model (tv1.threshold.v2), an assumed ${LIQ.termDays}-day invoice term, and current assets ≈ cash + receivables + inventory. TH is determined from the Base case.${S.case==='stress_7'?' The chart below shows the 7-day-late scenario; it does not change the Base matrix cell.':''} Provisional result.`;
   return `<section class="lstate ${cls}" data-wid="state" aria-label="Liquidity state">
     <header class="ls-head"><span class="ls-ic" aria-hidden="true">${icon}</span><div class="ls-tt"><h2>${title}</h2>${badge?`<span class="ls-badge">${badge}</span>`:''}</div>${grid}</header>
     ${chips}<p class="ls-lead">${lead}</p>${tiles?`<div class="ls-tiles">${tiles}</div>`:''}${body?`<p class="ls-msg">${body}</p>`:''}${acts?`<div class="ls-acts">${acts}</div>`:''}
@@ -1821,7 +1833,7 @@ function renderDash(){
    ${kc('Owned inventory',money(c.inv.reduce((a,x)=>a+x.own,0)),slow?`Aged stock ${money(slow)}`:'No aged stock','','var(--lc-color-data-inventory)','▦','','inv')}
   </div>`)}
   ${dashSec(2,'var(--lc-color-data-cash)','Cash conversion cycle','DSO, DIO, DPO and how due amounts spread over time',`<div class="dmid">
-   <div class="gauges">${gauge(dso,90,'var(--lc-color-data-receivables)','days','DSO','Days to collect = Receivables ÷ Revenue × 90')}${gauge(dio,90,'var(--lc-color-data-inventory)','days','DIO','Days in stock = Owned inventory ÷ COGS × 90')}${gauge(dpo,90,'var(--lc-color-data-payables)','days','DPO','Days to pay suppliers = Payables ÷ COGS × 90')}${gauge(ccc,120,'var(--lc-color-data-cash)','days','CCC','CCC = DSO + DIO − DPO')}</div>
+   <div class="gauges">${gauge(dso,90,'var(--lc-color-data-receivables)','days','DSO',`Days to collect = Receivables ÷ Revenue × ${c.N}`)}${gauge(dio,90,'var(--lc-color-data-inventory)','days','DIO',`Days in stock = Owned inventory ÷ COGS × ${c.N}`)}${gauge(dpo,90,'var(--lc-color-data-payables)','days','DPO',`Days to pay suppliers = Payables ÷ COGS × ${c.N}`)}${gauge(ccc,120,'var(--lc-color-data-cash)','days','CCC','CCC = DSO + DIO − DPO')}</div>
    <div class="card agc" data-wid="aging"><div class="card-head"><div><h3>Receivables and payables by due bucket</h3><p>VND million · from the cut-off date</p></div></div><div class="chartbox">${agingSVG(AG)}</div>
     <div class="legend"><span><i style="background:var(--lc-color-data-receivables)"></i>Receivables</span><span><i style="background:var(--lc-color-status-error)"></i>Overdue receivables</span><span><i style="background:var(--lc-color-data-payables)"></i>Payables</span></div></div>
   </div>`)}

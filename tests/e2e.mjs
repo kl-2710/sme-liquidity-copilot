@@ -132,6 +132,51 @@ const SAMPLE_CSV = {
   await page.close();
 }
 
+// Engine acceptance cases (SRS v1.3 Appendix D/E), evaluated in the page against the shared engine (js/engine.js).
+// TMK builds a minimal engine input: the FOB reference company of T21–T38 (revenue 30 bn, COGS 24 bn, 90-day period).
+const TMK = `window.TMK=(o={})=>({firm:{id:'T',name:'Test Co',business_model:'FOB',rtarget:500e6,essential_suppliers:[],...(o.firm||{})},
+  snapshot_id:'SNP-T-1',as_of:'2026-09-30',source:{type:'upload',id:'upload:test.csv',at:new Date().toISOString()},
+  fin:o.fin||[{period_start:'2026-07-03',period_end:'2026-09-30',revenue:30e9,cogs:24e9,opening_cash:1e9,current_assets:20e9}],
+  config:{amount_basis:'net',vat_rate:null},tables:{sales:true,purchases:true,inventory:true,planned:true,...(o.tables||{})},
+  sales:o.sales||[],purchases:o.purchases||[],inventory:o.inventory||[],planned:o.planned||[]});`;
+const enginePage = await browser.newPage();
+await enginePage.goto(URL0); await enginePage.waitForTimeout(400); await enginePage.addScriptTag({ content: TMK });
+const ev = (fn, arg) => enginePage.evaluate(fn, arg);
+await step("A · sample snapshot: N from the period, Appendix D revenue, converted COGS (T47)", async () => {
+  const r = await ev(() => { const s = DATA.snaps.F01; return { N: s.N, start: s.period_start, rev: s.fin.revenue, cogs: Math.round(s.fin.cogs), src: s.fin.cogs_src, inv: DATA.cases["F01|base"].invv }; });
+  assert.deepEqual(r, { N: 183, start: "2026-04-01", rev: 18108528000, cogs: 14385833333, src: "converted", inv: 3450000000 });
+  const f2 = await ev(() => DATA.snaps.F02.fin.revenue);
+  assert.equal(f2, 24031968000);
+});
+await step("A · T13 missing due date stays in receivables, is not aged and is reported", async () => {
+  const r = await ev(() => { const s = ENGINE.makeSnapshot(TMK({ sales: [
+    { id: "S1", customer: "K1", amount: 800e6, issue: "2026-08-01", due: "2026-08-31", paid: null },
+    { id: "S2", customer: "K2", amount: 200e6, issue: "2026-08-01", due: null, paid: null }] }));
+    const s2 = s.sales.find((x) => x.id === "S2"); return { open: s.sales.reduce((a, x) => a + x.open_amount, 0), dpd: s2.dpd, missing: s2.missing_due, issue: s.issues.find((i) => i.code === "AR_MISSING_DUE") }; });
+  assert.equal(r.open, 1000e6); assert.equal(r.dpd, null); assert.equal(r.missing, true); assert.equal(r.issue.amount, 200e6);
+});
+await step("A · Q02 payment after the cut-off does not reduce the balance; overpayment is an advance", async () => {
+  const r = await ev(() => { const s = ENGINE.makeSnapshot(TMK({ sales: [
+    { id: "S1", customer: "K1", amount: 100, issue: "2026-08-01", due: "2026-09-15", paid: "2026-09-20", paid_amount: 40 },
+    { id: "S2", customer: "K1", amount: 100, issue: "2026-08-01", due: "2026-09-15", paid: "2026-10-05" },
+    { id: "S3", customer: "K2", amount: 100, issue: "2026-08-01", due: "2026-09-15", paid: "2026-09-10", paid_amount: 120 }] }));
+    return s.sales.map((x) => [x.open_amount, x.advance]); });
+  assert.deepEqual(r, [[60, 0], [100, 0], [0, 20]]);
+});
+await step("A · T12/T46 customer-owned lots are excluded; an inferred type and a name hint stay provisional", async () => {
+  const r = await ev(() => { const s = ENGINE.makeSnapshot(TMK({ inventory: [
+    { name: "Fabric supplied by customer K1", type: null, qty: 1, unit_cost: 900e6, days: 20, owner: "customer" },
+    { name: "Cotton fabric", type: null, qty: 2, unit_cost: 100e6, days: 70, owner: null },
+    { name: "Fabric held for subcontracting", type: "NVL", qty: 1, unit_cost: 50e6, days: 10, owner: null }] }));
+    return { lots: s.lots.map((l) => [l.type, l.type_src, l.owner, l.value_own, l.hgc_proposed]), codes: s.issues.map((i) => i.code) }; });
+  assert.deepEqual(r.lots, [["HGC", "inferred", "customer", 0, false], ["NVL", "inferred", "unknown", 200e6, false], ["NVL", "declared", "unknown", 50e6, true]]);
+  assert.ok(r.codes.includes("INV_TYPE_INFERRED") && r.codes.includes("INV_OWNER_UNKNOWN"));
+});
+await step("A · the analysis period follows the chosen cut-off (default start = as_of − 182)", async () => {
+  const r = await ev(() => { const s = ENGINE.makeSnapshot(ENGINE.inputFromRaw(DATA.raw.F01, new Date().toISOString()), { asOf: "2026-08-31" }); return { N: s.N, start: s.period_start, sid: s.snapshot_id }; });
+  assert.deepEqual(r, { N: 183, start: "2026-03-02", sid: "SNP-F01-20260930-01@2026-08-31/183d" });
+});
+
 for (const theme of ["light", "dark"]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
@@ -194,7 +239,7 @@ for (const theme of ["light", "dark"]) {
   await step(`[${theme}] Task 1 diagnosis shows DSO/DIO/DPO/CCC`, async () => {
     await ask("Where is my working capital stuck?");
     const t = await last().innerText();
-    assert.match(t, /diagnose_working_capital/); assert.match(t, /69[.,]0/);
+    assert.match(t, /diagnose_working_capital/); assert.match(t, /68[.,]7/);
   });
   await step(`[${theme}] Task 2 explains every gap; chips stay visible after the 2nd message`, async () => {
     await ask("Why am I short of cash? Show me the cause.");
