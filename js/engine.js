@@ -395,25 +395,124 @@ const ENGINE=(()=>{
       stuck_inventory:sum(lots,l=>l.stuck),collateral,collateral_eligible:collateral>=CFG.collateralMin,size:companySize(d.metrics.annual_revenue)};
   }
 
-  /* ---------- Interim cash schedule (replaced by the SRS v1.3 delay model in phase E) ---------- */
-  function lateWavg(rows){const w=sum(rows,r=>r.amount);return w?sum(rows,r=>r.amount*Math.max(0,dnum(r.paid)-dnum(r.due)))/w:null}
-  function schedule(snap,scenario){
-    const A=dnum(snap.as_of),start=A+1,ev=[],by={};
-    (snap.sales||[]).forEach(s=>{if(s.fully_paid&&s.due)(by[s.key]=by[s.key]||[]).push(s)});
-    (snap.sales||[]).filter(s=>s.open&&s.due).forEach(s=>{
-      const h=by[s.key]||[],d=h.length>=CFG.ar.minHistory?Math.ceil(lateWavg(h)-1e-9):0;
-      let t=Math.max(start,dnum(s.due)+d);if(scenario==='stress_7')t+=CFG.tv2.stressDays;
-      ev.push([s.id,'IN','invoice_receipt',s.customer,s.open_amount,diso(t)])});
-    (snap.purchases||[]).filter(p=>p.open&&p.due).forEach(p=>ev.push([p.id,'OUT','supplier_payment',p.supplier,p.open_amount,diso(Math.max(start,dnum(p.due)))]));
-    snap.planned.forEach(p=>{const t=p.date?dnum(p.date):A+(p.week-1)*7+4;if(t<start)return;ev.push(planEvent(p,t))});
-    return ev;
+  /* ---------- UC02 · delay model and five scenarios (section 2.8.11.1, Appendix B T2-02 … T2-23) ---------- */
+  const SCENARIOS=['base','optimistic','conservative','stress_7','continuing_sales'];
+  const kOf=sc=>sc==='optimistic'||sc==='conservative'?sc:'base';   // delay assumption behind each scenario
+  const ceilT=x=>Math.ceil(x-1e-9);
+  // Amount-weighted statistics: Base = weighted mean, Optimistic = P25, Conservative = P75. SRS-DECISION: P25/P75 are amount-weighted
+  // quantiles (the first sample whose cumulative weight reaches p), consistent with the weighted Base; P25 ≤ Base ≤ P75 is enforced (T2-04).
+  function wQuantile(sorted,tot,p){let acc=0;for(const s of sorted){acc+=s.w;if(acc>=p*tot-1e-9)return s.late}return sorted.length?sorted[sorted.length-1].late:null}
+  function delayStats(samples){
+    if(!samples||!samples.length)return null;const tot=sum(samples,s=>s.w);if(!(tot>0))return null;
+    const sorted=samples.slice().sort((a,b)=>a.late-b.late),mean=sum(samples,s=>s.w*s.late)/tot,p25=wQuantile(sorted,tot,.25),p75=wQuantile(sorted,tot,.75);
+    return {base:Math.min(Math.max(mean,p25),p75),optimistic:p25,conservative:p75,mean,n:samples.length};
   }
-  // Planned flows keep their category code when it is a known one (payroll, tax…); otherwise the file's own label is the partner.
+  // Samples with a due date in (as_of − lookback; as_of]: paid in full → MAX(0; paid − due); still open and overdue → as_of − due
+  // (a truncated sample, a lower bound of the real delay, BR-02.13). Partly paid invoices that are still open count as open.
+  function delaySamples(rows,A){
+    const out=[];(rows||[]).forEach(r=>{if(!r.due)return;const due=dnum(r.due);if(!(due>A-CFG.tv2.delay.lookbackDays&&due<=A))return;
+      if(r.fully_paid&&r.paid)out.push({id:r.id,key:r.key,late:Math.max(0,dnum(r.paid)-due),w:r.amount,truncated:false});
+      else if(r.open)out.push({id:r.id,key:r.key,late:A-due,w:r.amount,truncated:true})});
+    return out;
+  }
+  function delayModel(snap){
+    const A=dnum(snap.as_of),minN=CFG.tv2.delay.minN;
+    const build=rows=>{
+      const samples=delaySamples(rows,A),by=new Map();samples.forEach(s=>{if(!by.has(s.key))by.set(s.key,[]);by.get(s.key).push(s)});
+      const pool={samples,n:samples.length,stats:delayStats(samples)},parties={};by.forEach((ss,k)=>{parties[k]={samples:ss,n:ss.length,stats:delayStats(ss)}});
+      // Fallback chain (T2-19): own samples ≥ min_n → company pool ≥ min_n → default late days; the level and count are kept per party.
+      const tierOf=k=>{const p=parties[k];if(p&&p.n>=minN)return {tier:'customer',set:p.samples,stats:p.stats,n:p.n};
+        if(pool.n>=minN)return {tier:'pool',set:pool.samples,stats:pool.stats,n:pool.n};return {tier:'default',set:[],stats:null,n:p?p.n:0}};
+      return {pool,parties,tierOf};
+    };
+    return {receipts:build(snap.sales),payments:build(snap.purchases)};
+  }
+  // Cash basis of invoice amounts (T2-22): gross → 1; net with a rate → 1 + rate; net without a rate → 1 and provisional (never 10 % by default).
+  function vatFactor(cfg){const c=cfg||{};if(c.amount_basis==='gross')return {f:1,status:'gross'};if(c.vat_rate>0)return {f:1+c.vat_rate,status:'net_with_rate'};return {f:1,status:'net_no_rate'}}
   const KNOWN_CAT=new Set(['payroll','rent','utilities','new_materials','tax','debt_service','capex']);
-  const planEvent=(p,t)=>{const known=KNOWN_CAT.has(p.category);return [p.id,p.direction,known?p.category:(p.direction==='IN'?'planned_inflow':'planned_outflow'),known?'Planned item':(p.category||'Planned item'),p.amount,diso(t)]};
-  function ledger(cash0,ev,A,days=91){
-    const by=new Map();ev.forEach(e=>{const d=dnum(e[5]);by.set(d,(by.get(d)||0)+(e[1]==='IN'?e[4]:-e[4]))});
-    let run=cash0;const out=[];for(let t=A+1;t<=A+days;t++){run+=by.get(t)||0;out.push([diso(t),run])}return out;
+  function forecast(snap,opts={}){
+    const T=CFG.tv2,A=dnum(snap.as_of),start=A+1,HD=7*T.horizonWeeks,end=A+HD,D=delayModel(snap),vat=vatFactor(opts.config||snap.config),issues=[];
+    const essential=new Set((opts.essentialSuppliers||snap.firm.essential_suppliers||[]).map(normName));
+    const isEssential=p=>p.essential==='yes'||essential.has(normName(p.supplier)),apTiming=opts.apTiming||'historical';
+    const openSales=(snap.sales||[]).filter(s=>s.open),openPur=(snap.purchases||[]).filter(p=>p.open);
+    const odPur=openPur.filter(p=>p.due&&dnum(p.due)<=A).sort((a,b)=>dnum(a.due)-dnum(b.due)||(a.id<b.id?-1:a.id>b.id?1:0));
+    const byK={};
+    ['base','optimistic','conservative'].forEach(k=>{
+      const rec=openSales.map(s=>{
+        const amt=s.open_amount*vat.f,base={id:s.id,dir:'IN',cat:'invoice_receipt',partner:s.customer,amt,certainty:'estimated',src:'sales_invoice',key:s.key};
+        if(!s.due)return {...base,t:null,method:'no_due_date'};
+        const due=dnum(s.due),tr=D.receipts.tierOf(s.key);let delay,method;
+        if(due>A){delay=tr.tier==='default'?T.delay.defaultLate:tr.stats[k];method=tr.tier}          // not yet due: due + CEILING(delay), not before Start
+        else{const dpd=A-due,cond=tr.set.filter(x=>x.late>=dpd&&x.id!==s.id);                     // overdue: conditional delay on samples late ≥ dpd
+          // SRS-DECISION: the invoice's own truncated sample is left out of its conditional set (it would only say "late ≥ dpd").
+          if(tr.tier!=='default'&&cond.length>=T.delay.conditionalMinN){delay=delayStats(cond)[k];method=tr.tier+'_conditional'}
+          else{delay=dpd+T.overdueResidual[k];method='residual'}}
+        return {...base,t:Math.max(start,due+ceilT(delay)),tier:tr.tier,n:tr.n,method,delay,dpd:due<=A?A-due:0};
+      });
+      const pay=openPur.map(p=>{
+        const amt=p.open_amount*vat.f,ess=isEssential(p),base={id:p.id,dir:'OUT',cat:'supplier_payment',partner:p.supplier,amt,certainty:'confirmed',src:'purchase_invoice',key:p.key,essential:ess};
+        if(!p.due)return {...base,t:null,method:'no_due_date'};
+        const due=dnum(p.due);
+        if(due<=A){const rank=odPur.indexOf(p);return {...base,t:A+T.apOverdueOffset[k]+(rank%5),method:'overdue_spread',rank}}   // as_of + off + (rank mod 5)
+        if(k==='conservative'||ess||apTiming==='due')return {...base,t:Math.max(start,due),method:ess?'essential_due':'due'};
+        const tr=D.payments.tierOf(p.key),L=tr.stats?tr.stats.mean:0;                                      // historical: due + CEILING(L_sup)
+        return {...base,t:Math.max(start,due+ceilT(L)),method:'historical_'+tr.tier,delay:L};
+      });
+      byK[k]=rec.concat(pay);
+    });
+    // Planned flows (T2-20): one obligation, one event; rows that duplicate an invoice are dropped (Q09); week-only rows switch the run to
+    // weekly_only (no daily figures are published); rows without date or week stay in the unscheduled list (never dropped from totals).
+    const invoiceIds=new Set([...(snap.sales||[]),...(snap.purchases||[])].map(x=>x.id)),plans=[];let weeklyOnly=false;
+    (snap.planned||[]).forEach(p=>{
+      if(p.source_id&&invoiceIds.has(p.source_id)){issues.push({code:'PLAN_DUPLICATES_INVOICE',severity:'warning',id:p.id,source:p.source_id});return}
+      const known=KNOWN_CAT.has(p.category),base={id:p.id,dir:p.direction,cat:known?p.category:(p.direction==='IN'?'planned_inflow':'planned_outflow'),
+        partner:known?'Planned item':(p.category||'Planned item'),amt:p.amount,certainty:p.certainty||'estimated',src:'plan'};
+      let t=null;if(p.date)t=dnum(p.date);else if(p.week){t=A+(p.week-1)*7+4;weeklyOnly=true}   // nominal day inside the week, never published as a daily figure
+      if(t!=null&&t<start){issues.push({code:'PLAN_BEFORE_START',severity:'warning',id:p.id});return}
+      plans.push({...base,t,method:p.date?'plan_date':p.week?'plan_week':'no_date'});
+    });
+    // continuing_sales (T2-21): new revenue each week = period revenue ÷ (N / 7), received at issue + average term + company delay.
+    // SRS-DECISION: new sales are issued on the first day of each forecast week; the delay is the company-pool Base delay.
+    const per=(snap.sales||[]).filter(s=>s.in_period&&s.due&&s.issue),wt=sum(per,s=>s.amount);
+    const avgTerm=wt?sum(per,s=>s.amount*(dnum(s.due)-dnum(s.issue)))/wt:CFG.ar.termFallbackDays;
+    const poolDelay=D.receipts.pool.n>=T.delay.minN?D.receipts.pool.stats.base:T.delay.defaultLate;
+    const weekly=snap.fin.revenue>0?snap.fin.revenue/(snap.N/7)*vat.f:0;
+    const newSales=weekly>0?Array.from({length:T.horizonWeeks},(_,i)=>{const iss=start+7*i;
+      return {id:'NS-W'+(i+1),dir:'IN',cat:'new_sales',partner:'New sales (assumed)',amt:weekly,certainty:'estimated',src:'continuing_sales',t:iss+ceilT(avgTerm+poolDelay),issue:diso(iss),method:'continuing_sales'}}):[];
+    const cash0=opts.cash0;
+    const scen={};
+    SCENARIOS.forEach(sc=>{
+      let list=byK[kOf(sc)].concat(plans);
+      // stress_7 (T2-18): only estimated receipts move 7 days later; confirmed items keep their date.
+      if(sc==='stress_7')list=list.map(e=>e.dir==='IN'&&e.t!=null&&e.certainty==='estimated'?{...e,t:e.t+T.stressDays,shift:T.stressDays}:e);
+      if(sc==='continuing_sales')list=list.concat(newSales);
+      list=list.map(e=>({...e,scope:e.t==null?'unscheduled':e.t>end?'beyond_horizon':'in_horizon'}));
+      const by=new Map();list.forEach(e=>{if(e.scope!=='in_horizon')return;const r=by.get(e.t)||{in:0,out:0};r[e.dir==='IN'?'in':'out']+=e.amt;by.set(e.t,r)});
+      let run=cash0??0,cum=0,minCum=0;const days=[];
+      for(let t=start;t<=end;t++){const r=by.get(t)||{in:0,out:0},open=run;run+=r.in-r.out;cum+=r.in-r.out;if(cum<minCum)minCum=cum;days.push({d:diso(t),open,in:r.in,out:r.out,close:run})}
+      const tot=(scope,dir)=>sum(list.filter(e=>e.scope===scope&&e.dir===dir),e=>e.amt);
+      scen[sc]={events:list,days,minCum,totals:{in:tot('in_horizon','IN'),out:tot('in_horizon','OUT')},beyond:{IN:tot('beyond_horizon','IN'),OUT:tot('beyond_horizon','OUT')},
+        unscheduled:{IN:tot('unscheduled','IN'),OUT:tot('unscheduled','OUT')}};
+    });
+    // Arithmetic reconciliation (≤ 1 VND): ledger vs totals, and every open invoice scheduled exactly once in each delay assumption.
+    const tol=T.tolerance,arSrc=sum(openSales,s=>s.open_amount)*vat.f,apSrc=sum(openPur,p=>p.open_amount)*vat.f;
+    const recon=SCENARIOS.every(sc=>{const o=scen[sc],last=o.days[o.days.length-1];return Math.abs((last.close-(cash0??0))-(o.totals.in-o.totals.out))<=tol&&Math.abs(sum(o.days,x=>x.in)-o.totals.in)<=tol&&Math.abs(sum(o.days,x=>x.out)-o.totals.out)<=tol})
+      &&['base','optimistic','conservative'].every(k=>Math.abs(sum(byK[k].filter(e=>e.dir==='IN'),e=>e.amt)-arSrc)<=tol&&Math.abs(sum(byK[k].filter(e=>e.dir==='OUT'),e=>e.amt)-apSrc)<=tol);
+    // Scenario order (BR-02.16): min Optimistic ≥ min Base ≥ min Conservative and min stress_7 ≤ min Base; otherwise an engine error.
+    const mn=sc=>Math.min(...scen[sc].days.map(x=>x.close));
+    const order_ok=GE(mn('optimistic'),mn('base'))&&GE(mn('base'),mn('conservative'))&&GE(mn('base'),mn('stress_7'));
+    if(!recon)issues.push({code:'RECONCILIATION_FAILED',severity:'invalid'});
+    if(!order_ok)issues.push({code:'SCENARIO_ORDER',severity:'invalid'});
+    if(scen.base.unscheduled.IN+scen.base.unscheduled.OUT>0)issues.push({code:'UNSCHEDULED_AMOUNT',severity:'missing',amount:scen.base.unscheduled.IN+scen.base.unscheduled.OUT});
+    if(!snap.tables.sales||!snap.tables.purchases)issues.push({code:'MISSING_CORE_SOURCE',severity:'missing'});
+    if(vat.status==='net_no_rate')issues.push({code:'VAT_NOT_MODELLED',severity:'provisional'});
+    if(weeklyOnly)issues.push({code:'WEEKLY_ONLY',severity:'provisional'});
+    const delays={receipts:{},payments:{}};
+    Object.entries(D.receipts.parties).forEach(([k,p])=>{const tr=D.receipts.tierOf(k),r=(snap.sales||[]).find(s=>s.key===k);delays.receipts[k]={name:r?r.customer:k,tier:tr.tier,n:p.n,used_n:tr.n,stats:tr.stats?{...tr.stats}:null}});
+    openSales.forEach(s=>{if(!delays.receipts[s.key]){const tr=D.receipts.tierOf(s.key);delays.receipts[s.key]={name:s.customer,tier:tr.tier,n:0,used_n:tr.n,stats:tr.stats?{...tr.stats}:null}}});
+    Object.entries(D.payments.parties).forEach(([k,p])=>{const tr=D.payments.tierOf(k),r=(snap.purchases||[]).find(s=>s.key===k);delays.payments[k]={name:r?r.supplier:k,tier:tr.tier,n:p.n,mean:tr.stats?tr.stats.mean:0}});
+    return {as_of:snap.as_of,start:diso(start),end:diso(end),days:HD,scenarios:scen,recon_ok:recon,order_ok,issues,vat,weekly_only:weeklyOnly,delays,
+      pool:{n:D.receipts.pool.n,stats:D.receipts.pool.stats},avg_term:avgTerm,pool_delay:poolDelay,new_sales_weekly:weekly,cash0};
   }
 
   /* ---------- Legacy case shape used by the chat flow, simulate() and rankFor() ---------- */
@@ -430,12 +529,16 @@ const ENGINE=(()=>{
       ccc0:f.revenue>0&&f.cogs>0?ar/f.revenue*snap.N+invv/f.cogs*snap.N-ap/f.cogs*snap.N:null,dso0:null,defk:null,cash0,
       opening:[snap.firm.id,`${snap.period_start}..${snap.as_of}`,snap.N,f.revenue,f.cogs,f.opening_cash,null],est:snap.source.type==='upload',snap};
   }
-  // Interim: base and stress_7 cases with the earlier prototype schedule.
-  function buildCases(snap){
-    const rt=snap.firm.rtarget||0,cash0=snap.fin.opening_cash||0,A=dnum(snap.as_of),out={};
-    ['base','stress_7'].forEach(sc=>{const ev=schedule(snap,sc);out[sc]=legacyCase(snap,sc,{rtarget:rt,cash0,ev,days:ledger(cash0,ev,A)})});
+  // The five scenario cases of one snapshot. Event tuples keep the legacy order [id, IN/OUT, category, partner, amount, date] plus a
+  // metadata object (delay level, method, certainty) for the contributing-factor views.
+  function buildCases(snap,opts={}){
+    const cash0=opts.cash0!==undefined?opts.cash0:snap.fin.opening_cash,rt=opts.rtarget!==undefined?opts.rtarget:(snap.firm.rtarget||0);
+    const fc=forecast(snap,{...opts,cash0}),out={};
+    SCENARIOS.forEach(sc=>{const o=fc.scenarios[sc];
+      const ev=o.events.filter(e=>e.scope==='in_horizon').sort((a,b)=>a.t-b.t).map(e=>[e.id,e.dir,e.cat,e.partner,e.amt,diso(e.t),{tier:e.tier,method:e.method,delay:e.delay,dpd:e.dpd,certainty:e.certainty,src:e.src,essential:e.essential,shift:e.shift}]);
+      const c=legacyCase(snap,sc,{rtarget:rt,cash0:cash0??0,ev,days:o.days.map(x=>[x.d,x.close])});c.fc=fc;out[sc]=c});
     return out;
   }
   return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
-    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,schedule,ledger,legacyCase,buildCases};
+    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,legacyCase,buildCases};
 })();

@@ -61,9 +61,9 @@ const INV_PRODUCTS=['FAC-001','FAC-002','FAC-003','RF-001','DD-001'];
 /* Sample companies: every case is computed here from the raw snapshots in DATA.raw with the same engine that
    processes uploaded files (BR-02.18). Nothing computed is stored in data.js. */
 const SESSION_LOADED_AT=new Date().toISOString();
-DATA.cases={};DATA.snaps={};DATA.inputs={};
+DATA.cases={};DATA.snaps={};DATA.inputs={};DATA.forecasts={};
 function registerCases(id,input){
-  const snap=ENGINE.makeSnapshot(input),cases=ENGINE.buildCases(snap);DATA.snaps[id]=snap;DATA.inputs[id]=input;
+  const snap=ENGINE.makeSnapshot(input),cases=ENGINE.buildCases(snap);DATA.snaps[id]=snap;DATA.inputs[id]=input;DATA.forecasts[id]=cases.base.fc;
   Object.keys(DATA.cases).filter(k=>k.split('|')[0]===id).forEach(k=>delete DATA.cases[k]);
   Object.entries(cases).forEach(([k,c])=>{DATA.cases[id+'|'+k]=c;const eps=episodes(c);
     // Default gap for financing: the largest gap that has ended within the horizon (a still-open gap has no known end), else the largest.

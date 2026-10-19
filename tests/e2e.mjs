@@ -320,6 +320,95 @@ await step("C · T50 company size, T51 size band, T52 new customer, T53 strategi
   assert.deepEqual(tax, [["TAX:0101234567", 150e6, false, "BUYER_NOT_IN_PROGRAM"], ["NAME:no tax ltd", 70e6, true, "name_match_unverified"]]);
 });
 
+// UC02 delay model and scenarios (phase E). QF builds a forecast input around one customer / supplier.
+await enginePage.addScriptTag({ content: `window.QF=(o={})=>{const d=(x)=>ENGINE.diso(ENGINE.dnum('2026-09-30')+x);
+  const input=TMK({fin:[{period_start:'2026-07-03',period_end:'2026-09-30',revenue:o.revenue??9e9,cogs:7e9,opening_cash:o.cash??1e9,current_assets:10e9}],
+    sales:(o.sales||[]).map((s,i)=>({id:s.id||'S'+i,customer:s.c||'K1',amount:s.a??100,issue:s.iss!=null?d(s.iss):d((s.due??0)-30),due:s.due==null?null:d(s.due),paid:s.paid==null?null:d(s.paid)})),
+    purchases:(o.purchases||[]).map((p,i)=>({id:p.id||'P'+i,supplier:p.s||'S1',amount:p.a??100,issue:d((p.due??0)-30),due:p.due==null?null:d(p.due),paid:p.paid==null?null:d(p.paid),essential:p.essential||null})),
+    planned:(o.planned||[]).map((p,i)=>({id:p.id||'PL'+i,date:p.date==null?null:d(p.date),week:p.week||null,direction:p.dir||'OUT',category:p.cat||'payroll',amount:p.a,certainty:p.cert||'estimated',source_id:p.src||null})),
+    firm:o.firm||{}});if(o.config)input.config=o.config;
+  const snap=ENGINE.makeSnapshot(input,{periodStart:'2026-07-03'});return {snap,fc:ENGINE.forecast(snap,{cash0:o.cash??1e9,config:input.config})}};
+window.RECV=(fc,sc,id)=>{const e=fc.scenarios[sc].events.find(x=>x.id===id);return e.t==null?null:ENGINE.diso(e.t)};` });
+await step("E · Q01 horizon, Q11 balances, Q03 sample window, Q04 positive lateness", async () => {
+  const r = await ev(() => { const { fc } = QF({ cash: 100, planned: [{ date: 1, dir: "OUT", a: 150 }, { date: 7, dir: "IN", a: 100, cert: "confirmed" }] }), ds = fc.scenarios.base.days;
+    return { start: fc.start, end: fc.end, n: ds.length, w1: [ds[0].d, ds[6].d], min: Math.min(...ds.map((x) => x.close)), last: ds.at(-1).close }; });
+  assert.deepEqual(r, { start: "2026-10-01", end: "2026-12-30", n: 91, w1: ["2026-10-01", "2026-10-07"], min: -50, last: 50 });
+  const w = await ev(() => ENGINE.delaySamples(ENGINE.makeSnapshot(TMK({ sales: [-179, -180, 0].map((x, i) => ({ id: "W" + i, customer: "K", amount: 100, issue: ENGINE.diso(ENGINE.dnum("2026-09-30") + x - 30), due: ENGINE.diso(ENGINE.dnum("2026-09-30") + x), paid: null })) })).sales, ENGINE.dnum("2026-09-30")).map((s) => s.id));
+  assert.deepEqual(w, ["W0", "W2"]);
+  const q4 = await ev(() => { const s = ENGINE.makeSnapshot(TMK({ sales: [{ id: "A", customer: "K", amount: 100, issue: "2026-07-01", due: "2026-08-01", paid: "2026-08-11" }, { id: "B", customer: "K", amount: 100, issue: "2026-07-01", due: "2026-08-21", paid: "2026-08-11" }] }), { periodStart: "2026-07-03" });
+    return [ENGINE.delayStats(ENGINE.delaySamples(s.sales, ENGINE.dnum("2026-09-30"))).mean, ENGINE.profiles(s, ENGINE.diagnose(s)).customers[0].late_pos_wavg]; });
+  assert.deepEqual(q4, [5, 5]);
+});
+await step("E · Q31/Q32 truncated samples and the fallback chain customer → company → 7 days", async () => {
+  const r = await ev(() => { const hist = Array.from({ length: 5 }, (_, i) => ({ c: "Big", due: -100 + i * 10, paid: -100 + i * 10 + 4 }));
+    const { snap, fc } = QF({ sales: [...hist, { id: "OPEN", c: "Big", due: -6 }, { id: "NEWCUST", c: "Small", due: 10 }, { id: "BIG2", c: "Big", due: 20 }] });
+    const samples = ENGINE.delaySamples(snap.sales, ENGINE.dnum("2026-09-30")), open = samples.find((s) => s.id === "OPEN");
+    const lone = QF({ sales: [{ id: "ONLY", c: "Solo", due: 10 }] }).fc;
+    return { trunc: [open.late, open.truncated], tiers: Object.values(fc.delays.receipts).map((x) => [x.name, x.tier]), newcust: RECV(fc, "base", "NEWCUST"), big2: RECV(fc, "base", "BIG2"),
+      lone: [Object.values(lone.delays.receipts)[0].tier, RECV(lone, "base", "ONLY")] }; });
+  assert.deepEqual(r.trunc, [6, true]);
+  assert.deepEqual(r.tiers, [["Big", "customer"], ["Small", "pool"]]);
+  assert.deepEqual(r.lone, ["default", "2026-10-17"]);                 // due 10/10 + 7 default days
+});
+await step("E · Q33/Q34 overdue receivables: conditional delay with ≥ 3 samples, otherwise dpd + 3/10/21; never before as_of + 1", async () => {
+  const r = await ev(() => { const hist = [20, 22, 25, 30, 2, 3].map((late, i) => ({ c: "K1", due: -150 + i * 15, paid: -150 + i * 15 + late }));
+    const a = QF({ sales: [...hist, { id: "OD", c: "K1", due: -11 }] }).fc;
+    const b = QF({ sales: [...hist.slice(4), { c: "K1", due: -40, paid: -38 }, { c: "K1", due: -30, paid: -29 }, { c: "K1", due: -20, paid: -20 }, { id: "OD", c: "K1", due: -11 }] }).fc;
+    return { cond: ["base", "optimistic", "conservative"].map((k) => [a.scenarios[k].events.find((e) => e.id === "OD").method, RECV(a, k, "OD")]),
+      resid: ["optimistic", "base", "conservative"].map((k) => RECV(b, k, "OD")) }; });
+  assert.ok(r.cond.every(([m]) => m === "customer_conditional"));
+  assert.ok(r.cond.every(([, d]) => d >= "2026-10-01"));
+  assert.deepEqual(r.resid, ["2026-10-03", "2026-10-10", "2026-10-21"]);   // as_of + 3 / 10 / 21
+});
+await step("E · Q35/Q36 overdue payables are spread (offset + rank mod 5); essential suppliers are paid on the due date", async () => {
+  const r = await ev(() => { const { fc } = QF({ purchases: [...[-30, -25, -20, -15, -10, -5].map((due, i) => ({ id: "OP" + i, due })), { id: "ESS", s: "Key mill", due: 12, essential: "yes" },
+    ...Array.from({ length: 5 }, (_, i) => ({ s: "Late payer", due: -170 + i * 20, paid: -170 + i * 20 + 6 })), { id: "HIST", s: "Late payer", due: 12 }] });
+    const ids = ["OP0", "OP1", "OP2", "OP3", "OP4", "OP5"];
+    return { spread: Object.fromEntries(["conservative", "base", "optimistic"].map((k) => [k, ids.map((id) => RECV(fc, k, id).slice(8))])),
+      ess: ["base", "optimistic", "conservative"].map((k) => RECV(fc, k, "ESS")), hist: ["base", "conservative"].map((k) => RECV(fc, k, "HIST")) }; });
+  assert.deepEqual(r.spread, { conservative: ["01", "02", "03", "04", "05", "01"], base: ["05", "06", "07", "08", "09", "05"], optimistic: ["10", "11", "12", "13", "14", "10"] });
+  assert.deepEqual(r.ess, ["2026-10-12", "2026-10-12", "2026-10-12"]);
+  assert.deepEqual(r.hist, ["2026-10-18", "2026-10-12"]);               // historical: due + 6 days; Conservative: due
+});
+await step("E · Q37 scenario order on the three samples, reconciliation and the sample scenario table", async () => {
+  const r = await ev(() => Object.fromEntries(["F01", "F02", "F03"].map((f) => { const fc = DATA.forecasts[f], rt = DATA.snaps[f].firm.rtarget;
+    return [f, { order: fc.order_ok, recon: fc.recon_ok, mins: ENGINE.SCENARIOS.map((sc) => Math.round(Math.min(...fc.scenarios[sc].days.map((x) => x.close)) / 1e6)),
+      need: Math.round(Math.max(0, rt - Math.min(0, fc.scenarios.base.minCum)) / 1e6) }]; })));
+  for (const f of ["F01", "F02", "F03"]) { assert.equal(r[f].order, true); assert.equal(r[f].recon, true); }
+  // Table E-2 matches except F01 stress_7 (−677 in E-2) and F01 continuing_sales (251 in E-2): see the phase report.
+  assert.deepEqual(r.F01, { order: true, recon: true, mins: [-619, -619, -1009, -902, 156], need: 2319 });
+  assert.deepEqual(r.F02, { order: true, recon: true, mins: [998, 1383, 749, 490, 998], need: 1802 });
+  assert.deepEqual(r.F03, { order: true, recon: true, mins: [631, 808, 602, 333, 631], need: 369 });
+});
+await step("E · Q39/Q40 VAT basis and the same data through the upload path; Q07–Q10 unscheduled, duplicates, out of horizon", async () => {
+  const vat = await ev(() => { const s = [{ id: "V", c: "K1", a: 1000, due: 10 }];
+    const net = QF({ sales: s }).fc, rate = QF({ sales: s, config: { amount_basis: "net", vat_rate: 0.08 } }).fc, gross = QF({ sales: s, config: { amount_basis: "gross", vat_rate: 0.08 } }).fc;
+    const amt = (fc) => fc.scenarios.base.events.find((e) => e.id === "V").amt;
+    return [amt(net), net.issues.some((i) => i.code === "VAT_NOT_MODELLED"), amt(rate), amt(gross)]; });
+  assert.deepEqual(vat, [1000, true, 1080, 1000]);
+  const same = await ev(() => { const raw = DATA.raw.F01, snapApp = { id: "v1", asOf: raw.snapshot.as_of, ts: Date.now(), files: ["f01.csv"], tables: {
+      sales: raw.sales.map(([id, buyer, amt, issue, due, paid]) => ({ id, buyer, amt, issue, due, paid: paid || "" })),
+      purchases: raw.purchases.map(([id, supplier, amt, issue, due, paid, dp, dd]) => ({ id, supplier, amt, issue, due, paid: paid || "", disc_pct: dp, disc_days: dd })),
+      inventory: raw.inventory.map(([name, type, qty, unit, days, owner]) => ({ name, inventory_type: type, qty, unit, days, owner })),
+      planned: raw.planned.map(([id, date, dir, cat, amt, cert]) => ({ id, date, type: dir === "IN" ? "in" : "out", cat, amt, certainty: cert })),
+      fin: [{ rev: raw.fin[0].revenue, cogs: raw.fin[1].cogs, cash0: raw.fin[1].opening_cash, period_start: raw.fin[0].period_start, period_end: raw.fin[0].period_end, days: 183 }] } };
+    const firm = { id: "U77", name: "F01 via upload", buffer: raw.firm.rtarget, business_model: "CMT", essential_suppliers: raw.firm.essential_suppliers };
+    const s = ENGINE.makeSnapshot(ENGINE.inputFromUpload(firm, snapApp)), fc = ENGINE.forecast(s, { cash0: s.fin.opening_cash });
+    const mins = (f) => ["base", "optimistic", "conservative", "stress_7"].map((sc) => Math.round(Math.min(...f.scenarios[sc].days.map((x) => x.close))));
+    return [mins(fc).join(","), mins(DATA.forecasts.F01).join(",")]; });
+  assert.equal(same[0], same[1]);
+  const q = await ev(() => { const { fc } = QF({ sales: [{ id: "NODUE", c: "K1", a: 500, due: null }, { id: "FAR", c: "K1", a: 300, due: 120, iss: -10 }], purchases: [{ id: "P9", a: 200, due: 20 }],
+      planned: [{ id: "DUP", date: 20, dir: "OUT", a: 200, src: "P9" }, { id: "WK", week: 3, dir: "OUT", a: 50 }] });
+    const b = fc.scenarios.base; return { unsched: b.unscheduled.IN, beyond: b.beyond.IN, dup: b.events.some((e) => e.id === "DUP"), codes: fc.issues.map((i) => i.code), weekly: fc.weekly_only,
+      week13: b.days.slice(84).reduce((a, x) => a + x.in, 0) }; });
+  assert.equal(q.unsched, 500); assert.equal(q.beyond, 300); assert.equal(q.dup, false); assert.equal(q.week13, 0);
+  assert.ok(q.codes.includes("PLAN_DUPLICATES_INVOICE") && q.codes.includes("UNSCHEDULED_AMOUNT") && q.weekly === true);
+});
+await step("E · two runs on the same data give identical results", async () => {
+  const r = await ev(() => { const a = ENGINE.forecast(DATA.snaps.F01, { cash0: 12e8 }), b = ENGINE.forecast(DATA.snaps.F01, { cash0: 12e8 }); return JSON.stringify(a.scenarios) === JSON.stringify(b.scenarios); });
+  assert.equal(r, true);
+});
+
 for (const theme of ["light", "dark"]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
@@ -396,12 +485,13 @@ for (const theme of ["light", "dark"]) {
   await step(`[${theme}] Task 3 ranks financing for every gap`, async () => {
     await ask("Rank the financing options that fit this cause.");
     assert.equal(await last().locator(".rank-sum tbody tr").count(), 5);
-    assert.deepEqual(await last().locator('[data-gap-top="3"] li b').allTextContents(), ["INV-001", "CL-001", "RF-001"]);
+    assert.deepEqual(await last().locator('[data-gap-top="3"] li b').allTextContents(), ["RF-001", "FAC-001", "CL-002"]);
     assert.equal(await page.locator("#demoChips").isVisible(), true);
   });
   await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
+    await ask("Explain gap 3");
     await ask("K1 will only pay 7 days early. What if we combine that with financing invoice S-F01-0070 via RF-001?");
-    assert.match(await last().innerText(), /3[.,]87/);
+    assert.match(await last().innerText(), /3[.,]74/);
     await last().locator("button", { hasText: "Create draft" }).click();
     await page.waitForTimeout(1800);
     assert.ok(Number(await page.locator("#pendN").innerText()) > 0);
@@ -454,7 +544,7 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#pane-gap #gapChart .gapband").count(), 5);
     await page.click('#pane-gap .ep[data-ep="3"]'); await page.waitForTimeout(600);
     assert.deepEqual(await page.locator("#pane-gap .ft thead th.gapwk").evaluateAll((els) => els.map((e) => e.dataset.w)), ["4", "5"]);
-    assert.equal(await page.locator("#pane-gap table:not(.ft) tbody tr td:nth-child(2) b").first().innerText(), "INV-001");
+    assert.equal(await page.locator("#pane-gap table:not(.ft) tbody tr td:nth-child(2) b").first().innerText(), "RF-001");
     await shot(page, `${theme}-shortfall`);
   });
   await step(`[${theme}] alert colours follow SRS 2.8.11.3 boundaries`, async () => {
