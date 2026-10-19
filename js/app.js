@@ -61,18 +61,43 @@ const INV_PRODUCTS=['FAC-001','FAC-002','FAC-003','RF-001','DD-001'];
 /* Sample companies: every case is computed here from the raw snapshots in DATA.raw with the same engine that
    processes uploaded files (BR-02.18). Nothing computed is stored in data.js. */
 const SESSION_LOADED_AT=new Date().toISOString();
-DATA.cases={};DATA.snaps={};DATA.inputs={};DATA.forecasts={};
+const VIEW=new Map();   // horizon views of the cases (see C())
+DATA.cases={};DATA.snaps={};DATA.inputs={};DATA.forecasts={};DATA.caseVersion={};
 function registerCases(id,input){
-  const snap=ENGINE.makeSnapshot(input),cases=ENGINE.buildCases(snap);DATA.snaps[id]=snap;DATA.inputs[id]=input;DATA.forecasts[id]=cases.base.fc;
-  Object.keys(DATA.cases).filter(k=>k.split('|')[0]===id).forEach(k=>delete DATA.cases[k]);
-  Object.entries(cases).forEach(([k,c])=>{DATA.cases[id+'|'+k]=c;const eps=episodes(c);
-    // Default gap for financing: the largest gap that has ended within the horizon (a still-open gap has no known end), else the largest.
-    if(eps.length){const ended=eps.filter(e=>!e.censored),pool=ended.length?ended:eps,e=pool.reduce((a,x)=>x.peak>a.peak?x:a,pool[0]);c.defk=e.k;c.tv3=rankFor(c,e,eps.length)}});
+  const snap=ENGINE.makeSnapshot(input),cases=ENGINE.buildCases(snap);DATA.snaps[id]=snap;DATA.inputs[id]=input;
+  setCases(id,cases);DATA.caseVersion[id]=null;
   return snap;
 }
+function setCases(id,cases){
+  Object.keys(DATA.cases).filter(k=>k.split('|')[0]===id).forEach(k=>delete DATA.cases[k]);
+  Object.entries(cases).forEach(([k,c])=>{DATA.cases[id+'|'+k]=c;setDefaultGap(c)});DATA.forecasts[id]=cases.base.fc;VIEW.clear();
+}
+// Cases follow the company's configuration (Cash0, Rmin/Rtarget/Rupper, VAT, essential suppliers): they are rebuilt when the
+// configuration version changes, so results of an older version are never shown as current.
+function policyCases(firm){
+  const snap=DATA.snaps[firm];if(!snap)return;const vid=POLICY.versionId(firm)+'|'+((S.user&&S.user.id)||'anon');if(DATA.caseVersion[firm]===vid)return;
+  const p=POLICY.get(firm),model=ENGINE.modelOf(snap,{business_model:p.business_model}).model,c0=ENGINE.resolveCash0(snap,p),R=ENGINE.resolveReserves(snap,p,model);
+  setCases(firm,ENGINE.buildCases(snap,{cash0:c0.value,rtarget:R.rtarget>0?R.rtarget:0,config:{amount_basis:p.amount_basis||snap.config.amount_basis,vat_rate:p.vat_rate??snap.config.vat_rate},
+    essentialSuppliers:p.essential_suppliers||snap.firm.essential_suppliers,apTiming:p.ap_timing}));
+  DATA.caseVersion[firm]=vid;
+}
+// UC02 run of the current company and configuration over S.weeks weeks (cached per snapshot, formula, configuration and horizon).
+function uc02(firm=S.firm){
+  const snap=DATA.snaps[firm];if(!snap)return null;policyCases(firm);
+  const p=POLICY.get(firm),vid=POLICY.versionId(firm),d=uc01(firm),fr=freshness(snap).level;
+  const key=['uc02',snap.snapshot_id,CFG.versions.formula,vid,S.weeks,d.snapshot_id,fr].join('|');
+  if(!RUNS.has(key))RUNS.set(key,ENGINE.runUC02(snap,p,{weeks:S.weeks,uc01:d,config_version:vid,freshness:fr,model:d.model.model}));
+  return RUNS.get(key);
+}
+// Rmin of the current configuration for the daily colours (alertLevel falls back to 50 % of Rtarget when it is missing).
+const RMIN=()=>{const u=uc02();return u&&u.reserves.rmin!=null?u.reserves.rmin:undefined};
 Object.entries(DATA.raw).forEach(([id,raw])=>registerCases(id,ENGINE.inputFromRaw(raw,SESSION_LOADED_AT)));
-const S={uc01Sel:null,firm:'F01',case:'base',tab:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
-const C=()=>DATA.cases[S.firm+'|'+S.case];
+const S={uc01Sel:null,weeks:13,firm:'F01',case:'base',tab:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
+const C=()=>{const c=DATA.cases[S.firm+'|'+S.case];if(!c||!(S.weeks<CFG.tv2.horizonWeeks))return c;
+  const k=[S.firm,S.case,S.weeks,DATA.caseVersion[S.firm]].join('|');if(!VIEW.has(k))VIEW.set(k,viewCase(c,S.weeks));return VIEW.get(k)};
+function viewCase(c,H){const last=dn(c.as_of)+7*H,v={...c,days:c.days.slice(0,7*H),ev:c.ev.filter(e=>dn(e[5])<=last),defk:null,tv3:null,weeks:H};setDefaultGap(v);return v}
+// Default gap for financing: the largest gap that has ended within the horizon (a still-open gap has no known end), else the largest.
+function setDefaultGap(c){const eps=episodes(c);if(eps.length){const ended=eps.filter(e=>!e.censored),pool=ended.length?ended:eps,e=pool.reduce((a,x)=>x.peak>a.peak?x:a,pool[0]);c.defk=e.k;c.tv3=rankFor(c,e,eps.length)}}
 /* Company policy store: owner declarations and approved settings, one versioned record per account and company.
    Every change bumps the version, so results computed with an older version are no longer reused (they are stale). */
 const POLICY={
@@ -194,8 +219,8 @@ function cashChart(box,o){
 }
 function drawChart(box,svg,o,sv,first){
   const W=Math.max(320,box.clientWidth||680),H=o.h||250,m={l:46,r:14,t:14,b:28},n=o.path.length;
-  const base=o.path.map(p=>p.c/1e6),sc=sv?sv.map(v=>v/1e6):null,buf=o.buf/1e6;
-  const all=[...base,...(sc||[]),buf];let mn=Math.min(...all),mx=Math.max(...all);const pad=(mx-mn)*.12||50;mn-=pad;mx+=pad;
+  const base=o.path.map(p=>p.c/1e6),sc=sv?sv.map(v=>v/1e6):null,buf=o.buf/1e6,rmin=o.rmin!=null?o.rmin/1e6:null,rup=o.rup!=null?o.rup/1e6:null,sbd=o.band?o.band.map(a=>a.map(v=>v/1e6)):null;
+  const all=[...base,...(sc||[]),buf,...(rmin!=null?[rmin]:[]),...(rup!=null?[rup]:[]),...(sbd?sbd.flat():[])];let mn=Math.min(...all),mx=Math.max(...all);const pad=(mx-mn)*.12||50;mn-=pad;mx+=pad;
   const X=i=>m.l+i*(W-m.l-m.r)/(n-1),Y=v=>m.t+(1-(v-mn)/(mx-mn))*(H-m.t-m.b),yb=Y(buf);
   const line=a=>a.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
   const area=a=>line(a)+` L${X(n-1)} ${yb} L${X(0)} ${yb} Z`;
@@ -206,15 +231,18 @@ function drawChart(box,svg,o,sv,first){
   let band='';(o.eps||(o.ep&&!o.ep.none?[o.ep]:[])).forEach(e=>{const i0=o.path.findIndex(p=>p.d===e.start),i1=o.path.findIndex(p=>p.d===e.end);if(i0<0)return;const on=o.ep&&!o.ep.none&&e.k===o.ep.k;
     band+=`<rect class="gapband${on?' on':''}" x="${X(i0)-3}" y="${m.t}" width="${Math.max(6,X(i1)-X(i0)+6)}" height="${H-m.t-m.b}" rx="5" fill="color-mix(in srgb,var(--lc-color-alert-red-mark) ${on?15:7}%,transparent)" stroke="color-mix(in srgb,var(--lc-color-status-error) ${on?70:30}%,transparent)" stroke-width="${on?1.6:1}" stroke-dasharray="4 3"/><text x="${X(i0)}" y="${m.t+11}" font-size="10" font-weight="700" fill="var(--lc-color-status-error)">Gap ${e.k}</text>`});
   const dim=sc?'var(--lc-color-data-historical)':'var(--lc-color-data-cash)';
+  const bandP=sbd&&sbd[0].length===n?`<path class="sband" d="${sbd[0].map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ')} ${sbd[1].map((v,i)=>i).reverse().map(i=>'L'+X(i).toFixed(1)+' '+Y(sbd[1][i]).toFixed(1)).join(' ')} Z" fill="color-mix(in srgb,var(--lc-color-data-cash) 9%,transparent)"/>`
+    +sbd.map(a=>`<path d="${line(a)}" fill="none" stroke="var(--lc-color-data-historical)" stroke-width="1.2" stroke-dasharray="2 3"/>`).join(''):'';
+  const rline=(v,lb,col)=>v==null?'':`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${col}" stroke-width="1.1" stroke-dasharray="2 4"/><text x="${m.l+4}" y="${Y(v)-4}" font-size="10" font-weight="700" fill="${col}">${lb} ${Math.round(v)}</text>`;
   const len=Math.round(W*1.6);
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('height',H);
   svg.innerHTML=`<defs><clipPath id="${cid}"><rect x="${m.l}" y="${yb}" width="${W-m.l-m.r}" height="${Math.max(0,H-yb)}"/></clipPath><linearGradient id="${cid}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--lc-color-data-cash)" stop-opacity=".16"/><stop offset="1" stop-color="var(--lc-color-data-cash)" stop-opacity="0"/></linearGradient></defs>
-  ${g}${xl}${band}
+  ${g}${xl}${band}${bandP}${rline(rup,'Rupper','var(--lc-color-status-info)')}${rline(rmin,'Rmin','var(--lc-color-status-error)')}
   <path d="${area(base)}" fill="color-mix(in srgb,var(--lc-color-alert-red-mark) 19%,transparent)" clip-path="url(#${cid})" ${first?'style="animation:areaIn .9s .5s both"':''}/>
   <line x1="${m.l}" x2="${W-m.r}" y1="${yb}" y2="${yb}" stroke="var(--lc-color-alert-orange-mark)" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <text x="${W-m.r}" y="${yb-5}" text-anchor="end" font-size="10" font-weight="700" fill="var(--lc-color-alert-orange)">Buffer ${Math.round(buf)}</text>
+  <text x="${W-m.r}" y="${yb-5}" text-anchor="end" font-size="10" font-weight="700" fill="var(--lc-color-alert-orange)">Rtarget ${Math.round(buf)}</text>
   <path d="${line(base)}" fill="none" stroke="${dim}" stroke-width="${sc?2:2.6}" stroke-linecap="round" stroke-linejoin="round" ${first?`style="--len:${len};stroke-dasharray:${len};animation:lineDraw 1.1s var(--ease) both"`:''} ${sc?'opacity=".75"':''}/>
-  ${o.path.map((p,i)=>`<circle class="dpt" cx="${X(i).toFixed(1)}" cy="${Y(base[i]).toFixed(1)}" r="2.4" fill="${LV[alertLevel(p.c,o.buf)].color}"><title>${fd(p.d)} · ${LV[alertLevel(p.c,o.buf)].label}</title></circle>`).join('')}
+  ${o.path.map((p,i)=>`<circle class="dpt" cx="${X(i).toFixed(1)}" cy="${Y(base[i]).toFixed(1)}" r="2.4" fill="${LV[alertLevel(p.c,o.buf,o.rmin)].color}"><title>${fd(p.d)} · ${LV[alertLevel(p.c,o.buf,o.rmin)].label}</title></circle>`).join('')}
   ${sc?`<path d="${line(sc)}" fill="none" stroke="var(--lc-color-status-success)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>`:''}
   <line class="cross" x1="0" x2="0" y1="${m.t}" y2="${H-m.b}" stroke="var(--lc-color-text-primary)" stroke-opacity=".35" stroke-dasharray="3 3" style="display:none"/>
   <circle class="dot1" r="4.5" fill="var(--lc-color-bg-surface)" stroke="${dim}" stroke-width="2.5" style="display:none"/>${sc?'<circle class="dot2" r="4.5" fill="var(--lc-color-bg-surface)" stroke="var(--lc-color-status-success)" stroke-width="2.5" style="display:none"/>':''}`;
@@ -249,7 +277,7 @@ $('#tabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)se
 
 function switchContext(firm,cs,{silent}={}){
   for(const k in TV3_CACHE)delete TV3_CACHE[k];S.causes={};
-  S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;S.uc01Sel=null;
+  S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;S.uc01Sel=null;S.weeks=CFG.tv2.horizonWeeks;policyCases(firm);
   const c=C();const eps=episodes(c);if(c.defk)S.epIdx=c.defk-1;else if(eps.length)S.epIdx=eps.reduce((a,e,i)=>e.peak>eps[a].peak?i:a,0);
   derive();S.lev=freshLev();$('#firmSel').value=firm;$$('.chipdate b').forEach(b=>b.textContent=fd(C().as_of));
   const w=$('#work');w.classList.add('loading');setTimeout(()=>w.classList.remove('loading'),260);
@@ -262,48 +290,166 @@ $('#firmSel').addEventListener('change',e=>{const f=e.target.value;if(f==='__add
 
 // Numbered section used by the Dashboard and Shortfall tabs.
 const dashSec=(n,col,h,pp,inner)=>`<section class="dsec" style="--sc:${col};--i:${n-1}"><header class="dsh"><span class="dsn">${n}</span><div><h2>${h}</h2><p>${pp}</p></div></header>${inner}</section>`;
+/* ===== UC02 Shortfall tab (SRS 2.8.1, 2.8.3–2.8.5, Table 3-1): information bar, scenario and horizon selectors, Cash0 banner,
+   overview, weekly forecast with an expandable daily table, daily chart with reserve lines and the Optimistic–Conservative band,
+   scenario comparison, shortfall episodes, two-week blocks and the financing ranking. TH and the matrix cell always use Base. ===== */
+const SC_KEYS=['base','optimistic','conservative','stress_7','continuing_sales'];
+const lvLabel=l=>l==='na'||l==='unknown'?t('lv.na'):t('lv.'+l);
+const srcName=k=>thrSrcName(k);
+// Colour of one shortfall episode = the worst daily level inside it (SRS 2.8.11.4), with the configured Rmin.
+function episodeLevel(c,e){const r=RMIN();return worstLevel(c.days.slice(e.i0,e.i1+1).map(([,v])=>alertLevel(v,c.buffer,r)))}
+function uc02HeaderHTML(u,c){
+  const sc=S.case,sm=u.summary[sc],b=u.summary.base,R=u.reserves,snap=DATA.snaps[S.firm],fr=freshness(snap);
+  const scope=t('gap.scope',{s:(snap.sales||[]).filter(x=>x.open).length,p:(snap.purchases||[]).filter(x=>x.open).length,pl:(snap.planned||[]).length});
+  const opts=SC_KEYS.map(k=>`<option value="${k}" ${k===sc?'selected':''}>${t('sc.'+k)}</option>`).join('');
+  const wk=Array.from({length:CFG.tv2.horizonWeeks},(_,i)=>`<option value="${i+1}" ${i+1===u.weeks?'selected':''}>${i+1}</option>`).join('');
+  const bar=`<div class="uc-src uc2-bar" data-wid="uc2bar"><div class="uc-src-l"><span><b>${esc(FIRMS[S.firm].name)}</b> · ${t('gap.asof',{d:fd(u.as_of)})} · ${t('gap.period',{a:fd(u.start),b:fd(u.end),w:u.weeks})} · ${t('gap.mode.'+(sc==='continuing_sales'?'cont':'runoff'))}</span>
+     <span class="runst st-${u.status}">${t('run.'+u.status)}</span><span>${scope}</span><span class="fr fr-${fr.level}"><i class="lv-sw" aria-hidden="true"></i>${t('fresh.'+fr.level,{h:CFG.erp.freshMaxHours})}</span></div>
+    <div class="uc-ctl"><label>${t('gap.scenario')}<select id="scSel">${opts}</select></label><label>${t('gap.weeks')}<select id="wkSel">${wk}</select></label>
+     <button class="btn sec sm" type="button" id="cash0Btn">${t('c0.open')}</button></div>
+    ${sc==='continuing_sales'?`<p class="uc-note warn">${t('gap.cont.note')}</p>`:''}${sc!=='base'?`<p class="uc-note">${t('gap.base.note')}</p>`:''}</div>`;
+  const banner=u.cash0.status!=='confirmed'?`<div class="callout warn c0b" data-wid="cash0"><span>⚠</span><div><b>${t('c0.banner.t')}</b> ${t('c0.banner',{v:u.cash0.value==null?'—':money(u.cash0.value),need:b.need_rtarget==null?'—':money(b.need_rtarget)})}
+     <div style="margin-top:8px"><button class="btn primary sm" type="button" id="cash0Btn2">${t('c0.open')}</button></div></div></div>`:'';
+  if(u.status==='invalid_data')return bar+banner+`<div class="callout red"><span>⛔</span><div><b>${t('run.invalid.t')}</b> ${u.status_codes.invalid.map(x=>t('code.'+x)).join(' ')}</div></div>`;
+  const tile=(lb,v,sub,cls='')=>`<div class="ls-tile ${cls}"><span>${lb}</span><b class="num">${v}</b><small>${sub}</small></div>`;
+  const ov=u.overall,cell=u.matrix.cell;
+  const tiles=`<div class="ls-tiles uc2-tiles" data-wid="uc2tiles">
+    ${tile(t('ov.level'),`<span class="lv-pill lv-${ov==='unknown'?'na':ov}" data-lv="${ov}"><i class="lv-sw lv-${ov==='unknown'?'na':ov}" aria-hidden="true"></i>${lvLabel(ov)}</span>`,t('ov.level.sub'))}
+    ${tile(t('ov.min'),money(sm.min),t('ov.min.sub',{d:fd(sm.min_date),s:t('sc.'+sc)}))}
+    ${tile(t('ov.first'),sm.first_below_rtarget?fd(sm.first_below_rtarget):t('ov.none'),t('ov.first.sub',{z:sm.first_negative?fd(sm.first_negative):t('ov.none')}))}
+    ${tile(t('ov.need'),sm.need_rtarget==null?'—':money(sm.need_rtarget),t('ov.need.sub',{z:money(sm.need_zero),c:u.cash0.value==null?'—':money(u.cash0.value)}))}
+    ${tile(t('ov.peak'),money(sm.peak_buffer),t('ov.peak.sub',{z:money(sm.peak_zero),d:sm.peak_buffer_date?fd(sm.peak_buffer_date):'—'}))}
+    ${tile(t('ov.th'),u.th.th==='unknown'?t('ov.unknown'):t('th.'+u.th.th),`${u.th.reference?t('th.ref')+' · ':''}${cell?t('ov.cell',{c:cell,n:M_EN[cell]}):t('ov.notrouted')}`)}</div>
+   <p class="uc2-res">${t('res.line',{rmin:money(R.rmin),rt:money(R.rtarget),rup:money(R.rupper),s1:srcName(R.src.rmin),s2:srcName(R.src.rtarget),s3:srcName(R.src.rupper)})}${R.annualised&&R.src.rtarget==='verified_reference'?' '+t('res.annual'):''}</p>`;
+  return bar+banner+tiles;
+}
+// Comparison of the five scenarios of the same run (UC02.4); nothing is recalculated.
+function scenarioTableHTML(u){
+  const rows=SC_KEYS.map(k=>{const s=u.summary[k];return `<tr class="${k===S.case?'on':''}"><td><b>${t('sc.'+k)}</b>${k==='continuing_sales'?`<small>${t('gap.cont.short')}</small>`:''}</td><td>${t('gap.mode.'+(k==='continuing_sales'?'cont':'runoff'))}</td>
+    <td class="num ${s.min<0?'neg':''}">${money(s.min)}</td><td class="num">${fd(s.min_date)}</td><td><span class="lv-tag" style="--lvc:${LV[s.overall==='unknown'?'na':s.overall].color}"><i class="lv-sw lv-${s.overall}" aria-hidden="true"></i>${lvLabel(s.overall)}</span></td>
+    <td class="num">${s.need_rtarget==null?'—':money(s.need_rtarget)}</td><td><small>${t('basis.'+k)}</small></td></tr>`}).join('');
+  return `<div class="table-wrap"><table class="dtable sc-cmp"><thead><tr><th>${t('gap.scenario')}</th><th>${t('cmp.mode')}</th><th class="num">${t('cmp.min')}</th><th class="num">${t('cmp.date')}</th><th>${t('cmp.level')}</th><th class="num">${t('ov.need')}</th><th>${t('cmp.basis')}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function blocksHTML(u){
+  const b=u.blocks;if(!b.list.length)return '';
+  const it=x=>`<li class="blk b-${x.status}"><span class="blk-k">${t('blk.n',{k:x.k})}</span><span>${fds(x.start)}–${fds(x.end)}</span><b>${t('blk.'+x.status)}</b>${x.severity?`<span class="lv-tag" style="--lvc:${LV[x.severity].color}"><i class="lv-sw lv-${x.severity}"></i>${lvLabel(x.severity)}</span>`:''}<span class="num">${t('blk.min',{v:money(x.min),d:fds(x.min_date)})}</span>${x.gap?`<span class="num neg">${t('blk.gap',{v:money(x.gap)})}</span>`:''}${x.excess?`<span class="num">${t('blk.ex',{v:money(x.excess)})}</span>`:''}</li>`;
+  return `<div class="card blks" data-wid="blocks"><div class="card-head"><div><h3>${t('blk.title')}</h3><p>${t('blk.sub')}</p></div></div>
+    ${b.persistent?`<div class="callout warn"><span>⏳</span><div><b>${t('blk.persist')}</b> ${t('blk.persist.sub',{a:fd(b.persistent.from),b:fd(b.persistent.to),n:b.persistent.blocks,d:fd(b.persistent.need_date),g:money(b.persistent.peak_gap)})}</div></div>`:''}
+    <ol class="blk-list">${b.display.map(it).join('')}</ol></div>`;
+}
+function dailyTableHTML(c){
+  const r=RMIN(),o=c.fc.scenarios[S.case],ds=o.days.slice(0,c.days.length);
+  return `<div class="table-wrap dt-daily"><table class="dtable"><thead><tr><th>${t('col.date')}</th><th class="num">${t('col.opening')}</th><th class="num">${t('col.in')}</th><th class="num">${t('col.out')}</th><th class="num">${t('col.closing')}</th><th>${t('cmp.level')}</th></tr></thead><tbody>
+    ${ds.map(x=>{const l=alertLevel(x.close,c.buffer,r);return `<tr><td class="num">${fd(x.d)}</td><td class="num">${mm(x.open)}</td><td class="num">${x.in?mm(x.in):'–'}</td><td class="num">${x.out?mm(x.out):'–'}</td><td class="num ${x.close<0?'neg':''}">${mm(x.close)}</td><td><span class="lv-tag" style="--lvc:${LV[l].color}"><i class="lv-sw lv-${l}"></i>${lvLabel(l)}</span></td></tr>`}).join('')}</tbody></table></div>`;
+}
 function renderGap(){
-  const c=C(),p=$('#pane-gap'),M=weeklyModel(c),big=largestGap(),asOf=dn(c.as_of);
-  const sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
-  const ov=!!(S.last&&S.overlay&&!EP.none);
-  const forecast=dashSec(1,'var(--lc-color-data-cash)','13-week cash forecast','Cash in, cash out and week-end balance vs buffer',`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${S.case==='stress_7'?'Assuming customers pay 7 days later · ':''}VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
-   <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(openingCash(c))}</b><small>Cash at cut-off</small></div>
+  const c=C(),p=$('#pane-gap'),u=uc02(),M=weeklyModel(c),big=largestGap(),asOf=dn(c.as_of),H=u.weeks;
+  const ov=!!(S.last&&S.overlay&&!EP.none),weeklyOnly=u.weekly_only,sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
+  const head=uc02HeaderHTML(u,c);
+  if(u.status==='invalid_data'){p.innerHTML=head;bindGapHeader(p);return}
+  const scName=t('sc.'+S.case);
+  const forecast=dashSec(1,'var(--lc-color-data-cash)',`${H}-week cash forecast`,`Cash in, cash out and week-end balance vs Rtarget · ${scName}`,`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${scName} · VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
+   <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(c.cash0??openingCash(c))}</b><small>Cash at cut-off (${t('c0.st.'+u.cash0.status)})</small></div>
     <div class="fst"><b class="num pos">+${money(sumIn)}</b><small>Expected cash in</small><b class="num neg" style="margin-top:8px">−${money(sumOut)}</b><small>Expected cash out</small></div>
     <div class="fst"><b class="num ${minB<c.buffer?'neg':''}">${money(minB)}</b><small>Lowest week-end, week ${minW.w}</small></div></div>
     <div class="chartbox fch">${flowChartSVG(c,M,EP)}</div></div>
-   <div class="legend"><span><i style="background:var(--lc-color-status-success-bg);border:1px solid var(--lc-color-status-success)"></i>Cash in</span><span><i style="background:var(--lc-color-status-error-bg);border:1px solid var(--lc-color-status-error)"></i>Cash out</span><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Week-end balance (dot = alert level)</span><span><i class="ds"></i>Buffer ${money(c.buffer)}</span>${EP.none?'':`<span><i class="gapwk-sw"></i>Weeks of gap ${EP.k}</span>`}</div>
+   <div class="legend"><span><i style="background:var(--lc-color-status-success-bg);border:1px solid var(--lc-color-status-success)"></i>Cash in</span><span><i style="background:var(--lc-color-status-error-bg);border:1px solid var(--lc-color-status-error)"></i>Cash out</span><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Week-end balance (dot = alert level)</span><span><i class="ds"></i>Rtarget ${money(c.buffer)}</span>${EP.none?'':`<span><i class="gapwk-sw"></i>Weeks of gap ${EP.k}</span>`}</div>
    ${alertLegendHTML()}
    ${flowTableHTML(c,M,EP)}
-   <p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.</p></div>`);
-  const daily=dashSec(2,'var(--lc-color-status-error)','Daily cash balance','Every gap below the buffer is shaded; each dot shows that day’s alert level',`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${S.case==='stress_7'?'assuming customers pay 7 days later':'base forecast'}</p></div>
+   <p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.${weeklyOnly?' '+t('gap.weekly'):''}</p>
+   ${weeklyOnly?'':`<button class="btn sec sm" type="button" id="dailyBtn" aria-expanded="${!!S.showDaily}">${S.showDaily?t('gap.daily.hide'):t('gap.daily.show')}</button>${S.showDaily?dailyTableHTML(c):''}`}</div>`);
+  const daily=dashSec(2,'var(--lc-color-status-error)','Daily cash balance','Every gap below Rtarget is shaded; each dot shows that day’s alert level; Rmin, Rtarget and Rupper lines; Optimistic–Conservative band',weeklyOnly?`<div class="card"><div class="empty">${t('gap.weekly')}</div></div>`
+    :`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${scName}</p></div>
       <label class="legend" style="cursor:pointer;user-select:none;${S.last&&!EP.none?'':'display:none'}" id="ovLbl"><input type="checkbox" id="ovChk" ${S.overlay?'checked':''} style="accent-color:var(--lc-color-status-success)"> Show latest scenario</label></div>
     <div class="chartbox" id="gapChart"></div>
-    <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>Base balance</span>${ov?'<span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span>':''}<span><i class="ds"></i>Buffer ${money(c.buffer)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 30%,transparent);border:1px dashed var(--lc-color-status-error)"></i>Gap (selected gap is darker)</span></div>
-    ${alertLegendHTML()}</div>`);
-  const foot=`<div class="foot-note">Aged stock and goods held for subcontracting are excluded from collateral; financed receivables are not counted as receivables. Interest, fees and advance rates come from the synthetic finance_catalogue; EAC is indicative only. ${DISC}</div>`;
+    <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>${scName}</span>${ov?'<span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span>':''}<span><i class="band-sw"></i>${t('chart.band')}</span><span><i class="ds"></i>Rtarget ${money(c.buffer)}</span><span><i class="ds rmin"></i>Rmin ${money(u.reserves.rmin)}</span><span><i class="ds rup"></i>Rupper ${money(u.reserves.rupper)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 30%,transparent);border:1px dashed var(--lc-color-status-error)"></i>Gap (selected gap is darker)</span></div>
+    ${alertLegendHTML()}<h4 class="sub-h">${t('cmp.title')}</h4>${scenarioTableHTML(u)}</div>`);
+  const foot=`<div class="foot-note">${t('gap.foot',{n:(uc01()||{}).N||c.N})} Aged stock and goods held for subcontracting are excluded from collateral; financed receivables are not counted as receivables. Interest, fees and advance rates come from the synthetic finance_catalogue; EAC is indicative only. ${DISC}</div>`;
+  const stuck=(()=>{const d=uc01();return `<p class="stuck">${t('stuck.line',{ar:money(d.metrics.total_overdue_ar),inv:money(d.profiles.stuck_inventory)})}</p>`})();
   if(!EPS.length){
-    p.innerHTML=forecast+daily+`<div class="card" style="margin-top:14px"><div class="empty"><b>No cash shortfall in the 13-week forecast, so there is nothing to simulate.</b></div></div>`+foot;
+    p.innerHTML=head+forecast+daily+`<div class="card" style="margin-top:14px"><div class="empty"><b>No cash shortfall in the ${H}-week forecast (${scName}), so there is nothing to simulate.</b></div></div>`+blocksHTML(u)+stuck+foot;
   }else{
     const dl=dn(EP.start)-asOf,rq='Rank the financing options that fit this cause.',t3=S.stage>=3?tv3For(EP):null;
-    const gaps=dashSec(3,'var(--lc-color-status-error)','Cash gaps',`Gap = a run of consecutive days with balance below the buffer ${money(c.buffer)}. Every gap is a red alert. Pick a gap to see its weeks, KPIs and financing ranking.`,`<div class="eps">${EPS.map(e=>`<button class="ep gap-red ${EP.k===e.k?'on':''}" data-ep="${e.k}" aria-pressed="${EP.k===e.k}"><div class="ep-tags"><span class="lv-tag"><i class="lv-sw lv-red" aria-hidden="true"></i>Red alert</span>${big&&big.k===e.k?'<span class="status blue">Largest gap</span>':''}${e.censored?'<span class="status gray">not yet ended</span>':''}</div><div class="k">Gap ${e.k}</div><div class="a num">${mm(e.peak)}</div><div class="d">${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''} · lowest ${money(e.cashMin)}</div></button>`).join('')}</div>
+    const card=e=>{const lv=episodeLevel(c,e),rec=e.censored?null:c.days[e.i1+1];return `<button class="ep gap-lv lv-${lv} ${EP.k===e.k?'on':''}" data-ep="${e.k}" data-lv="${lv}" aria-pressed="${EP.k===e.k}"><div class="ep-tags"><span class="lv-tag" style="--lvc:${LV[lv].color}"><i class="lv-sw lv-${lv}" aria-hidden="true"></i>${t('ep.alert',{l:lvLabel(lv)})}</span>${big&&big.k===e.k?'<span class="status blue">Largest gap</span>':''}${e.censored?`<span class="status gray">${t('ep.open')}</span>`:''}</div><div class="k">Gap ${e.k}</div><div class="a num">${mm(e.peak)}</div><div class="d">${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''} · ${t('ep.days',{n:e.i1-e.i0+1})} · lowest ${money(e.cashMin)} on ${fds(e.peakDay)}</div><div class="d">${rec?t('ep.recovery',{d:fds(rec[0])}):t('ep.notended')}</div></button>`};
+    const gaps=dashSec(3,'var(--lc-color-status-error)','Cash gaps',`Gap = a run of consecutive days with balance below Rtarget ${money(c.buffer)} (${scName}). The colour is the worst daily alert level inside the gap. Pick a gap to see its weeks, KPIs and financing ranking.`,`<div class="eps">${EPS.map(card).join('')}</div>
   <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px">
-    <div class="card kpi k2"><div class="t">Peak shortfall · gap ${EP.k}</div><div class="v num">${mm(EP.peak)}</div><div class="f">vs buffer</div></div>
+    <div class="card kpi k2"><div class="t">Peak shortfall · gap ${EP.k}</div><div class="v num">${mm(EP.peak)}</div><div class="f">vs Rtarget</div></div>
     <div class="card kpi"><div class="t">Cash needed on</div><div class="v num">${fds(EP.start)}</div><div class="f">${dl} days from the cut-off</div></div>
     <div class="card kpi k3"><div class="t">Lowest balance</div><div class="v num">${money(EP.cashMin)}</div><div class="f">on ${fds(EP.peakDay)}</div></div>
     <div class="card kpi k4"><div class="t">Gap ends</div><div class="v num">${fds(EP.end)}</div><div class="f">${EP.censored?'not recovered within the period':'recovered'}</div></div>
-  </div>`);
+  </div>${blocksHTML(u)}${stuck}`);
     const rank=dashSec(4,'var(--lc-color-action-primary)',`Financing ranking · gap ${EP.k}`,'Tier (fully covers and funds in time), then cost relative to the shortfall',
       !t3?`<div class="callout"><span>ℹ</span><div>The ranking appears after the financing step of the conversation.<div style="margin-top:8px"><button class="btn primary sm" type="button" data-ask="${esc(rq)}">${esc(rq)} →</button></div></div></div>`
       :`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div><span class="status amber"><i></i>provisional</span></div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`);
-    p.innerHTML=forecast+daily+gaps+rank+foot;
+    p.innerHTML=head+forecast+daily+gaps+rank+foot;
   }
-  cashChart($('#gapChart',p),{path:(ov?S.last.res:BASE).path,buf:c.buffer,ep:EP,eps:EPS,scen:ov});
+  if(!weeklyOnly){
+    const band=['optimistic','conservative'].map(k=>DATA.cases[S.firm+'|'+k].days.slice(0,c.days.length).map(d=>d[1]));
+    cashChart($('#gapChart',p),{path:(ov?S.last.res:BASE).path,buf:c.buffer,rmin:u.reserves.rmin,rup:u.reserves.rupper,band,ep:EP,eps:EPS,scen:ov});
+  }
   const chk=$('#ovChk',p);chk&&chk.addEventListener('change',e=>{S.overlay=e.target.checked;renderGap()});
   $$('[data-csv]',p).forEach(b=>b.onclick=()=>exportFlowCSV(c,M));window._csvCtx=()=>exportFlowCSV(c,M);
   $$('[data-ask]',p).forEach(b=>b.onclick=()=>sendChat(b.dataset.ask));
+  const db=$('#dailyBtn',p);db&&(db.onclick=()=>{S.showDaily=!S.showDaily;renderGap()});
+  bindGapHeader(p);
   setTimeout(redrawCharts,480);
   $$('[data-ep]',p).forEach(b=>b.addEventListener('click',()=>{selectGap(+b.dataset.ep);renderGap();renderDemoChips()}));
   $$('[data-try]',p).forEach(b=>b.addEventListener('click',()=>{const [inv,prod]=b.dataset.try.split('|');S.lev=freshLev();S.lev.l4_on=1;S.lev.inv_id=inv;S.lev.prod=prod;setTab('whatif');runNow('Finance '+inv+' via '+prod)}));
+}
+function bindGapHeader(p){
+  const ss=$('#scSel',p);ss&&(ss.onchange=()=>setScenario(ss.value));
+  const ws=$('#wkSel',p);ws&&(ws.onchange=()=>setWeeks(+ws.value));
+  $$('#cash0Btn,#cash0Btn2',p).forEach(b=>b.onclick=openCash0Form);
+}
+// The scenario selector changes the displayed scenario only; the chat, the stage and TH (Base) stay as they are.
+function setScenario(sc){if(!SC_KEYS.includes(sc))return;S.case=sc;S.epIdx=0;const c=C();if(c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];refreshTab();renderDemoChips()}
+function setWeeks(h){S.weeks=Math.min(CFG.tv2.horizonWeeks,Math.max(1,h|0));S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];refreshTab();renderDemoChips()}
+// Cash0 and reserve-level form (UC02.3). Saving creates a configuration version (owner_policy); earlier results become stale.
+function essentialDailySpend(){
+  const fc=DATA.forecasts[S.firm],ess=new Set(['payroll','tax','rent','debt_service']);
+  const out=fc.scenarios.base.events.filter(e=>e.dir==='OUT'&&e.scope==='in_horizon'&&(ess.has(e.cat)||e.essential));
+  return out.reduce((a,e)=>a+e.amt,0)/fc.days;
+}
+function openCash0Form(){
+  const f=S.firm,snap=DATA.snaps[f],p=POLICY.get(f),u=uc02(),R=u.reserves,ref=R.reference,daily=essentialDailySpend();
+  const sups=[...new Set((snap.purchases||[]).map(x=>x.supplier))],essSel=new Set(p.essential_suppliers||snap.firm.essential_suppliers||[]);
+  const v=x=>x==null?'':Math.round(x);
+  openModal(`<form class="evid c0f" id="c0Form" novalidate><button class="settings-close" type="button" aria-label="Close">×</button><h3>${t('c0.title')}</h3><p class="sub">${t('c0.sub',{v:esc(POLICY.versionId(f))})}</p>
+   <div class="pol-form">
+    <label>${t('c0.total')}<input id="c0Total" inputmode="numeric" value="${v(p.cash0?p.cash0.total:u.cash0.total)}"></label>
+    <label>${t('c0.restricted')}<input id="c0Restr" inputmode="numeric" value="${v(p.cash0?p.cash0.restricted:0)}"></label>
+    <fieldset class="wide c0m"><legend>${t('c0.method')}</legend>${['industry','critical_days','direct'].map(m=>`<label><input type="radio" name="c0m" value="${m}" ${(p.reserve&&p.reserve.method||'direct')===m?'checked':''}> ${t('c0.m.'+m)}</label>`).join('')}</fieldset>
+    <label>Rmin<input id="c0Rmin" inputmode="numeric" value="${v(R.rmin)}"></label><label>Rtarget<input id="c0Rt" inputmode="numeric" value="${v(R.rtarget)}"></label><label>Rupper<input id="c0Rup" inputmode="numeric" value="${v(R.rupper)}"></label>
+    <label>${t('c0.basis')}<select id="c0Basis"><option value="net">net</option><option value="gross">gross</option></select></label>
+    <label>${t('c0.vat')}<input id="c0Vat" inputmode="decimal" placeholder="${t('c0.vat.ph')}" value="${p.vat_rate!=null?p.vat_rate*100:''}"></label>
+    <fieldset class="wide c0s"><legend>${t('c0.ess')}</legend>${sups.map(s=>`<label><input type="checkbox" value="${esc(s)}" ${essSel.has(s)?'checked':''}> ${esc(s)}</label>`).join('')}</fieldset>
+    <label class="wide">${t('pol.reason')}<textarea id="c0Reason" rows="2" maxlength="500" placeholder="${t('c0.reason.ph')}">${esc((p.reserve&&p.reserve.reason)||'')}</textarea></label></div>
+   <p class="c0-ref">${ref?t('c0.ref',{a:money(ref.rmin),b:money(ref.rtarget),c:money(ref.rupper),m:(uc01()||{model:{model:'FOB'}}).model.model}):''} ${t('c0.days',{d:money(daily)})}</p>
+   <div id="c0Warn"></div><p id="c0Err" class="settings-error"></p>
+   <div class="acts"><button class="btn sec" type="button" id="c0Cancel">${t('pol.cancel')}</button><button class="btn primary" type="submit" id="c0Save">${t('c0.save')}</button></div></form>`,m=>{
+    const q=s=>m.querySelector(s),num=s=>{const x=q(s).value.trim();return x===''?null:parseNum(x)};
+    q('#c0Basis').value=p.amount_basis||snap.config.amount_basis||'net';
+    q('.settings-close').onclick=q('#c0Cancel').onclick=closeModal;
+    m.querySelectorAll('input[name=c0m]').forEach(r=>r.onchange=()=>{const md=r.value;
+      if(md==='industry'&&ref){q('#c0Rmin').value=v(ref.rmin);q('#c0Rt').value=v(ref.rtarget);q('#c0Rup').value=v(ref.rupper)}
+      if(md==='critical_days'){q('#c0Rmin').value=v(daily*CFG.liq.criticalDays.rmin[0]);q('#c0Rt').value=v(daily*CFG.liq.criticalDays.rtarget[0]);q('#c0Rup').value=v(daily*CFG.liq.criticalDays.rtarget[0]*CFG.liq.rupperDefaultRatio)}
+      check()});
+    const check=()=>{const w=[],rt=num('#c0Rt'),rmin=num('#c0Rmin');
+      if(ref&&rt!=null&&rt<ref.rmin)w.push(t('c0.w.p25'));if(rmin!=null&&rmin<15*daily)w.push(t('c0.w.days',{d:money(15*daily)}));
+      q('#c0Warn').innerHTML=w.map(x=>`<div class="callout warn"><span>⚠</span><div>${x}</div></div>`).join('')};
+    m.querySelectorAll('#c0Rmin,#c0Rt,#c0Rup').forEach(i=>i.oninput=check);check();
+    q('#c0Form').onsubmit=e=>{e.preventDefault();const tot=num('#c0Total'),res=num('#c0Restr')??0,rmin=num('#c0Rmin'),rt=num('#c0Rt'),rup=num('#c0Rup'),vat=num('#c0Vat'),reason=q('#c0Reason').value.trim(),err=q('#c0Err');
+      // Validation (UC02.3 step 5): amounts ≥ 0, restricted ≤ total, 0 ≤ Rmin ≤ Rtarget < Rupper, reason 10–500 characters when the levels differ from the reference.
+      if(tot!=null&&!(tot>=0)){err.textContent=t('c0.e.total');return}if(!(res>=0)||(tot!=null&&res>tot)){err.textContent=t('c0.e.restr');return}
+      if(!(rt>0)){err.textContent=t('c0.e.rt');return}if(!(rmin>=0&&rmin<=rt)){err.textContent=t('c0.e.rmin');return}if(!(rup>rt)){err.textContent=t('c0.e.rup');return}
+      if(vat!=null&&!(vat>=0&&vat<100)){err.textContent=t('c0.e.vat');return}
+      const differs=!ref||[rmin,rt,rup].some((x,i)=>Math.abs(x-[ref.rmin,ref.rtarget,ref.rupper][i])>1);
+      if((differs&&reason.length<10)||reason.length>500){err.textContent=t('pol.reason.err');return}
+      const md=(m.querySelector('input[name=c0m]:checked')||{}).value||'direct',ess=[...m.querySelectorAll('.c0s input:checked')].map(x=>x.value);
+      POLICY.set(f,{cash0:tot==null?null:{total:tot,restricted:res,confirmed:true},reserve:{method:md,rmin,rtarget:rt,rupper:rup,reason},amount_basis:q('#c0Basis').value,vat_rate:vat==null?null:vat/100,essential_suppliers:ess},reason);
+      closeModal();policyCases(f);S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];
+      toast(t('c0.saved',{v:POLICY.versionId(f)}));refreshTab();renderDemoChips()};
+  });
 }
 function rankTable(t3){
   const G=t3.inputs.gap,maxC=Math.max(...t3.ranked.map(r=>r.cpg));
@@ -957,7 +1103,8 @@ async function respondCause(bot,{focus}={}){
     const lateTxt=k.late?`${esc(k.late[3])} ${mm(k.late[4])} arrives only on ${fd(k.late[5])}, after the low point`:'';
     const same=k.late&&tb&&k.late[3]===tb.k;
     S.causes[e.k]={txt:`${drv.slice(0,2).join(' and ')} fall before the low point${k.late?`, while ${lateTxt}`:''}`};
-    return `<details class="liq gap-acc" data-gap="${e.k}" ${focus||e.k===big.k?'open':''}><summary><span class="ga-t">Why gap ${e.k} happens</span><span class="lv-tag"><i class="lv-sw lv-red" aria-hidden="true"></i>Red alert</span><span class="ga-s">${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''} · peak ${mm(e.peak)}${e.k===big.k?' · largest gap':''}</span></summary>
+    const lv=episodeLevel(c,e);
+    return `<details class="liq gap-acc" data-gap="${e.k}" ${focus||e.k===big.k?'open':''}><summary><span class="ga-t">Why gap ${e.k} happens</span><span class="lv-tag" style="--lvc:${LV[lv].color}"><i class="lv-sw lv-${lv}" aria-hidden="true"></i>${t('ep.alert',{l:lvLabel(lv)})}</span><span class="ga-s">${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''} · peak ${mm(e.peak)}${e.k===big.k?' · largest gap':''}</span></summary>
     <div class="ga-b"><p class="ga-p">Bridge from the cut-off ${fd(c.as_of)} to the low point ${fd(e.peakDay)}: the balance reaches <b>${money(e.cashMin)}</b>, ${mm(e.peak)} below the buffer.</p>
     <div class="liq-b"><div class="lb"><span>Opening cash</span><b class="num">${money(k.open)}</b></div><div class="lb"><span>+ Cash in</span><b class="num">${money(k.sumIn)}</b></div><div class="lb"><span>− Cash out</span><b class="num">${money(k.sumOut)}</b></div></div>
     <div class="liq-note"><span>↧</span><div><b>Largest outflows before the low point</b><ul class="cause-list">${k.by.map(([t,v])=>`<li>${CAUSE_LBL[t]||t}: ${money(v)}</li>`).join('')}</ul></div></div>
@@ -1642,17 +1789,18 @@ const CATVN={invoice_receipt:'Customer collections',planned_inflow:'Planned infl
 const lblCat=k=>CATVN[k]||k;
 function weeklyModel(c){
   const A=dn(c.as_of),W=[];
-  for(let w=0;w<13;w++){const ds=c.days.slice(7*w,7*(w+1)),lo=ds.reduce((a,d)=>d[1]<a[1]?d:a,ds[0]);W.push({w:w+1,start:A+1+7*w,end:A+7*(w+1),inn:0,out:0,bal:c.days[Math.min(7*(w+1),c.days.length)-1][1],min:lo[1],minDay:lo[0]})}
+  const H=Math.ceil(c.days.length/7),c0=c.cash0??openingCash(c);
+  for(let w=0;w<H;w++){const ds=c.days.slice(7*w,7*(w+1)),lo=ds.reduce((a,d)=>d[1]<a[1]?d:a,ds[0]);W.push({w:w+1,start:A+1+7*w,end:A+7*(w+1),inn:0,out:0,open:w?c.days[7*w-1][1]:c0,bal:c.days[Math.min(7*(w+1),c.days.length)-1][1],min:lo[1],minDay:lo[0]})}
   const rows=new Map();
-  c.ev.forEach(e=>{const d=dn(e[5]);if(d<=A)return;const w=Math.floor((d-A-1)/7);if(w<0||w>12)return;
+  c.ev.forEach(e=>{const d=dn(e[5]);if(d<=A)return;const w=Math.floor((d-A-1)/7);if(w<0||w>=H)return;
     const dir=e[1],k=dir+'|'+e[2];
     if(dir==='IN')W[w].inn+=e[4];else W[w].out+=e[4];
-    let r=rows.get(k);if(!r){r={dir,cat:e[2],tot:0,wk:Array(13).fill(0),ch:new Map()};rows.set(k,r)}
+    let r=rows.get(k);if(!r){r={dir,cat:e[2],tot:0,wk:Array(H).fill(0),ch:new Map()};rows.set(k,r)}
     r.tot+=e[4];r.wk[w]+=e[4];
-    if(e[2]==='invoice_receipt'||e[2]==='supplier_payment'){let ch=r.ch.get(e[3]);if(!ch){ch={name:e[3],tot:0,wk:Array(13).fill(0)};r.ch.set(e[3],ch)}ch.tot+=e[4];ch.wk[w]+=e[4]}});
+    if(e[2]==='invoice_receipt'||e[2]==='supplier_payment'){let ch=r.ch.get(e[3]);if(!ch){ch={name:e[3],tot:0,wk:Array(H).fill(0)};r.ch.set(e[3],ch)}ch.tot+=e[4];ch.wk[w]+=e[4]}});
   const groups=[...rows.values()].sort((a,b)=>b.tot-a.tot);
   groups.forEach(g=>{const arr=[...g.ch.values()].sort((a,b)=>b.tot-a.tot);g.kids=arr.slice(0,3);
-    if(arr.length>3){const o={name:`Other (${arr.length-3})`,tot:0,wk:Array(13).fill(0)};arr.slice(3).forEach(x=>{o.tot+=x.tot;x.wk.forEach((v,i)=>o.wk[i]+=v)});g.kids.push(o)}});
+    if(arr.length>3){const o={name:`Other (${arr.length-3})`,tot:0,wk:Array(H).fill(0)};arr.slice(3).forEach(x=>{o.tot+=x.tot;x.wk.forEach((v,i)=>o.wk[i]+=v)});g.kids.push(o)}});
   return {W,groups,A};
 }
 function agingModel(c){
@@ -1682,22 +1830,22 @@ function spk(vals,color){
 }
 const gapWeeks=(M,ep)=>new Set(ep&&!ep.none?M.W.filter(x=>x.end>=dn(ep.start)&&x.start<=dn(ep.end)).map(x=>x.w):[]);
 function flowChartSVG(c,M,ep){
-  const {W}=M,buf=c.buffer,Wd=900,Hd=250,l=44,r=10,t=14,b=26,iw=Wd-l-r,ih=Hd-t-b,hw=gapWeeks(M,ep);
+  const {W}=M,buf=c.buffer,rmin=RMIN(),Wd=900,Hd=250,l=44,r=10,t=14,b=26,iw=Wd-l-r,ih=Hd-t-b,hw=gapWeeks(M,ep);
   const mn=Math.min(0,...W.map(x=>x.bal),buf),mx=Math.max(...W.flatMap(x=>[x.inn,x.out,x.bal]),buf)*1.08,rg=(mx-mn)||1;
-  const Y=v=>t+(mx-v)*ih/rg,step=iw/13,bw=Math.min(22,step*.32);
+  const Y=v=>t+(mx-v)*ih/rg,step=iw/W.length,bw=Math.min(22,step*.32);
   const tk=(()=>{const raw=rg/4,p=Math.pow(10,Math.floor(Math.log10(raw))),m=[1,2,2.5,5,10].find(x=>x*p>=raw)*p,o=[];for(let v=Math.ceil(mn/m)*m;v<=mx;v+=m)o.push(v);return o})();
-  let s=`<svg viewBox="0 0 ${Wd} ${Hd}" role="img" aria-label="Cash in, out and week-end balance over 13 weeks">`;
+  let s=`<svg viewBox="0 0 ${Wd} ${Hd}" role="img" aria-label="Cash in, out and week-end balance over ${W.length} weeks">`;
   W.forEach((x,i)=>{if(hw.has(x.w))s+=`<rect class="gapwk" x="${(l+step*i+1).toFixed(1)}" y="${t}" width="${(step-2).toFixed(1)}" height="${ih}" rx="4"/>`});
   tk.forEach(v=>{s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--lc-color-border-default)"/><text x="${l-6}" y="${Y(v)+3.5}" text-anchor="end" class="ax">${nf(Math.round(v/1e6)||0,0)}</text>`});
-  s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="var(--lc-color-status-error)" stroke-dasharray="5 4" stroke-width="1.2"/><text x="${Wd-r}" y="${Y(buf)-4}" text-anchor="end" class="ax" fill="var(--lc-color-status-error)">Buffer ${nf(buf/1e6,0)}</text>`;
-  W.forEach((x,i)=>{const cx=l+step*(i+.5),lv=alertLevel(x.bal,buf),ml=alertLevel(x.min,buf);
+  s+=`<line x1="${l}" x2="${Wd-r}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="var(--lc-color-status-error)" stroke-dasharray="5 4" stroke-width="1.2"/><text x="${Wd-r}" y="${Y(buf)-4}" text-anchor="end" class="ax" fill="var(--lc-color-status-error)">Rtarget ${nf(buf/1e6,0)}</text>`;
+  W.forEach((x,i)=>{const cx=l+step*(i+.5),lv=alertLevel(x.bal,buf,rmin),ml=alertLevel(x.min,buf,rmin);
     s+=`<g class="wk" data-w="${x.w}" data-tt="${esc(`<b>Week ${x.w} · ${fds(isoOf(x.start))}–${fds(isoOf(x.end))}</b><i style='background:var(--lc-color-status-success)'></i>In ${mm(x.inn)}<br><i style='background:var(--lc-color-status-error)'></i>Out ${mm(x.out)}<br><i style='background:${LV[lv].color}'></i>Week-end balance ${mm(x.bal)} · ${LV[lv].label}<br><i style='background:${LV[ml].color}'></i>Lowest in week ${mm(x.min)} on ${fds(x.minDay)} · ${LV[ml].label}${hw.has(x.w)?`<br>Part of gap ${ep.k}`:''}`)}"><rect class="wkhit" x="${l+step*i}" y="${t}" width="${step}" height="${ih}"/>
     <rect class="bx" style="--bi:${i}" x="${cx-bw-1}" y="${Y(x.inn)}" width="${bw}" height="${Math.max(0,Y(0)-Y(x.inn))}" rx="3" fill="var(--lc-color-status-success-bg)" stroke="var(--lc-color-status-success)"/>
     <rect class="bx" style="--bi:${i}" x="${cx+1}" y="${Y(x.out)}" width="${bw}" height="${Math.max(0,Y(0)-Y(x.out))}" rx="3" fill="var(--lc-color-status-error-bg)" stroke="var(--lc-color-status-error)"/></g>
     <text x="${cx}" y="${Hd-9}" text-anchor="middle" class="ax${hw.has(x.w)?' gapax':''}">W${x.w}</text>`});
   const pts=W.map((x,i)=>[l+step*(i+.5),Y(x.bal)]);
   s+=`<polyline points="${pts.map(p=>p.map(v=>v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="var(--lc-color-data-cash)" stroke-width="2.2"/>`;
-  W.forEach((x,i)=>{s+=`<circle class="lvdot" data-lv="${alertLevel(x.bal,buf)}" cx="${pts[i][0]}" cy="${pts[i][1]}" r="4.6" fill="${LV[alertLevel(x.bal,buf)].color}" stroke="var(--lc-color-bg-surface)" stroke-width="1.5"/>`});
+  W.forEach((x,i)=>{s+=`<circle class="lvdot" data-lv="${alertLevel(x.bal,buf,rmin)}" cx="${pts[i][0]}" cy="${pts[i][1]}" r="4.6" fill="${LV[alertLevel(x.bal,buf,rmin)].color}" stroke="var(--lc-color-bg-surface)" stroke-width="1.5"/>`});
   return s+'</svg>';
 }
 function agingSVG(A){
@@ -1710,9 +1858,9 @@ function agingSVG(A){
   return s+`<text x="${(l+Wd-r)/2}" y="${Hd-2}" text-anchor="middle" class="ax" font-weight="700">Due in (days)</text></svg>`;
 }
 function flowTableHTML(c,M,ep){
-  const {W,groups}=M,buf=c.buffer,hw=gapWeeks(M,ep),gw=w=>w&&hw.has(w)?' gapwk':'';
+  const {W,groups}=M,buf=c.buffer,rmin=RMIN(),hw=gapWeeks(M,ep),gw=w=>w&&hw.has(w)?' gapwk':'',daily=!(uc02()||{}).weekly_only;
   const cell=(v,cls='',w)=>`<td class="num ${cls}${gw(w)}"${w?` data-w="${w}"`:''}>${v?nf(v/1e6,1):'–'}</td>`;
-  const head=`<thead><tr><th class="sticky">VND million</th>${W.map(x=>{const lv=alertLevel(x.bal,buf);return `<th data-w="${x.w}" data-lv="${lv}" class="lv-${lv}${gw(x.w)}" title="Week-end level: ${LV[lv].label}"><span><i class="lv-sw lv-${lv}" aria-hidden="true"></i>W${x.w}</span><small>${fds(isoOf(x.start))}</small></th>`}).join('')}<th>Total</th></tr></thead>`;
+  const head=`<thead><tr><th class="sticky">VND million</th>${W.map(x=>{const lv=alertLevel(x.bal,buf,rmin);return `<th data-w="${x.w}" data-lv="${lv}" class="lv-${lv}${gw(x.w)}" title="Week-end level: ${LV[lv].label}"><span><i class="lv-sw lv-${lv}" aria-hidden="true"></i>W${x.w}</span><small>${fds(isoOf(x.start))}</small></th>`}).join('')}<th>Total</th></tr></thead>`;
   const sec=(dir,title)=>{
     const gs=groups.filter(g=>g.dir===dir),tot=W.map(x=>dir==='IN'?x.inn:x.out),sum=tot.reduce((a,v)=>a+v,0);
     let h=`<tr class="grp ${dir}"><th class="sticky"><button type="button" class="tg" data-tg="${dir}" aria-expanded="true">▾ ${title}</button></th>${tot.map((v,i)=>cell(v,'',i+1)).join('')}${cell(sum)}</tr>`;
@@ -1721,10 +1869,10 @@ function flowTableHTML(c,M,ep){
     return h};
   const net=W.map(x=>x.inn-x.out);
   const lvCell=(v,lv,w,extra='',tip='')=>`<td class="num lvc lv-${lv}${gw(w)}" data-w="${w}" data-lv="${lv}" title="${tip||LV[lv].label}">${v<0?'−':''}${nf(Math.abs(v)/1e6,1)}${extra}</td>`;
-  const body=`<tbody>${sec('IN','Cash in')}${sec('OUT','Cash out')}
+  const body=`<tbody><tr class="grp open"><th class="sticky">Opening cash</th>${W.map(x=>`<td class="num${gw(x.w)}" data-w="${x.w}">${x.open<0?'−':''}${nf(Math.abs(x.open)/1e6,1)}</td>`).join('')}<td></td></tr>${sec('IN','Cash in')}${sec('OUT','Cash out')}
    <tr class="grp net"><th class="sticky">Net cash flow</th>${net.map((v,i)=>`<td class="num ${v<0?'neg':'pos'}${gw(i+1)}" data-w="${i+1}">${v<0?'−':''}${nf(Math.abs(v)/1e6,1)}</td>`).join('')}<td class="num">${nf(net.reduce((a,v)=>a+v,0)/1e6,1)}</td></tr>
-   <tr class="grp end"><th class="sticky">Week-end balance</th>${W.map(x=>{const lv=alertLevel(x.bal,buf);return lvCell(x.bal,lv,x.w,'',`Week-end · ${LV[lv].label}`)}).join('')}<td></td></tr>
-   <tr class="grp lowwk"><th class="sticky">Lowest in week <small>worst day</small></th>${W.map(x=>{const lv=alertLevel(x.min,buf);return lvCell(x.min,lv,x.w,`<small>${fds(x.minDay)}</small>`,`${fd(x.minDay)} · ${LV[lv].label}`)}).join('')}<td></td></tr></tbody>`;
+   <tr class="grp end"><th class="sticky">Week-end balance</th>${W.map(x=>{const lv=alertLevel(x.bal,buf,rmin);return lvCell(x.bal,lv,x.w,'',`Week-end · ${LV[lv].label}`)}).join('')}<td></td></tr>
+   ${daily?'':'<!--weekly_only-->'}<tr class="grp lowwk"${daily?'':' hidden'}><th class="sticky">Lowest in week <small>worst day</small></th>${W.map(x=>{const lv=alertLevel(x.min,buf,rmin);return lvCell(x.min,lv,x.w,`<small>${fds(x.minDay)}</small>`,`${fd(x.minDay)} · ${LV[lv].label}`)}).join('')}<td></td></tr></tbody>`;
   return `<div class="ftw"><table class="ft">${head}${body}</table></div>`;
 }
 function exportFlowCSV(c,M){
@@ -1732,9 +1880,9 @@ function exportFlowCSV(c,M){
   const add=(n,arr)=>rows.push([n,...arr.map(v=>Math.round(v)),Math.round(arr.reduce((a,v)=>a+v,0))]);
   add('Cash in',M.W.map(x=>x.inn));M.groups.filter(g=>g.dir==='IN').forEach(g=>add('  '+lblCat(g.cat),g.wk));
   add('Cash out',M.W.map(x=>x.out));M.groups.filter(g=>g.dir==='OUT').forEach(g=>add('  '+lblCat(g.cat),g.wk));
-  rows.push(['Week-end balance',...M.W.map(x=>Math.round(x.bal)),'']);
+  rows.unshift(['Opening cash',...M.W.map(x=>Math.round(x.open)),'']);rows.push(['Week-end balance',...M.W.map(x=>Math.round(x.bal)),'']);
   rows.push(['Lowest in week (worst day)',...M.W.map(x=>Math.round(x.min)),'']);
-  dlFile(`${S.firm}_cash_flow_13_weeks.csv`,csvOf(hdr,rows));
+  dlFile(`${S.firm}_${S.case}_cash_flow_${M.W.length}_weeks.csv`,csvOf(hdr,rows));
 }
 /* ===== SRS v1.3 · W axis (UC01), cash state TH (UC02) and the M1–M9 matrix =====
    A deterministic engine on the selected company's snapshot, always using the Base case.
@@ -1757,25 +1905,17 @@ function openingCash(c){
 // W axis and bottleneck pattern BN0–BN7 from the UC01 engine (sections 2.7.6–2.7.11). It never reads forecast balances:
 // the two axes are independent. Short aliases (w, bn, main, mar, share) keep the card code readable.
 function classifyW(){const d=uc01();return Object.assign({},d,{w:d.wc_class,bn:d.bn_pattern,main:d.main_bottleneck,mar:d.money_at_risk,share:d.materiality_share||0,model:d.model.model,modelDeclared:d.model.declared})}
-// Cash state TH (section 2.8.12), required Cash0 (Table 2-86) and SafeCash for the surplus branch (section 2.9.5.7).
+// Cash state TH (section 2.8.12) from the UC02 run on Base, with Cash0 needed (Table 2-86) and SafeCash for the surplus branch.
 function computeTH(c){
-  const Rt=c.buffer;if(!(Rt>0)||!c.days||!c.days.length)return {th:'unknown'};
-  const Rmin=Rt*LIQ.rminRatio,Rup=Rt*LIQ.rupperRatio,op=openingCash(c),D=c.days,lvls=[];
-  let minC=Infinity,minD=null,firstBelow=null,firstNeg=null,minCum=0,run=0,best={len:0,end:-1};
-  D.forEach(([d,v],i)=>{
-    if(v<minC){minC=v;minD=d}
-    if(v<Rt&&!firstBelow)firstBelow=d;
-    if(v<0&&!firstNeg)firstNeg=d;
-    minCum=Math.min(minCum,v-op);
-    lvls.push(alertLevel(v,Rt,Rmin));
-    run=v>Rup?run+1:0;if(run>best.len)best={len:run,end:i}});
-  const th=firstBelow?'TH01':best.len>=LIQ.th03Days?'TH03':'TH02';
-  const level=worstLevel(lvls); // overall level = highest daily level in the Base case
-  const out={th,Rt,Rmin,Rup,op,minC,minD,firstBelow,firstNeg,peakGap:Math.max(0,Rt-minC),need:Math.max(0,Rt-Math.min(0,minCum)),run:best.len,level,shown:th==='TH03'?'blue':level};
-  if(th==='TH03'){const i0=best.end-best.len+1,scen=[c,DATA.cases[c.firm+'|stress_7']].filter(Boolean),gap=x=>x.days.slice(i0,best.end+1).map(([,v])=>v-Rt);
+  const u=uc02();if(!u)return {th:'unknown'};const R=u.reserves,b=u.summary.base,T=u.th;
+  const out={th:T.th,Rt:R.rtarget,Rmin:R.rmin,Rup:R.rupper,op:u.cash0.value,minC:b.min,minD:b.min_date,firstBelow:b.first_below_rtarget,firstNeg:b.first_negative,
+    peakGap:b.peak_buffer,need:b.need_rtarget,needZero:b.need_zero,run:T.run||0,level:u.overall==='unknown'?'na':u.overall,reference:!!T.reference,status:u.status,src:R.src};
+  out.shown=T.th==='TH03'?'blue':out.level;
+  if(T.th==='TH03'){const base=DATA.cases[S.firm+'|base'],i0=base.days.findIndex(d=>d[0]===T.window[0]),i1=base.days.findIndex(d=>d[0]===T.window[1]);
+    const scen=[base,DATA.cases[S.firm+'|stress_7']].filter(Boolean),gap=x=>x.days.slice(i0,i1+1).map(([,v])=>v-R.rtarget);
     out.safe=Math.max(0,Math.min(...scen.flatMap(gap)));   // SafeCash under the most adverse scenario (SRS 2.9.5.7)
-    out.safeBase=Math.max(0,Math.min(...gap(c)));          // reference: Base case only
-    out.window=[D[i0][0],D[best.end][0]];out.scenN=scen.length}
+    out.safeBase=Math.max(0,Math.min(...gap(base)));        // reference: Base case only
+    out.window=T.window;out.scenN=scen.length}
   return out;
 }
 function wNoteHTML(){

@@ -515,6 +515,114 @@ const ENGINE=(()=>{
       pool:{n:D.receipts.pool.n,stats:D.receipts.pool.stats},avg_term:avgTerm,pool_delay:poolDelay,new_sales_weekly:weekly,cash0};
   }
 
+  /* ---------- UC02 · Cash0, reserve levels and the run summary (sections 2.8.3, 2.8.10–2.8.12) ---------- */
+  // Cash0 = cash_total − cash_restricted when the owner entered it (confirmed); otherwise the cash of the data as a substitute
+  // (provisional); otherwise missing (T2-01).
+  function resolveCash0(snap,policy={}){
+    const c=policy.cash0;
+    if(c&&c.total!=null)return {value:c.total-(c.restricted||0),total:c.total,restricted:c.restricted||0,status:'confirmed'};
+    if(snap.fin.opening_cash!=null)return {value:snap.fin.opening_cash,total:snap.fin.opening_cash,restricted:0,status:'provisional'};
+    return {value:null,status:'missing'};
+  }
+  // Rmin / Rtarget / Rupper by source priority (BR-02.20): owner_policy > company profile target > verified_reference (cash-buffer
+  // percentiles × model factor × 12-month revenue) > demo_assumption (Rmin = 50 %, Rupper = 200 % of an existing Rtarget).
+  // SRS-DECISION: min_cash_buffer_vnd of the company profile is the owner's declared Rtarget (source firm_profile); its Rmin/Rupper
+  // come from the demo assumption. With only N < 365 days of revenue, 12-month revenue = revenue × 365 ÷ N and the reference is provisional.
+  function resolveReserves(snap,policy={},model){
+    const pr=policy.reserve||{},R=CFG.liq,annual=snap.fin.revenue>0?snap.fin.revenue*365/snap.N:null,ref=annual?R.reference[model]:null;
+    const out={rmin:null,rtarget:null,rupper:null,src:{},annual,annualised:snap.N<365,reference:ref?{rmin:ref.rmin*annual,rtarget:ref.rtarget*annual,rupper:ref.rupper*annual}:null};
+    if(pr.rtarget!=null){out.rtarget=pr.rtarget;out.src.rtarget='owner_policy'}
+    else if(snap.firm.rtarget!=null&&snap.firm.rtarget!==''){out.rtarget=snap.firm.rtarget;out.src.rtarget='firm_profile'}
+    else if(out.reference){out.rtarget=out.reference.rtarget;out.src.rtarget='verified_reference'}
+    if(pr.rmin!=null){out.rmin=pr.rmin;out.src.rmin='owner_policy'}
+    if(pr.rupper!=null){out.rupper=pr.rupper;out.src.rupper='owner_policy'}
+    if(out.src.rtarget==='verified_reference'){if(out.rmin==null){out.rmin=out.reference.rmin;out.src.rmin='verified_reference'}if(out.rupper==null){out.rupper=out.reference.rupper;out.src.rupper='verified_reference'}}
+    if(out.rtarget!=null){if(out.rmin==null){out.rmin=R.rminDefaultRatio*out.rtarget;out.src.rmin='demo_assumption'}if(out.rupper==null){out.rupper=R.rupperDefaultRatio*out.rtarget;out.src.rupper='demo_assumption'}}
+    // Validation (EC-2, Q15/Q16): Rtarget > 0 and 0 ≤ Rmin ≤ Rtarget < Rupper; otherwise no colour is assigned.
+    if(out.rtarget==null)out.status='missing_data';
+    else if(!(out.rtarget>0))out.status=out.rtarget===0?'missing_data':'invalid_data';
+    else if(!(out.rmin>=0&&out.rmin<=out.rtarget&&out.rtarget<out.rupper))out.status='invalid_data';
+    else out.status=Object.values(out.src).some(s=>s==='demo_assumption'||(s==='verified_reference'&&out.annualised))||out.src.rtarget==='firm_profile'?'provisional':'ok';
+    return out;
+  }
+  const LVN={green:0,yellow:1,orange:2,red:3};
+  // Daily alert level of SRS 2.8.11.3 on unrounded values (the same rule as alertLevel in the app).
+  function level(v,R){if(!(R.rtarget>0))return 'na';const gr=Math.max(0,R.rtarget-v)/R.rtarget;if(v<0||v<R.rmin||gr>.5)return 'red';if(gr>.2)return 'orange';if(gr>0)return 'yellow';return 'green'}
+  const worst=ls=>ls.reduce((a,l)=>(LVN[l]??-1)>(LVN[a]??-1)?l:a,'green');
+  // Summary of one scenario over the first H weeks (T2-10 … T2-15, T2-23).
+  function scenarioSummary(o,R,H){
+    const ds=o.days.slice(0,7*H),valid=R.status!=='invalid_data'&&R.rtarget>0;
+    let low=ds[0],cum=0,minCum=0,firstB=null,firstZ=null,pb=0,pbD=null,pz=0,pzD=null;
+    ds.forEach(x=>{if(x.close<low.close)low=x;cum+=x.in-x.out;if(cum<minCum)minCum=cum;
+      if(valid&&x.close<R.rtarget&&!firstB)firstB=x.d;if(x.close<0&&!firstZ)firstZ=x.d;
+      const gb=valid?Math.max(0,R.rtarget-x.close):0,gz=Math.max(0,-x.close);if(gb>pb){pb=gb;pbD=x.d}if(gz>pz){pz=gz;pzD=x.d}});
+    const levels=valid?ds.map(x=>level(x.close,R)):ds.map(()=>'na');
+    return {min:low.close,min_date:low.d,first_below_rtarget:firstB,first_negative:firstZ,peak_buffer:pb,peak_buffer_date:pbD,peak_zero:pz,peak_zero_date:pzD,
+      need_rtarget:valid?Math.max(0,R.rtarget-Math.min(0,minCum)):null,need_zero:Math.max(0,-minCum),min_cum:minCum,closing:ds[ds.length-1].close,
+      levels,overall:valid?worst(levels):'na',totals:{in:sum(ds,x=>x.in),out:sum(ds,x=>x.out)}};
+  }
+  function weeklyRollup(o,R,H){
+    const out=[];for(let w=0;w<H;w++){const ch=o.days.slice(7*w,7*w+7),low=ch.reduce((a,x)=>x.close<a.close?x:a,ch[0]);
+      out.push({w:w+1,start:ch[0].d,end:ch[ch.length-1].d,open:ch[0].open,in:sum(ch,x=>x.in),out:sum(ch,x=>x.out),close:ch[ch.length-1].close,min:low.close,min_date:low.d,
+        level_close:level(ch[ch.length-1].close,R),level_worst:worst(ch.map(x=>level(x.close,R)))})}
+    return out;
+  }
+  // Two-week blocks (T2-25, Table 2-88): status by the lowest day of the block, never by its closing balance.
+  function blocks(o,R,H){
+    const ds=o.days.slice(0,7*H),n=CFG.tv2.blockDays,out=[];
+    for(let i=0;i<ds.length;i+=n){const ch=ds.slice(i,i+n),low=ch.reduce((a,x)=>x.close<a.close?x:a,ch[0]);
+      const st=low.close<R.rtarget?'shortage':low.close>R.rupper?'surplus':'balanced';
+      out.push({k:out.length+1,start:ch[0].d,end:ch[ch.length-1].d,days:ch.length,min:low.close,min_date:low.d,status:st,severity:st==='shortage'?level(low.close,R):null,
+        gap:st==='shortage'?R.rtarget-low.close:0,excess:st==='surplus'?low.close-R.rupper:0})}
+    const order=out.slice().sort((a,b)=>{const g=x=>x.status==='shortage'?0:x.status==='surplus'?1:2;return g(a)-g(b)||
+      (a.status==='shortage'?(LVN[b.severity]-LVN[a.severity])||(b.gap-a.gap):a.status==='surplus'?(b.excess-a.excess):0)||a.k-b.k});
+    // "Persistent shortfall": ≥ tv2.persistent_shortfall.min_blocks consecutive shortage blocks; it never raises the daily colours.
+    let best=null,run=[];out.forEach(b=>{if(b.status==='shortage'){run.push(b);if(run.length>=CFG.tv2.persistentShortfallMinBlocks&&(!best||run.length>best.length))best=run.slice()}else run=[]});
+    const persistent=best?{from:best[0].start,to:best[best.length-1].end,blocks:best.length,need_date:ds.find(x=>x.d>=best[0].start&&x.close<R.rtarget).d,peak_gap:Math.max(...best.map(b=>b.gap))}:null;
+    return {list:out,display:order,persistent};
+  }
+  // Shortfall episodes on Base (2.8.11.4): consecutive days below Rtarget; colour = the worst daily level inside the episode.
+  function shortfallEpisodes(o,R,H){
+    const ds=o.days.slice(0,7*H),eps=[];let cur=null;
+    ds.forEach((x,i)=>{if(x.close<R.rtarget){if(!cur){cur={start:x.d,i0:i,low:x,levels:[]};eps.push(cur)}cur.end=x.d;cur.i1=i;cur.levels.push(level(x.close,R));if(x.close<cur.low.close)cur.low=x}else cur=null});
+    return eps.map((e,j)=>({k:j+1,start:e.start,end:e.end,days:e.i1-e.i0+1,low_date:e.low.d,low:e.low.close,peak_gap:R.rtarget-e.low.close,color:worst(e.levels),
+      recovery:e.i1+1<ds.length?ds[e.i1+1].d:null,censored:e.i1===ds.length-1}));
+  }
+  // Cash state TH on Base (Table 2-89): shortage before surplus; TH03 needs ≥ 14 consecutive days above Rupper; run-off surplus is a reference.
+  function cashState(base,R,status,H,mode='run_off'){
+    if(['missing_data','invalid_data','rejected'].includes(status)||!(R.rtarget>0))return {th:'unknown'};
+    const ds=base.days.slice(0,7*H);
+    if(ds.some(x=>x.close<R.rtarget))return {th:'TH01'};
+    let run=0,best={len:0,end:-1};ds.forEach((x,i)=>{run=x.close>R.rupper?run+1:0;if(run>best.len)best={len:run,end:i}});
+    if(best.len>=CFG.tv2.th03MinConsecutiveDays)return {th:'TH03',reference:mode==='run_off',window:[ds[best.end-best.len+1].d,ds[best.end].d],run:best.len};
+    return {th:'TH02',run:best.len};
+  }
+  const MATRIX_CELLS={W0:{TH01:'M1',TH02:'M2',TH03:'M3'},W1:{TH01:'M4',TH02:'M5',TH03:'M6'},W2:{TH01:'M7',TH02:'M8',TH03:'M9'}};
+  // Full UC02 run on one snapshot and configuration (UC02.1). The matrix cell needs W and TH from the same snapshot (BR-02.22).
+  function runUC02(snap,policy={},opts={}){
+    const H=Math.min(CFG.tv2.horizonWeeks,Math.max(1,opts.weeks|0||CFG.tv2.horizonWeeks)),model=opts.model||(snap.firm.business_model||CFG.wc.defaultModel);
+    const cash0=resolveCash0(snap,policy),R=resolveReserves(snap,policy,model);
+    const fc=forecast(snap,{cash0:cash0.value,config:{amount_basis:policy.amount_basis||snap.config.amount_basis,vat_rate:policy.vat_rate??snap.config.vat_rate},
+      essentialSuppliers:policy.essential_suppliers||snap.firm.essential_suppliers,apTiming:policy.ap_timing});
+    const sev=s=>fc.issues.filter(i=>i.severity===s).map(i=>i.code);
+    const invalid=[...sev('invalid'),...(R.status==='invalid_data'?['INVALID_RESERVES']:[])],missing=[...sev('missing'),...(R.status==='missing_data'?['MISSING_RTARGET']:[]),...(cash0.status==='missing'?['MISSING_CASH0']:[])];
+    const prov=[...sev('provisional'),...(cash0.status==='provisional'?['CASH0_PROVISIONAL']:[]),...(R.status==='provisional'?['RESERVES_PROVISIONAL']:[]),...(opts.freshness==='stale'?['DATA_STALE']:[]),
+      ...(opts.freshness==='expired'?['DATA_EXPIRED']:[]),...(snap.source.type==='sample'?['DEMO_DATA']:[])];
+    const status=invalid.length?'invalid_data':missing.length?'missing_data':prov.length?'provisional':'ok';
+    const summary={},weekly={};SCENARIOS.forEach(sc=>{summary[sc]=scenarioSummary(fc.scenarios[sc],R,H)});
+    const base=fc.scenarios.base,th=cashState(base,R,status,H),W=opts.uc01;
+    const same=W&&W.snapshot_id===snap.snapshot_id,cell=same&&W.wc_class!=='unknown'&&th.th!=='unknown'?MATRIX_CELLS[W.wc_class][th.th]:null;
+    const key=[snap.snapshot_id,CFG.versions.formula,opts.config_version||'CFG-default',H].join('|');
+    return {run_id:'RUN-UC02-'+hash(key),key,snapshot_id:snap.snapshot_id,as_of:snap.as_of,weeks:H,start:fc.start,end:diso(dnum(snap.as_of)+7*H),mode:'run_off',status,
+      status_codes:{invalid,missing,provisional:prov},cash0,reserves:R,fc,summary,weekly:weeklyRollup(base,R,H),blocks:blocks(base,R,H),episodes:shortfallEpisodes(base,R,H),
+      th,matrix:{cell,routed:!!cell,reason:!W?'no_uc01':!same?'different_snapshot':W.wc_class==='unknown'?'w_unknown':th.th==='unknown'?'th_unknown':null},
+      overall:status==='invalid_data'||status==='missing_data'?'unknown':summary.base.overall,config_version:opts.config_version||'CFG-default',weekly_only:fc.weekly_only};
+  }
+  // Weekly roll-up of any scenario (the forecast table follows the selected scenario).
+  const weeklyOf=(o,R,H)=>weeklyRollup(o,R,H);
+  // Cash0 needed by the formula T2-23 from a cumulative net-flow series (Q38).
+  const cashNeeded=(minCum,rt)=>({rtarget:Math.max(0,rt-Math.min(0,minCum)),zero:Math.max(0,-minCum)});
+
   /* ---------- Legacy case shape used by the chat flow, simulate() and rankFor() ---------- */
   function legacyCase(snap,scenario,{rtarget,cash0,ev,days}){
     const A=dnum(snap.as_of),lots=snap.lots||[];
@@ -540,5 +648,5 @@ const ENGINE=(()=>{
     return out;
   }
   return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
-    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,legacyCase,buildCases};
+    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,legacyCase,buildCases};
 })();

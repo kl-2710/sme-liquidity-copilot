@@ -409,6 +409,48 @@ await step("E · two runs on the same data give identical results", async () => 
   assert.equal(r, true);
 });
 
+// UC02 reserve levels, summary, blocks, TH and the matrix (phase F).
+await step("F · Q15/Q16 invalid or missing Rtarget gives no colours; Q58 industry reference levels", async () => {
+  const r = await ev(() => { const run = (pol, firm) => { const input = TMK({ firm: firm || {} }), s = ENGINE.makeSnapshot(input, { periodStart: "2026-07-03" }); return ENGINE.runUC02(s, pol || {}, {}); };
+    const zero = run({ reserve: { rtarget: 0 } }), bad = run({ reserve: { rmin: 600e6, rtarget: 500e6, rupper: 1e9 } }), neg = run({ reserve: { rtarget: -5 } });
+    const q58 = ENGINE.resolveReserves(ENGINE.makeSnapshot(TMK({ firm: { rtarget: null }, fin: [{ period_start: "2025-10-01", period_end: "2026-09-30", revenue: 120e9, cogs: 90e9, opening_cash: 5e9 }] })), {}, "FOB");
+    return { zero: [zero.reserves.status, zero.status, zero.overall, zero.th.th], bad: [bad.reserves.status, bad.status, bad.overall], neg: neg.reserves.status,
+      q58: [q58.src.rtarget, (q58.rtarget / 1e9).toFixed(1), (q58.rmin / 1e9).toFixed(1), (q58.rupper / 1e9).toFixed(1), q58.status] }; });
+  assert.deepEqual(r.zero, ["missing_data", "missing_data", "unknown", "unknown"]);
+  assert.deepEqual(r.bad, ["invalid_data", "invalid_data", "unknown"]);
+  assert.equal(r.neg, "invalid_data");
+  assert.deepEqual(r.q58, ["verified_reference", "12.3", "6.4", "22.9", "ok"]);
+});
+await step("F · Q12–Q14 colour boundaries, the 363 M gap case, Q17/Q18 peaks not summed, Q38 Cash0 needed", async () => {
+  const r = await ev(() => { const R = { rmin: 250e6, rtarget: 500e6, rupper: 1e9 };
+    const lv = [400e6, 350e6, 250e6, 249e6, 363e6].map((v) => ENGINE.level(v, R));
+    const days = (vals) => ({ days: vals.map((v, i) => ({ d: ENGINE.diso(ENGINE.dnum("2026-10-01") + i), open: 0, in: 0, out: 0, close: v })) });
+    const two = days([...Array(7).fill(400), ...Array(7).fill(400), ...Array(77).fill(600)].map((v) => v * 1e6));
+    const eps = ENGINE.shortfallEpisodes(two, R, 13), s = ENGINE.scenarioSummary(two, R, 13), open = ENGINE.shortfallEpisodes(days([...Array(85).fill(600e6), ...Array(6).fill(300e6)]), R, 13);
+    return { lv, eps: eps.map((e) => [e.start, e.days, Math.round(e.peak_gap / 1e6), e.low_date]), peak: [Math.round(s.peak_buffer / 1e6), s.peak_buffer_date], open: open[0].censored, need: ENGINE.cashNeeded(-116, 200) }; });
+  assert.deepEqual(r.lv, ["yellow", "orange", "orange", "red", "orange"]);
+  assert.deepEqual(r.eps, [["2026-10-01", 14, 100, "2026-10-01"]]);
+  assert.deepEqual(r.peak, [100, "2026-10-01"]); assert.equal(r.open, true);
+  assert.deepEqual(r.need, { rtarget: 316, zero: 116 });
+});
+await step("F · Q41–Q45 two-week blocks: 7 blocks, lowest day decides, boundaries are balanced, display order", async () => {
+  const r = await ev(() => { const R = { rmin: 250e6, rtarget: 500e6, rupper: 1e9 }, v = Array(91).fill(700e6);
+    v[20] = 300e6; for (let i = 28; i < 42; i++) v[i] = 1.2e9; v[45] = 500e6; v[60] = 1e9; v[86] = 450e6;
+    const b = ENGINE.blocks({ days: v.map((x, i) => ({ d: ENGINE.diso(ENGINE.dnum("2026-10-01") + i), close: x })) }, R, 13);
+    return { n: b.list.length, last: b.list[6].days, st: b.list.map((x) => x.status + (x.severity ? "/" + x.severity : "")), order: b.display.map((x) => x.k), persist: b.persistent }; });
+  assert.equal(r.n, 7); assert.equal(r.last, 7);
+  assert.deepEqual(r.st, ["balanced", "shortage/orange", "surplus", "balanced", "balanced", "balanced", "shortage/yellow"]);
+  assert.deepEqual(r.order, [2, 7, 3, 1, 4, 5, 6]); assert.equal(r.persist, null);
+});
+await step("F · Q52–Q55 cash state TH on Base and Q56 the matrix cell", async () => {
+  const r = await ev(() => { const R = { rmin: 250e6, rtarget: 500e6, rupper: 1e9 }, mk = (f) => ({ days: Array.from({ length: 91 }, (_, i) => ({ d: ENGINE.diso(ENGINE.dnum("2026-10-01") + i), close: f(i) })) });
+    return [ENGINE.cashState(mk((i) => i === 40 ? 500e6 - 1 : 700e6), R, "ok", 13).th, ENGINE.cashState(mk((i) => i >= 10 && i < 23 ? 1.1e9 : 700e6), R, "ok", 13).th,
+      ENGINE.cashState(mk((i) => i >= 10 && i < 24 ? 1.1e9 : 700e6), R, "ok", 13), ENGINE.cashState(mk((i) => i === 5 ? 400e6 : i >= 30 && i < 50 ? 1.2e9 : 700e6), R, "ok", 13).th,
+      uc02("F01").matrix.cell, uc02("F01").th.th]; });
+  assert.equal(r[0], "TH01"); assert.equal(r[1], "TH02"); assert.equal(r[2].th, "TH03"); assert.equal(r[2].reference, true); assert.equal(r[3], "TH01");
+  assert.equal(r[4], "M7"); assert.equal(r[5], "TH01");
+});
+
 for (const theme of ["light", "dark"]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
@@ -539,7 +581,8 @@ for (const theme of ["light", "dark"]) {
     assert.match(h2[3], /^Financing ranking/);
     const cards = page.locator("#pane-gap .ep");
     assert.equal(await cards.count(), 5);
-    for (const t of await cards.allInnerTexts()) assert.match(t, /Red alert/);
+    assert.deepEqual(await cards.evaluateAll((els) => els.map((e) => e.dataset.lv)), ["yellow", "orange", "red", "red", "red"]);
+    assert.match((await cards.allInnerTexts())[0], /Yellow alert/);
     assert.doesNotMatch(await page.locator("#pane-gap").innerText(), /Target gap|No TV3 result/);
     assert.equal(await page.locator("#pane-gap #gapChart .gapband").count(), 5);
     await page.click('#pane-gap .ep[data-ep="3"]'); await page.waitForTimeout(600);
@@ -731,6 +774,29 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#modal .ev-body tbody tr").count(), 50);
     assert.match(await page.locator("#modal .ev-body").innerText(), /Page 1 of 4/); assert.match(await page.locator("#modal .ev-body").innerText(), /Showing 200 of 260 records/);
     await page.keyboard.press("Escape");
+  });
+
+  await step("F · Shortfall header: run status, scenario and horizon selectors, Cash0 form with validation and a new configuration version", async () => {
+    await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(3); setTab("gap"); setWide(true); }); await page.waitForTimeout(700);
+    assert.match(await page.locator("#pane-gap .uc2-bar").innerText(), /Run status: provisional/);
+    assert.match(await page.locator("#pane-gap .c0b").innerText(), /Cash0 is provisional/);
+    await page.selectOption("#scSel", "conservative"); await page.waitForTimeout(500);
+    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /-1,01bn/);
+    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /TH01 – Cash shortfall/);    // TH stays on Base
+    await page.selectOption("#scSel", "base"); await page.waitForTimeout(300);
+    await page.selectOption("#wkSel", "4"); await page.waitForTimeout(500);
+    assert.equal(await page.locator("#pane-gap .dsec h2").first().innerText(), "4-week cash forecast");
+    assert.equal(await page.locator("#pane-gap .ft thead th[data-w]").count(), 4);
+    await page.selectOption("#wkSel", "13"); await page.waitForTimeout(400);
+    const v0 = await page.evaluate(() => POLICY.get("F01").version || 0);
+    await page.click("#cash0Btn"); await page.waitForTimeout(300);
+    await page.fill("#c0Total", "2000000000"); await page.fill("#c0Rmin", "600000000"); await page.fill("#c0Rt", "500000000"); await page.fill("#c0Rup", "1000000000");
+    await page.click("#c0Save"); assert.match(await page.locator("#c0Err").innerText(), /Rmin must be between 0 and Rtarget/);
+    await page.fill("#c0Rmin", "250000000"); await page.click("#c0Save"); assert.match(await page.locator("#c0Err").innerText(), /10 to 500 characters/);
+    await page.fill("#c0Reason", "Bank balances confirmed on 30/09/2026"); await page.click("#c0Save"); await page.waitForTimeout(600);
+    const r = await page.evaluate(() => { const u = uc02(); return [u.cash0.status, Math.round(u.cash0.value / 1e6), u.config_version, Math.round(u.summary.base.need_rtarget / 1e6), Math.round(u.summary.base.min / 1e6), u.reserves.src.rtarget]; });
+    assert.deepEqual(r, ["confirmed", 2000, `CFG-F01-v${v0 + 1}`, 2319, 181, "owner_policy"]);    // Cash0 needed does not depend on Cash0
+    assert.equal(await page.locator("#pane-gap .c0b").count(), 0);
   });
   await step("D · no JavaScript errors on the dashboard", async () => assert.deepEqual(errors, []));
   await page.close();

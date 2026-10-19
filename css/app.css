@@ -994,3 +994,35 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .pol-prev{font-size:12.5px;padding:8px 10px;border-radius:8px;background:var(--lc-color-bg-subtle)}
 @media (max-width:900px){.wgrid,.icards{grid-template-columns:1fr}}
 @media (max-width:600px){.wc-dl div{grid-template-columns:1fr}.pol-form{grid-template-columns:1fr}.uc-ctl{flex-direction:column;align-items:flex-start}.dtables .table-wrap{overflow-x:auto}}
+
+/* ===== UC02 Shortfall tab (information bar, overview, scenario table, blocks, gap levels, Cash0 form) ===== */
+.uc2-bar select{font:inherit;padding:4px 6px;border:1px solid var(--lc-color-border-control);border-radius:8px;background:var(--lc-color-bg-input);color:var(--lc-color-text-primary)}
+.runst{font-weight:800;padding:2px 8px;border-radius:20px;background:var(--lc-color-status-neutral-bg)}
+.runst.st-ok{background:var(--lc-color-status-success-bg);color:var(--lc-color-status-success)}.runst.st-provisional{background:var(--lc-color-status-warning-bg);color:var(--lc-color-status-warning)}
+.runst.st-missing_data,.runst.st-invalid_data,.runst.st-rejected{background:var(--lc-color-status-error-bg);color:var(--lc-color-status-error)}
+.uc-note.warn{color:var(--lc-color-status-warning);font-weight:700}
+.c0b{margin:0 0 12px}
+.uc2-tiles{grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:6px}
+.uc2-tiles .lv-pill{font-size:13px}
+.uc2-res{font-size:12px;color:var(--lc-color-text-secondary);margin:4px 0 0}
+.sub-h{margin:16px 0 8px;font-size:13px}
+.sc-cmp tr.on td{background:var(--lc-color-bg-selected)}
+.sc-cmp .lv-tag{--lvc:var(--lc-color-status-neutral)}
+.legend .band-sw{display:inline-block;width:18px;height:10px;border-radius:3px;background:color-mix(in srgb,var(--lc-color-data-cash) 14%,transparent);border:1px dashed var(--lc-color-data-historical)}
+.legend .ds.rmin{border-top-color:var(--lc-color-status-error)!important;border-top-style:dotted!important}.legend .ds.rup{border-top-color:var(--lc-color-status-info)!important;border-top-style:dotted!important}
+.blks{margin-top:14px;padding:12px 14px}
+.blk-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.blk{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 10px;border:1px solid var(--lc-color-border-default);border-radius:10px;font-size:12px}
+.blk-k{font-weight:800;color:var(--lc-color-text-muted)}.blk.b-shortage{border-left:3px solid var(--lc-color-alert-orange-mark)}.blk.b-surplus{border-left:3px solid var(--lc-color-status-info)}
+.blk .lv-tag{--lvc:var(--lc-color-status-neutral)}
+.stuck{font-size:12px;color:var(--lc-color-text-secondary);margin:10px 0 0}
+.ep.gap-lv{border-color:color-mix(in srgb,var(--epc,var(--lc-color-status-error)) 55%,transparent);background:color-mix(in srgb,var(--epc,var(--lc-color-status-error)) 7%,var(--lc-color-bg-surface))}
+.ep.gap-lv.lv-red{--epc:var(--lc-color-status-error)}.ep.gap-lv.lv-orange{--epc:var(--lc-color-alert-orange)}.ep.gap-lv.lv-yellow{--epc:var(--lc-color-alert-yellow)}
+.ep.gap-lv .lv-tag{--lvc:var(--epc)}
+.dt-daily{max-height:340px;overflow:auto;margin-top:8px}
+.c0f fieldset{border:1px solid var(--lc-color-border-default);border-radius:10px;padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px 14px}
+.c0f fieldset label{flex-direction:row;align-items:center;gap:6px;font-weight:500}
+.c0f input:not([type]),.c0f input[inputmode]{font:inherit;padding:5px 7px;border:1px solid var(--lc-color-border-control);border-radius:8px;background:var(--lc-color-bg-input);color:var(--lc-color-text-primary)}
+.c0-ref{font-size:12px;color:var(--lc-color-text-secondary)}
+@media (max-width:900px){.uc2-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:600px){.uc2-tiles{grid-template-columns:1fr}}
