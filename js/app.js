@@ -89,9 +89,24 @@ const RUNS=new Map();
 function uc01(firm=S.firm){
   const snap=DATA.snaps[firm];if(!snap)return null;
   const p=POLICY.get(firm),vid=POLICY.versionId(firm),key='uc01|'+[snap.snapshot_id,CFG.versions.formula,vid].join('|');
-  if(!RUNS.has(key))RUNS.set(key,ENGINE.diagnose(snap,{business_model:p.business_model||null,materiality:p.materiality??null,version_id:vid,prevLabels:p.labels||{}}));
+  if(!RUNS.has(key)){
+    const prev=LABELS.previous(firm,snap.snapshot_id),d=ENGINE.diagnose(snap,{business_model:p.business_model||null,materiality:p.materiality??null,version_id:vid,prevLabels:prev});
+    // Programme lists of the supply-chain products (RF, DD) and the highest catalogue rate feed the UC03 flags of the profiles.
+    const wl=CAT.filter(c=>['reverse_factoring','dynamic_discounting'].includes(c.type)).flatMap(c=>c.wl?c.wl.split('|'):[]);
+    d.profiles=ENGINE.profiles(snap,d,{maxRate:Math.max(...CAT.map(c=>c.rate))/100,whitelist:wl,prevLabels:prev,allowExtension:p.allowExtension||{}});
+    LABELS.record(firm,snap.snapshot_id,d.profiles.customers);RUNS.set(key,d)}
   return RUNS.get(key);
 }
+// Label history per company: labels are recomputed for each new snapshot and every change is logged (section 2.7.10.1);
+// the size and behaviour bands of Tables 2-38/2-39 compare against the labels of the previous snapshot.
+const LABELS={
+  key:f=>`lilact.labels.v1.${(S.user&&S.user.id)||'anon'}.${f}`,
+  get(f){try{return JSON.parse(localStorage.getItem(this.key(f))||'null')||{snaps:{},order:[],history:[]}}catch(e){return {snaps:{},order:[],history:[]}}},
+  previous(f,sid){const L=this.get(f),prev=L.order.filter(x=>x!==sid).at(-1);return prev?L.snaps[prev]:{}},
+  record(f,sid,custs){const L=this.get(f);if(L.snaps[sid])return;const prev=L.order.length?L.snaps[L.order.at(-1)]:null,now={};
+    custs.forEach(c=>{now[c.key]={size:c.size,behaviour:c.behaviour};if(prev&&prev[c.key])['size','behaviour'].forEach(k=>{if(prev[c.key][k]!==now[c.key][k])L.history.push({at:new Date().toISOString(),snapshot:sid,customer:c.name,field:k,from:prev[c.key][k],to:now[c.key][k]})})});
+    L.snaps[sid]=now;L.order.push(sid);L.order=L.order.slice(-12);L.history=L.history.slice(-200);try{localStorage.setItem(this.key(f),JSON.stringify(L))}catch(e){}}
+};
 let EPS=[],EP=null,BASE=null;
 function derive(){
   const c=C();EPS=episodes(c);

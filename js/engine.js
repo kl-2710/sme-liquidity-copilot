@@ -294,6 +294,106 @@ const ENGINE=(()=>{
     return result;
   }
 
+  /* ---------- UC01 · counterparty and lot profiles (section 2.7.10) ---------- */
+  // Declared labels (strategic, essential, sole, allows extension, pledged, cancelled) default to "unknown" and are never read as "no";
+  // no label changes W, bn_pattern, TH or the matrix cell (BR-02.31). Each label carries a status: ok / provisional / missing_data.
+  const TIER_ACTION={5:'negotiate_schedule',1:'tighten_if_late_else_new_orders',2:'tighten_if_late_else_monitor',4:'negotiate_commitment_or_finance',3:'polite_reminder'};
+  const TIER_TEMPLATE={5:'REM+FIN',1:'TIGHTEN',2:'TIGHTEN',4:'REM+FIN',3:'REM'};
+  function behaviourLabel(lpw,nPaid,rel,prev){
+    if(rel==='new'||nPaid<CFG.cl.behaviourMinPaid)return {label:'insufficient',status:'provisional'};
+    const {lateFrequentDays:L,bandLateDays:B}=CFG.cl;
+    const late=prev==='frequent_late'?lpw>L-B:prev?lpw>L+B:lpw>L;
+    return {label:late?'frequent_late':'on_time',status:nPaid>=CFG.cl.lateConclusionMinPaid?'ok':'provisional'};
+  }
+  function supplierCategory(name){
+    const n=normName(name);
+    if(/logistic|customs|thong quan/.test(n))return {cat:'logistics_customs',extendable:false};
+    if(/electric|power|water|utility|dien|nuoc/.test(n))return {cat:'utilities',extendable:false};
+    if(/transport|freight|van tai/.test(n))return {cat:'transport',extendable:true};
+    if(/trim|thread|button|zipper|label|packag|carton|phu lieu|bao bi|ink|consumable|muc in|chi|nut|khoa/.test(n))return {cat:'trims_packaging',extendable:true};
+    if(/fabric|yarn|paper roll|mill|vai|giay cuon|soi/.test(n))return {cat:'main_material',extendable:false};
+    return {cat:'unknown',extendable:null};
+  }
+  function companySize(annual){
+    if(annual==null)return {tier:null,status:'missing_data'};
+    const z=CFG.size,tier=annual<=z.micro?'micro':annual<=z.small?'small':annual<=z.medium?'medium':'beyond_sme';
+    const cap=tier==='micro'?z.micro:tier==='small'?z.small:tier==='medium'?z.medium:null;
+    // Without total capital and headcount the tier is provisional by revenue only (Table 2-46, A48).
+    return {tier,annual,status:'provisional',near_cap:cap!=null&&annual>=CFG.bn.nearThresholdRatio*cap,cap};
+  }
+  function profiles(snap,d,opts={}){
+    const A=dnum(snap.as_of),win=A-CFG.ar.lookbackDays,maxRate=opts.maxRate||0,wl=opts.whitelist||[];
+    const wlNames=new Set(wl.map(normName)),strategic=new Set((snap.firm.strategic_customers||[]).map(normName));
+    const customers=(d.customers||[]).map(c=>{
+      const open=c.rows.filter(r=>r.open),b={current:0,d1_30:0,d31_60:0,d61_90:0,d90p:0,no_due:0};
+      open.forEach(r=>{if(!r.due)b.no_due+=r.open_amount;else if(dnum(r.due)>=A)b.current+=r.open_amount;else{const x=r.dpd;b[x<=30?'d1_30':x<=60?'d31_60':x<=90?'d61_90':'d90p']+=r.open_amount}});
+      const paid=c.rows.filter(r=>r.fully_paid&&r.due&&r.paid&&dnum(r.paid)>win&&dnum(r.paid)<=A),w=sum(paid,r=>r.amount);
+      const lpw=w?sum(paid,r=>r.amount*Math.max(0,dnum(r.paid)-dnum(r.due)))/w:null;
+      const withIssue=paid.filter(r=>r.issue),wi=sum(withIssue,r=>r.amount),cdw=wi?sum(withIssue,r=>r.amount*(dnum(r.paid)-dnum(r.issue)))/wi:null;
+      const beh=behaviourLabel(lpw??0,paid.length,c.relationship,((opts.prevLabels||{})[c.key]||{}).behaviour);
+      const debt=c.max_overdue>CFG.cl.overdueLongDays?'overdue_long':c.overdue>0?'overdue':'none';
+      const strat=strategic.has(normName(c.name))?'yes':c.strategic;
+      const tier=customerTier(c.relationship,c.size,strat),notes=[];
+      if(tier===4&&strat==='unknown')notes.push('strategic_not_confirmed');if(c.new_large)notes.push('new_large');if(c.key_weak)notes.push('counterparty_key_weak');
+      const late=c.overdue>0||(lpw??0)>0;
+      const action=tier===1?(late?'tighten_now':'strict_terms_new_orders'):tier===2?(late?'tighten_now':'monitor'):TIER_ACTION[tier];
+      const inWl=wlNames.has(normName(c.name)),whitelist=inWl?(c.key_weak?'name_match_unverified':'in_program'):'BUYER_NOT_IN_PROGRAM';
+      return {...c,rows:undefined,invoice_ids:c.rows.map(r=>r.id),buckets:b,late_pos_wavg:lpw,paid_count:paid.length,late_rate:paid.length?paid.filter(r=>dnum(r.paid)>dnum(r.due)).length/paid.length:null,
+        collect_days_wavg:cdw,behaviour:beh.label,behaviour_status:beh.status,debt_status:debt,disputed:'missing_data',strategic:strat,tier,action,template:TIER_TEMPLATE[tier],notes,whitelist,
+        label_status:{relationship:'ok',size:'ok',behaviour:beh.status,strategic:strat==='unknown'?'provisional':'ok',key:c.key_weak?'provisional':'ok'}};
+    });
+    const exposureOrder=customers.slice().sort((a,b)=>b.ar-a.ar).map(c=>c.key);
+    const interventionOrder=customers.slice().sort((a,b)=>a.tier-b.tier||b.overdue-a.overdue).map(c=>c.key);
+    // Suppliers (section 2.7.10.4).
+    const pur=snap.purchases||[],purTot=sum(pur.filter(p=>p.in_period),p=>p.amount),groups=new Map();
+    pur.forEach(p=>{if(!groups.has(p.key))groups.set(p.key,[]);groups.get(p.key).push(p)});
+    const suppliers=[...groups.entries()].map(([key,rows])=>{
+      const name=rows[0].supplier,inPer=rows.filter(r=>r.in_period),purchases=sum(inPer,r=>r.amount),dep=purTot>0?purchases/purTot:0;
+      const open=rows.filter(r=>r.open),g={overdue:0,due0_7:0,due8_30:0,later:0,no_due:0};
+      open.forEach(r=>{if(!r.due){g.no_due+=r.open_amount;return}const t=dnum(r.due);g[t<A?'overdue':t<=A+7?'due0_7':t<=A+30?'due8_30':'later']+=r.open_amount});
+      const terms=rows.filter(r=>r.due&&r.issue).map(r=>dnum(r.due)-dnum(r.issue)),avgTerm=terms.length?sum(terms)/terms.length:null;
+      const disc=rows.find(r=>r.disc_pct>0&&r.disc_days>0&&r.due&&r.issue);
+      let rDisc=null;if(disc){const dd=disc.disc_pct,T=dnum(disc.due)-dnum(disc.issue),k=disc.disc_days;if(T>k)rDisc=dd/(1-dd)*365/(T-k)}
+      const first=Math.min(...rows.map(r=>r.issue?dnum(r.issue):A)),months=new Set(inPer.filter(r=>r.issue).map(r=>r.issue.slice(0,7))).size;
+      const rel=relationLabel(A-first,inPer.length,months),essential=rows[0].essential||'unknown',cat=supplierCategory(name);
+      const allowsExt=(opts.allowExtension||{})[key]||'unknown',sole='unknown';
+      let conclusion;
+      if(essential==='yes'||sole==='yes')conclusion='pay_on_time';
+      else if(allowsExt==='no')conclusion='no_basis';
+      else if(cat.extendable)conclusion=rel==='new'?'cautious':'negotiate';
+      else conclusion='undecided';
+      const pending=conclusion==='negotiate'&&essential==='unknown';
+      return {key,name,key_weak:rows[0].key_weak,purchases,dependency:dep,dependency_high:dep>=CFG.cl.supplierDependency,ap:sum(open,r=>r.open_amount),groups:g,
+        overdue:g.overdue,max_overdue:Math.max(0,...open.filter(r=>r.dpd>0).map(r=>r.dpd)),pressure30:g.overdue+g.due0_7+g.due8_30,avg_term:avgTerm,
+        short_term:avgTerm!=null&&avgTerm<CFG.cl.supplierShortTermDays,discount:disc?{pct:disc.disc_pct,days:disc.disc_days,term:dnum(disc.due)-dnum(disc.issue),r_disc:rDisc,attractive:rDisc!=null&&rDisc>maxRate}:null,
+        relationship:rel,essential,sole,allows_extension:allowsExt,category:cat.cat,category_src:'inferred',conclusion,pending_confirmation:pending,ext_days:conclusion==='negotiate'?CFG.cl.extDays:null,
+        invoice_ids:rows.map(r=>r.id),label_status:{essential:essential==='unknown'?'provisional':'ok',category:'provisional',key:rows[0].key_weak?'provisional':'ok'}};
+    });
+    const pressure={essential:0,extendable:0,undecided:0};
+    suppliers.forEach(s=>{pressure[s.essential==='yes'?'essential':(s.conclusion==='negotiate'||s.conclusion==='cautious')?'extendable':'undecided']+=s.pressure30});
+    // Lots (section 2.7.10.5, Tables 2-44 and 2-45).
+    const pos=snap.firm.position||null;
+    const lots=(snap.lots||[]).map(l=>{
+      const thr=l.owner==='customer'?null:(CFG.inv.slowDays[l.type]||CFG.inv.unknownTypeSlowDays),slow=thr!=null&&l.days!=null&&l.days>thr;
+      const status=l.owner==='customer'?'excluded':(l.cancelled==='yes'||l.cancel_proposed)?'cancelled':l.pledged==='yes'?'pledged':slow?'slow':'normal';
+      const stuck=l.owner!=='customer'&&(slow||l.cancelled==='yes')?l.value_own:0;
+      const collateralOk=l.owner!=='customer'&&l.cancelled!=='yes'&&l.pledged!=='yes'&&CFG.inv.collateralTypes.includes(l.type);
+      const checks=[];
+      if(pos==='trading'&&l.type==='NVL')checks.push('trader_should_be_HH');
+      if(l.owner==='customer'&&pos&&pos!=='cmt')checks.push('hgc_at_non_subcontractor');
+      if(l.type==='BTP'&&slow)checks.push('line_bottleneck');if(l.type==='TP'&&slow)checks.push('late_delivery_or_slow_pickup');
+      return {name:l.name,type:l.type,type_src:l.type_src,suggested_type:pos==='trading'&&l.type==='NVL'?'HH':null,owner:l.owner,qty:l.qty,unit_cost:l.unit_cost,value:l.value,value_own:l.value_own,days:l.days,
+        threshold:thr,days_over:slow?l.days-thr:0,status,cancel_status:l.cancelled==='yes'?'confirmed':l.cancel_proposed?'proposed':'unknown',pledged:l.pledged,stuck,
+        collateral:collateralOk?l.value_own:0,collateral_pending:collateralOk&&(l.pledged==='unknown'||l.cancel_proposed),checks,hgc_proposed:l.hgc_proposed,
+        label_status:{type:l.type_src==='declared'?'ok':l.type_src==='inferred'?'provisional':'missing_data',owner:l.owner==='unknown'?'provisional':'ok',pledged:l.pledged==='unknown'?'provisional':'ok',cancelled:l.cancelled==='unknown'?'provisional':'ok'}};
+    });
+    const own=lots.filter(l=>l.owner!=='customer'),oldest=own.filter(l=>l.days!=null).sort((a,b)=>b.days-a.days)[0]||null;
+    const largestSlow=own.filter(l=>l.status==='slow'||l.stuck>0).sort((a,b)=>b.value_own-a.value_own)[0]||null;
+    const collateral=sum(lots,l=>l.collateral);
+    return {customers,exposureOrder,interventionOrder,suppliers,pressure,lots,oldest_lot:oldest&&oldest.name,largest_slow_lot:largestSlow&&largestSlow.name,
+      stuck_inventory:sum(lots,l=>l.stuck),collateral,collateral_eligible:collateral>=CFG.collateralMin,size:companySize(d.metrics.annual_revenue)};
+  }
+
   /* ---------- Interim cash schedule (replaced by the SRS v1.3 delay model in phase E) ---------- */
   function lateWavg(rows){const w=sum(rows,r=>r.amount);return w?sum(rows,r=>r.amount*Math.max(0,dnum(r.paid)-dnum(r.due)))/w:null}
   function schedule(snap,scenario){
@@ -336,5 +436,5 @@ const ENGINE=(()=>{
     return out;
   }
   return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
-    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,schedule,ledger,legacyCase,buildCases};
+    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,schedule,ledger,legacyCase,buildCases};
 })();

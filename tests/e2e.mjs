@@ -37,7 +37,8 @@ const SAMPLE_CSV = {
 
 {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  const authReady = async () => { await page.waitForSelector("#authRoot:not([hidden])"); await page.waitForTimeout(300); };
+  // The sign-in screen is ready once the three demo accounts are stored (their passwords are hashed asynchronously on first load).
+  const authReady = async () => { await page.waitForSelector("#authRoot:not([hidden])"); await page.waitForFunction(() => JSON.parse(localStorage.getItem("smefc.users.v1") || "[]").length >= 3); await page.waitForTimeout(300); };
   await page.goto(URL0); await page.evaluate(() => localStorage.clear()); await page.reload(); await authReady();
   await step("sign-up requires company, valid tax code and a complex password", async () => {
     await page.click("#tabReg");
@@ -272,6 +273,51 @@ await step("B · T47 F01 cash cycle and T48/T49 cause breakdowns", async () => {
   assert.equal(t49.total, 2310267000); assert.equal(t49.main_cause_detail.source, 5); assert.equal((t49.main_cause_detail.share * 100).toFixed(1), "62.8");
   const bad = await ev(() => ENGINE.decompose({ E_AR: 100, E_INV: 0, arFlagged: [{ amount: 300, tier: 4 }], slowLots: [] }));   // T56
   assert.equal(bad.ok, false);
+});
+
+await step("C · T39–T42 customer profiles of F01 (K1 large, tier 4; K3 small, tier 2)", async () => {
+  const r = await ev(() => { const p = uc01("F01").profiles, k = (n) => p.customers.find((c) => c.name.endsWith(n));
+    const K1 = k("K1"), K3 = k("K3");
+    return { k1: [K1.revenue, (K1.revenue_share * 100).toFixed(1), K1.size, K1.ar, (K1.ar_share * 100).toFixed(1), p.exposureOrder[0] === K1.key, K1.late_pos_wavg.toFixed(1), K1.max_overdue, K1.overdue,
+        K1.behaviour, K1.debt_status, K1.tier, K1.notes.includes("strategic_not_confirmed"), K1.whitelist],
+      k3: [K3.revenue, (K3.revenue_share * 100).toFixed(1), K3.size, K3.late_pos_wavg.toFixed(1), K3.behaviour, K3.overdue, K3.debt_status, K3.tier, K3.action, K3.whitelist] }; });
+  assert.deepEqual(r.k1, [11820351000, "65.3", "large", 3888513000, "79.2", true, "20.5", 11, 817756000, "frequent_late", "overdue", 4, true, "name_match_unverified"]);
+  assert.deepEqual(r.k3, [1813146000, "10.0", "small", "9.5", "on_time", 53809000, "overdue", 2, "tighten_now", "BUYER_NOT_IN_PROGRAM"]);
+});
+await step("C · T43 supplier Beta, T44 khaki stock at a trader, T45 cancelled-order trims, T46 customer fabric", async () => {
+  const r = await ev(() => { const s = uc01("F01").profiles.suppliers.find((x) => x.name.startsWith("Beta")), p2 = uc01("F02").profiles, p1 = uc01("F01").profiles;
+    const kaki = p2.lots.find((l) => l.name.startsWith("Khaki")), trims = p1.lots.find((l) => l.name.startsWith("Trims for cancelled")), hgc = p1.lots.find((l) => l.name.startsWith("Fabric supplied"));
+    return { beta: [s.purchases, (s.dependency * 100).toFixed(1), s.dependency_high, (s.discount.r_disc * 100).toFixed(1), s.essential, s.conclusion],
+      kaki: [kaki.value, kaki.days, kaki.suggested_type, kaki.status, kaki.stuck, kaki.checks.includes("trader_should_be_HH")],
+      trims: [trims.cancel_status, trims.status, trims.stuck, trims.collateral, trims.collateral_pending], hgc: [hgc.status, hgc.value_own, hgc.stuck, hgc.collateral, uc01("F01").metrics.INV] }; });
+  assert.deepEqual(r.beta, [4627174000, "53.5", true, "37.2", "yes", "pay_on_time"]);
+  assert.deepEqual(r.kaki, [1450000000, 155, "HH", "slow", 1450000000, true]);
+  assert.deepEqual(r.trims, ["proposed", "cancelled", 430000000, 430000000, true]);   // before confirmation: still slow-moving stuck stock, collateral pending
+  assert.deepEqual(r.hgc, ["excluded", 0, 0, 0, 3450000000]);
+  // After the owner confirms the cancelled order the lot leaves the collateral (T45).
+  const c = await ev(() => { const raw = JSON.parse(JSON.stringify(DATA.raw.F01)); raw.inventory.find((l) => l[0].startsWith("Trims for cancelled"))[6] = "yes";
+    const s = ENGINE.makeSnapshot(ENGINE.inputFromRaw(raw, new Date().toISOString())), d = ENGINE.diagnose(s), p = ENGINE.profiles(s, d); const l = p.lots.find((x) => x.name.startsWith("Trims for cancelled")); return [l.stuck, l.collateral]; });
+  assert.deepEqual(c, [430000000, 0]);
+});
+await step("C · T50 company size, T51 size band, T52 new customer, T53 strategic flag, T54/T55 tax codes", async () => {
+  const size = await ev(() => uc01("F02").profiles.size);
+  assert.equal(size.tier, "small"); assert.equal((size.annual / 1e9).toFixed(2), "47.93"); assert.equal(size.status, "provisional"); assert.equal(size.near_cap, true);
+  const band = await ev(() => { let prev = "medium"; return [0.305, 0.325, 0.29, 0.275].map((s) => (prev = ENGINE.sizeLabel(s, prev))); });
+  assert.deepEqual(band, ["medium", "large", "large", "medium"]);
+  const t52 = await ev(() => { const input = TMK({ sales: [{ id: "N1", customer: "New Co", amount: 100e6, issue: "2026-09-01", due: "2026-10-15", paid: null },
+    { id: "O1", customer: "Old Co", amount: 900e6, issue: "2026-08-01", due: "2026-10-30", paid: null }] });
+    const s = ENGINE.makeSnapshot(input, { periodStart: "2026-07-03" }), d = ENGINE.diagnose(s), c = ENGINE.profiles(s, d).customers.find((x) => x.name === "New Co"); return [c.relationship, c.tier, c.action]; });
+  assert.deepEqual(t52, ["new", 1, "strict_terms_new_orders"]);
+  const t53 = await ev(() => { const mk = (strat) => { const input = TMK({ firm: { strategic_customers: strat }, sales: Array.from({ length: 12 }, (_, i) => ({ id: "A" + i, customer: "Anchor", amount: 40e6, issue: ENGINE.diso(ENGINE.dnum("2026-04-05") + i * 14), due: "2026-10-20", paid: null }))
+      .concat(Array.from({ length: 12 }, (_, i) => ({ id: "B" + i, customer: "Other", amount: 60e6, issue: ENGINE.diso(ENGINE.dnum("2026-04-06") + i * 14), due: "2026-10-20", paid: null }))) });
+    const s = ENGINE.makeSnapshot(input), d = ENGINE.diagnose(s), c = ENGINE.profiles(s, d).customers.find((x) => x.name === "Anchor"); return [Math.round(c.revenue_share * 100), c.tier, c.notes.includes("strategic_not_confirmed")]; };
+    return [mk([]), mk(["Anchor"])]; });
+  assert.deepEqual(t53, [[40, 4, true], [40, 5, false]]);
+  const tax = await ev(() => { const input = TMK({ sales: [{ id: "X1", customer: "Kappa JSC", tax_code: "0101234567", amount: 100e6, issue: "2026-09-01", due: "2026-10-01", paid: null },
+    { id: "X2", customer: "KAPPA Joint Stock Co.", tax_code: "0101234567", amount: 50e6, issue: "2026-09-02", due: "2026-10-02", paid: null },
+    { id: "X3", customer: "No Tax Ltd", amount: 70e6, issue: "2026-09-03", due: "2026-10-03", paid: null }] });
+    const s = ENGINE.makeSnapshot(input), d = ENGINE.diagnose(s), cs = ENGINE.profiles(s, d, { whitelist: ["No Tax Ltd"] }).customers; return cs.map((c) => [c.key, c.ar, c.key_weak, c.whitelist]); });
+  assert.deepEqual(tax, [["TAX:0101234567", 150e6, false, "BUYER_NOT_IN_PROGRAM"], ["NAME:no tax ltd", 70e6, true, "name_match_unverified"]]);
 });
 
 for (const theme of ["light", "dark"]) {
