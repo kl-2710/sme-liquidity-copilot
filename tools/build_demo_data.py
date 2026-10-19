@@ -18,6 +18,7 @@ import csv
 import json
 import re
 import sys
+import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -28,40 +29,41 @@ DATA_JS = ROOT / "js" / "data.js"
 AS_OF = date(2026, 9, 30)
 PERIOD_DAYS = 183  # half-year analysis period: period start = as_of - 182
 
-# The demo UI is in English, so party and lot names are translated once here (same names as the earlier data.js).
+# The demo UI is in English, so party and lot names of the workbook are translated once here (same names as the earlier data.js).
+# Keys are the workbook names with accents removed (see tr()), so this file holds no Vietnamese text.
 NAMES = {
-    "Nhà xuất khẩu Lớn K1": "Large Exporter K1",
-    "Nhà xuất khẩu K2": "Exporter K2",
-    "Thương hiệu nội địa K3": "Domestic Brand K3",
-    "Nhà phân phối vải Beta (F02)": "Beta Fabric Distributor (F02)",
-    "Bao bì – phụ liệu Gamma (F03)": "Gamma Packaging & Trims (F03)",
-    "Chỉ – nút – khóa NCC4": "Thread, Button, Zipper SUP4",
-    "Vận tải nội địa NCC5": "Domestic Transport SUP5",
-    "Vải tự mua cho đơn FOB": "Fabric bought for FOB orders",
-    "Phụ liệu (chỉ, nút, khóa, nhãn)": "Trims (thread, buttons, zippers, labels)",
-    "Bán thành phẩm trên chuyền": "Work in progress on the line",
-    "Thành phẩm chờ xuất (đơn K2)": "Finished goods awaiting shipment (K2 order)",
-    "Phụ liệu đơn hàng bị hủy mùa Hè": "Trims for cancelled summer order",
-    "Vải của Nhà xuất khẩu K1 giao để gia công": "Fabric supplied by Large Exporter K1 for subcontracting",
-    "Xưởng may gia công Alpha (F01)": "Alpha Garment Subcontractor (F01)",
-    "Xưởng may KH2": "Garment Factory KH2",
-    "Xưởng may KH3": "Garment Factory KH3",
-    "Xưởng may KH4": "Garment Factory KH4",
-    "Xưởng may KH5": "Garment Factory KH5",
-    "Nhà máy vải nước ngoài S1": "Overseas fabric mill S1",
-    "Nhà máy vải nước ngoài S2": "Overseas fabric mill S2",
-    "Logistics – thông quan S3": "Logistics and customs S3",
-    "Vải cotton nhập khẩu": "Imported cotton fabric",
-    "Vải polyester nhập khẩu": "Imported polyester fabric",
-    "Vải kaki tồn từ mùa trước": "Khaki fabric left over from last season",
-    "Hàng đang trên đường về cảng": "Goods in transit to port",
-    "Giấy cuộn – NCC P1": "Paper rolls – SUP P1",
-    "Mực in – NCC P2": "Printing ink – SUP P2",
-    "Điện – NCC P3": "Electricity – SUP P3",
-    "Giấy cuộn": "Paper rolls",
-    "Mực in, keo": "Ink and glue",
-    "Thùng carton thành phẩm": "Finished-goods cartons",
-    "Thẻ bài in theo mẫu đã đổi thiết kế": "Cards printed on a redesigned template",
+    "Nha xuat khau Lon K1": "Large Exporter K1",
+    "Nha xuat khau K2": "Exporter K2",
+    "Thuong hieu noi dia K3": "Domestic Brand K3",
+    "Nha phan phoi vai Beta (F02)": "Beta Fabric Distributor (F02)",
+    "Bao bi – phu lieu Gamma (F03)": "Gamma Packaging & Trims (F03)",
+    "Chi – nut – khoa NCC4": "Thread, Button, Zipper SUP4",
+    "Van tai noi dia NCC5": "Domestic Transport SUP5",
+    "Vai tu mua cho don FOB": "Fabric bought for FOB orders",
+    "Phu lieu (chi, nut, khoa, nhan)": "Trims (thread, buttons, zippers, labels)",
+    "Ban thanh pham tren chuyen": "Work in progress on the line",
+    "Thanh pham cho xuat (don K2)": "Finished goods awaiting shipment (K2 order)",
+    "Phu lieu don hang bi huy mua He": "Trims for cancelled summer order",
+    "Vai cua Nha xuat khau K1 giao de gia cong": "Fabric supplied by Large Exporter K1 for subcontracting",
+    "Xuong may gia cong Alpha (F01)": "Alpha Garment Subcontractor (F01)",
+    "Xuong may KH2": "Garment Factory KH2",
+    "Xuong may KH3": "Garment Factory KH3",
+    "Xuong may KH4": "Garment Factory KH4",
+    "Xuong may KH5": "Garment Factory KH5",
+    "Nha may vai nuoc ngoai S1": "Overseas fabric mill S1",
+    "Nha may vai nuoc ngoai S2": "Overseas fabric mill S2",
+    "Logistics – thong quan S3": "Logistics and customs S3",
+    "Vai cotton nhap khau": "Imported cotton fabric",
+    "Vai polyester nhap khau": "Imported polyester fabric",
+    "Vai kaki ton tu mua truoc": "Khaki fabric left over from last season",
+    "Hang dang tren duong ve cang": "Goods in transit to port",
+    "Giay cuon – NCC P1": "Paper rolls – SUP P1",
+    "Muc in – NCC P2": "Printing ink – SUP P2",
+    "Dien – NCC P3": "Electricity – SUP P3",
+    "Giay cuon": "Paper rolls",
+    "Muc in, keo": "Ink and glue",
+    "Thung carton thanh pham": "Finished-goods cartons",
+    "The bai in theo mau da doi thiet ke": "Cards printed on a redesigned template",
 }
 
 # Company profile declarations for the sample companies (the workbook has no business_model column).
@@ -100,8 +102,14 @@ def sheet(wb, name):
     return [dict(zip(head, r)) for r in rows[hi + 1:] if r and any(v is not None for v in r)]
 
 
+def fold(s: str) -> str:
+    """Remove accents (and map d-stroke to d) so workbook names match the keys of NAMES."""
+    s = unicodedata.normalize("NFD", s).replace(chr(0x111), "d").replace(chr(0x110), "D")
+    return "".join(c for c in s if not unicodedata.combining(c))
+
+
 def tr(name: str) -> str:
-    return NAMES.get(str(name).strip(), str(name).strip())
+    return NAMES.get(fold(str(name).strip()), str(name).strip())
 
 
 def build(workbook: Path, plans_csv: Path) -> dict:

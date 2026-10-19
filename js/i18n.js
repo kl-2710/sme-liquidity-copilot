@@ -1,9 +1,9 @@
-/* Minimal i18n for the UC01/UC02 screens and chat answers (vi / en). t(key, vars) falls back to English, then to the key.
-   Placeholders use {name}. The language is a viewer preference (Settings › General › Language). */
-let LANG='en';
-const I18N={en:{},vi:{}};
+/* UI text of the UC01/UC02 screens and chat answers (English only). t(key, vars) returns the string or, if missing, the key.
+   Placeholders use {name}. */
+const LANG='en';
+const I18N={en:{}};
 function t(key,vars){
-  const s=(I18N[LANG]&&I18N[LANG][key])??I18N.en[key]??key;
+  const s=I18N.en[key]??key;
   return vars?String(s).replace(/\{(\w+)\}/g,(m,k)=>vars[k]!=null?vars[k]:m):s;
 }
 function addStrings(lang,obj){Object.assign(I18N[lang],obj)}
@@ -28,7 +28,7 @@ addStrings('en',{
   'w.s.inactive':'Revenue or COGS of the period is zero, so the business is treated as inactive; W is not classified.',
   'w.main':'Main bottleneck','w.none':'No bottleneck yet','w.pattern':'Pattern','w.model':'Thresholds',
   'w.model.unconfirmed':'default FOB thresholds – business model not confirmed','w.prov':'provisional',
-  'mar.t':'Capital above the normal level','mar.sub':'money_at_risk = E_AR + E_INV, double counting removed; not the money that caused a shortfall',
+  'mar.t':'Capital above the normal level','mar.sub':'money_at_risk = E_AR + E_INV, double counting removed; not the money behind a shortfall',
   'mar.share':'Materiality share','mar.share.sub':'Largest E_i ÷ current assets {ca}{assumed}; materiality level {mat}',
   'mar.assumed':' (cash + receivables + inventory, assumption)',
   'ob.t':'Overdue obligations','ob.sub':'Overdue supplier invoices with R-AP-OD (E_AP). An obligation to pay, reported separately and never added to money_at_risk.',
@@ -66,63 +66,6 @@ addStrings('en',{
   'exp.rules':'Rules','exp.run':'Run','exp.versions':'Versions','exp.raw':'Raw value (VND)',
   'foot.uc01':'Diagnosis at the cut-off date on period-end balances; it does not forecast when cash runs short (see the Shortfall tab). Thresholds: garment industry benchmark (FiinTrade 2016–2025, tv1.threshold.v2) unless a company policy applies; invoice and lot thresholds are demo assumptions.'
 });
-addStrings('vi',{
-  'src.line':'Nguồn dữ liệu {src} · snapshot {sid} · ngày chốt {asof} · kỳ {start}–{end} ({n} ngày)',
-  'src.loaded':'nạp lúc {at}','src.uploaded':'tải lên lúc {at}',
-  'fresh.fresh':'dữ liệu mới','fresh.stale':'dữ liệu cũ – quá {h} giờ','fresh.expired':'dữ liệu hết hạn – tạm tính; cần làm mới trước khi gửi yêu cầu sang UC03','fresh.unknown':'chưa rõ độ tươi',
-  'ctl.asof':'Ngày chốt','ctl.start':'Ngày đầu kỳ','ctl.expert':'Chế độ chuyên gia','ctl.policy':'Chính sách ngưỡng','ctl.reset':'Về ngày của snapshot',
-  'ctl.note':'Đổi ngày chốt chỉ tính lại chẩn đoán vốn lưu động; dự báo dòng tiền vẫn dùng ngày của snapshot, nên ô ma trận hiển thị “chưa định tuyến” cho đến khi hai bên cùng snapshot.',
-  'sec.w':'Chẩn đoán vốn lưu động','sec.w.sub':'Trục W, điểm nghẽn chính và vốn vượt mức bình thường',
-  'sec.items':'Phải thu, tồn kho, phải trả','sec.items.sub':'Số dư, số ngày và vị trí so với ngưỡng ngành',
-  'sec.tables':'Ai đang giữ tiền','sec.tables.sub':'Khách hàng, lô hàng, nhà cung cấp; chọn một dòng để xem bằng chứng',
-  'sec.ccc':'Vòng quay tiền','sec.ccc.sub':'DSO, DIO, DPO và phân bố khoản đến hạn theo thời gian',
-  'w.W0':'W0 – Chưa thấy dấu hiệu','w.W1':'W1 – Cần theo dõi','w.W2':'W2 – Điểm nghẽn trọng yếu','w.unknown':'Chưa đủ dữ liệu',
-  'w.s.W0':'Tại ngày chốt, chưa thấy khoản mục nào vượt ngưỡng theo dõi.',
-  'w.s.W1':'Có dấu hiệu cần theo dõi ở {items}, chưa đạt mức trọng yếu ({share} tài sản ngắn hạn).',
-  'w.s.W2sev':'{main} vượt ngưỡng nghiêm trọng (mức mà 90% doanh nghiệp may không vượt quá).',
-  'w.s.W2mat':'Điểm nghẽn trọng yếu ở {main}: vốn vượt mức bình thường bằng {share} tài sản ngắn hạn.',
-  'w.s.unknown':'Thiếu dữ liệu cốt lõi ({fields}); chưa xếp trục W và không gán ô ma trận.',
-  'w.s.inactive':'Doanh thu hoặc giá vốn trong kỳ bằng 0 nên coi là không hoạt động; chưa xếp trục W.',
-  'w.main':'Điểm nghẽn chính','w.none':'Chưa thấy điểm nghẽn','w.pattern':'Mẫu','w.model':'Bộ ngưỡng',
-  'w.model.unconfirmed':'ngưỡng mặc định FOB – chưa xác nhận mô hình','w.prov':'tạm tính',
-  'mar.t':'Vốn vượt mức bình thường','mar.sub':'money_at_risk = E_AR + E_INV, đã loại phần đếm trùng; không phải số tiền gây ra thiếu hụt',
-  'mar.share':'Tỷ lệ trọng yếu','mar.share.sub':'E_i lớn nhất ÷ tài sản ngắn hạn {ca}{assumed}; mức trọng yếu {mat}',
-  'mar.assumed':' (tiền + phải thu + tồn kho, giả định)',
-  'ob.t':'Nghĩa vụ quá hạn','ob.sub':'Hóa đơn mua quá hạn có R-AP-OD (E_AP). Là nghĩa vụ phải trả, báo riêng và không cộng vào money_at_risk.',
-  'bn0.t':'Chưa thấy khoản mục nào vượt ngưỡng','bn0.sub':'Khoảng cách tới ngưỡng theo dõi hiển thị trên từng thẻ khoản mục. Các bảng vẫn liệt kê đối tượng giữ nhiều tiền nhất nhưng không tô màu cảnh báo.',
-  'item.AR':'Phải thu','item.INV':'Tồn kho sở hữu','item.AP':'Phải trả',
-  'item.metric.AR':'DSO','item.metric.INV':'DIO','item.metric.AP':'DPO',
-  'item.cap.AR':'Số ngày doanh thu khách hàng còn nợ: DSO = Phải thu ÷ Doanh thu kỳ × {n}.',
-  'item.cap.INV':'Số ngày giá vốn nằm trong hàng tồn sở hữu: DIO = Tồn kho sở hữu ÷ Giá vốn kỳ × {n} (không tính hàng gia công của khách).',
-  'item.cap.AP':'Số ngày giá vốn doanh nghiệp còn nợ nhà cung cấp: DPO = Phải trả ÷ Giá vốn kỳ × {n}. DPO cao do trả trễ không phải là tốt.',
-  'st.normal':'Bình thường','st.watch':'Theo dõi','st.severe':'Nghiêm trọng','st.n/a':'Không áp dụng',
-  'mk.ref':'Tham chiếu P50','mk.watch':'Theo dõi P75','mk.severe':'Nghiêm trọng P90','mk.low':'Thấp P10','mk.high':'Cao P75 (thông tin)',
-  'item.headroom':'còn {d} ngày tới ngưỡng theo dõi','item.near':'sát ngưỡng ({p} ngưỡng)','item.above':'vượt ngưỡng theo dõi {d} ngày',
-  'item.E':'Vượt mức bình thường {v}','item.shape':'Hình dạng {s}','shape.H':'chỉ tín hiệu tổng hợp','shape.L':'chỉ cấp hóa đơn / lô','shape.HL':'cả tổng hợp và hóa đơn / lô',
-  'item.apinfo':'DPO cao hơn ngưỡng cao: kiểm tra quá hạn nhà cung cấp (chỉ ghi chú, R-AP-INFO).',
-  'item.cogsprov':'Giá vốn quy đổi về {n} ngày từ báo cáo {d} ngày (tạm tính).','item.missing':'Thiếu dữ liệu: {f}',
-  'thr.src':'Nguồn ngưỡng: {s} · {v}',
-  'tbl.customers':'Khách hàng','tbl.lots':'Lô hàng','tbl.suppliers':'Nhà cung cấp',
-  'tbl.order.exposure':'Thứ tự phơi nhiễm (phải thu)','tbl.order.intervention':'Thứ tự can thiệp (bậc)',
-  'col.customer':'Khách hàng','col.ar':'Phải thu','col.share':'Tỷ trọng','col.overdue':'Quá hạn','col.maxod':'Quá hạn lớn nhất','col.late':'Trễ TB',
-  'col.size':'Quy mô','col.rel':'Quan hệ','col.labels':'Quy mô · quan hệ · hành vi','col.beh':'Hành vi','col.debt':'Trạng thái nợ','col.tier':'Bậc',
-  'col.lot':'Lô hàng','col.type':'Loại','col.age':'Tuổi','col.value':'Giá trị','col.thr':'Ngưỡng tuổi','col.status':'Trạng thái','col.collateral':'Tài sản bảo đảm',
-  'col.supplier':'Nhà cung cấp','col.purch':'Giá trị mua (kỳ)','col.dep':'Phụ thuộc','col.ap':'Phải trả','col.press':'Phải chi 30 ngày','col.ess':'Thiết yếu','col.concl':'Giãn hạn',
-  'lbl.large':'Lớn','lbl.medium':'Vừa','lbl.small':'Nhỏ','lbl.new':'Mới','lbl.regular':'Thường xuyên','lbl.occasional':'Vãng lai',
-  'lbl.frequent_late':'Trả chậm thường xuyên','lbl.on_time':'Đúng hạn / ít trễ','lbl.insufficient':'Chưa đủ lịch sử',
-  'lbl.overdue_long':'Quá hạn kéo dài','lbl.overdue':'Có quá hạn','lbl.none':'Không quá hạn',
-  'lbl.excluded':'Loại trừ (hàng của khách)','lbl.cancelled':'Hàng đơn hủy','lbl.pledged':'Đã cầm cố','lbl.slow':'Tồn lâu','lbl.normal':'Bình thường',
-  'lbl.yes':'Có','lbl.no':'Không','lbl.unknown':'Chưa rõ','lbl.proposed':'đề xuất, chờ xác nhận',
-  'lbl.pay_on_time':'Trả đúng hạn','lbl.no_basis':'Không có cơ sở','lbl.cautious':'Thận trọng (mới)','lbl.negotiate':'Đàm phán 15–30 ngày','lbl.undecided':'Chưa kết luận',
-  'note.strategic_not_confirmed':'chưa xác nhận khách chiến lược','note.new_large':'mới và lớn','note.counterparty_key_weak':'thiếu mã số thuế',
-  'tbl.empty':'Không có bản ghi','tbl.pending':'chờ xác nhận',
-  'ev.title':'Bằng chứng · {name}','ev.filter':'Lọc','ev.all':'Tất cả','ev.open':'Còn mở','ev.overdue':'Quá hạn','ev.paid':'Đã thu / trả',
-  'ev.none':'Không có bản ghi thỏa điều kiện ({f}).','ev.more':'Đang hiển thị {n} / {total} bản ghi (mỗi trang {p}, tối đa {max}). Thu hẹp bộ lọc để xem phần còn lại.',
-  'ev.from':'Đọc từ lần chạy {run}; không tính lại.','ev.prev':'‹ Trước','ev.next':'Sau ›','ev.page':'Trang {p} / {n}',
-  'col.inv':'Hóa đơn','col.issue':'Ngày phát hành','col.due':'Đến hạn','col.paid':'Ngày thu / trả','col.amount':'Số tiền','col.open':'Còn mở','col.dpd':'Ngày quá hạn','col.rho':'ρ',
-  'exp.rules':'Quy tắc','exp.run':'Lần chạy','exp.versions':'Phiên bản','exp.raw':'Giá trị gốc (VND)',
-  'foot.uc01':'Chẩn đoán tại ngày chốt theo số dư cuối kỳ; không dự báo thời điểm thiếu tiền (xem tab Thiếu hụt). Ngưỡng: chuẩn ngành may (FiinTrade 2016–2025, tv1.threshold.v2) trừ khi có chính sách của doanh nghiệp; ngưỡng cấp hóa đơn và lô hàng là giả định trình diễn.'
-});
 addStrings('en',{
   'unit.days':'days','ccc.cap':'Cash conversion cycle: CCC = DSO + DIO − DPO, only when all three are valid.',
   'ctl.bad':'Choose a cut-off date on or before the snapshot date and a period start before it.',
@@ -131,15 +74,6 @@ addStrings('en',{
   'pol.undeclared':'Not declared (default FOB thresholds)','pol.reason':'Reason (10–500 characters)','pol.reason.ph':'e.g. Approved by the board on 15/10/2026',
   'pol.reason.err':'Enter a reason of 10 to 500 characters.','pol.preview':'Impact preview: {from} → <b>{to}</b> · capital above the normal level {mar} · materiality share {share}',
   'pol.cancel':'Cancel','pol.save':'Approve and save','pol.saved':'Saved as {v}; the diagnosis is recalculated.'
-});
-addStrings('vi',{
-  'unit.days':'ngày','ccc.cap':'Vòng quay tiền: CCC = DSO + DIO − DPO, chỉ tính khi cả ba thành phần hợp lệ.',
-  'ctl.bad':'Chọn ngày chốt không muộn hơn ngày của snapshot và ngày đầu kỳ trước ngày chốt.',
-  'pol.title':'Chính sách ngưỡng','pol.sub':'Ngưỡng ngành {v} theo mô hình kinh doanh; cấu hình hiện hành {cfg}. Thay đổi cần lý do, tạo phiên bản cấu hình mới và đánh dấu kết quả cũ là “đã cũ”. Không đổi ngưỡng qua Chat.',
-  'pol.metric':'Chỉ số','pol.source':'Nguồn','pol.buffer':'Đệm tiền mỏng (P25, % doanh thu)','pol.lot':'Ngưỡng tuổi lô NVL/HH / BTP/TP (ngày)',
-  'pol.undeclared':'Chưa khai báo (ngưỡng mặc định FOB)','pol.reason':'Lý do (10–500 ký tự)','pol.reason.ph':'Ví dụ: Hội đồng quản trị phê duyệt ngày 15/10/2026',
-  'pol.reason.err':'Nhập lý do từ 10 đến 500 ký tự.','pol.preview':'Xem trước tác động: {from} → <b>{to}</b> · vốn vượt mức bình thường {mar} · tỷ lệ trọng yếu {share}',
-  'pol.cancel':'Hủy','pol.save':'Phê duyệt và lưu','pol.saved':'Đã lưu thành {v}; chẩn đoán được tính lại.'
 });
 
 /* ---------- UC02 Shortfall tab ---------- */
@@ -184,47 +118,6 @@ addStrings('en',{
   'c0.e.rmin':'Rmin must be between 0 and Rtarget.','c0.e.rup':'Rupper must be greater than Rtarget.','c0.e.vat':'The VAT rate must be between 0 and 100 %.',
   'c0.save':'Confirm and save','c0.saved':'Saved as {v}; the forecast is recalculated and earlier results are stale.'
 });
-addStrings('vi',{
-  'lv.red':'Đỏ','lv.orange':'Cam','lv.yellow':'Vàng','lv.green':'Xanh lá','lv.blue':'Xanh dương','lv.na':'Không gán màu (thiếu Rtarget)',
-  'sc.base':'Cơ sở (Base)','sc.optimistic':'Lạc quan','sc.conservative':'Thận trọng','sc.stress_7':'Thu chậm 7 ngày (stress_7)','sc.continuing_sales':'Bán hàng tiếp diễn (tham chiếu)',
-  'gap.scope':'Dữ liệu: {s} hóa đơn bán còn mở · {p} hóa đơn mua còn mở · {pl} khoản kế hoạch','gap.asof':'ngày chốt {d}','gap.period':'dự báo {a}–{b} ({w} tuần)',
-  'gap.mode.runoff':'run-off (không có doanh thu mới)','gap.mode.cont':'bán hàng tiếp diễn – có doanh thu mới giả định (tham chiếu)','gap.scenario':'Kịch bản','gap.weeks':'Số tuần',
-  'gap.cont.note':'Chế độ tham chiếu – có doanh thu mới giả định: cộng doanh thu tuần của kỳ nhưng chưa có chi phí tương ứng; không đọc như dự báo đầy đủ.',
-  'gap.cont.short':'tham chiếu – có doanh thu mới giả định','gap.base.note':'Trạng thái TH, mức cảnh báo tổng thể và ô ma trận luôn tính theo kịch bản Base.',
-  'gap.weekly':'Nguồn chỉ có lịch theo tuần: kế hoạch có tuần nhưng không có ngày nên không công bố số liệu ngày (ẩn bảng ngày và ngày thấp nhất trong tuần).',
-  'gap.daily.show':'Mở bảng ngày','gap.daily.hide':'Ẩn bảng ngày',
-  'gap.foot':'Dự báo các hóa đơn còn mở và khoản kế hoạch từ ngày chốt (run-off); số phải thu, tồn kho của chẩn đoán (kỳ {n} ngày) không phải dòng tiền vào.',
-  'run.ok':'Trạng thái lần chạy: ok','run.provisional':'Trạng thái lần chạy: tạm tính','run.missing_data':'Trạng thái lần chạy: thiếu dữ liệu','run.invalid_data':'Trạng thái lần chạy: dữ liệu không hợp lệ','run.rejected':'Trạng thái lần chạy: bị từ chối',
-  'run.invalid.t':'Kết quả không hợp lệ – không phát hành.',
-  'code.SCENARIO_ORDER':'Lỗi thứ tự kịch bản (BR-02.16): phải có Lạc quan ≥ Base ≥ Thận trọng và stress_7 ≤ Base.','code.RECONCILIATION_FAILED':'Đối soát lệch quá 1 đồng.',
-  'code.INVALID_RESERVES':'Mức dự trữ phải thỏa 0 ≤ Rmin ≤ Rtarget < Rupper và Rtarget > 0 (INVALID_REQUEST).',
-  'c0.open':'Thiết lập Cash0 và ngưỡng dự trữ','c0.banner.t':'Cash0 đang tạm tính.','c0.banner':'Dự báo bắt đầu từ {v} là số tiền trong dữ liệu, chưa phải số dư đã xác nhận. Cash0 cần có để không xuống dưới Rtarget: {need}.',
-  'c0.st.confirmed':'đã xác nhận','c0.st.provisional':'tạm tính','c0.st.missing':'thiếu',
-  'ov.level':'Mức cảnh báo tổng thể (Base)','ov.level.sub':'Mức cao nhất trong các ngày của kỳ','ov.min':'Số dư thấp nhất','ov.min.sub':'{d} · {s}','ov.first':'Ngày đầu tiên dưới Rtarget',
-  'ov.first.sub':'Ngày đầu tiên dưới 0: {z}','ov.none':'không có','ov.need':'Cash0 cần có','ov.need.sub':'Để không dưới Rtarget · để không âm: {z} · Cash0 hiện có {c}',
-  'ov.peak':'Mức thiếu lớn nhất so với Rtarget','ov.peak.sub':'PeakBuffer ngày {d}; mức thiếu để không âm (PeakZero) {z} – hai thước đo, không cộng','ov.th':'Trạng thái tiền (Base)','ov.unknown':'Chưa xác định',
-  'ov.cell':'Ô {c} · {n}','ov.notrouted':'Chưa định tuyến',
-  'th.TH01':'TH01 – Thiếu tiền','th.TH02':'TH02 – Cân bằng','th.TH03':'TH03 – Dư tiền','th.ref':'Dư tiền (tham chiếu, run-off)',
-  'res.line':'Rmin {rmin} ({s1}) · Rtarget {rt} ({s2}) · Rupper {rup} ({s3}).','res.annual':'Doanh thu 12 tháng quy năm từ kỳ dữ liệu (tạm tính).',
-  'cmp.title':'Năm kịch bản của cùng lần chạy','cmp.mode':'Chế độ','cmp.min':'Số dư thấp nhất','cmp.date':'Ngày thấp nhất','cmp.level':'Mức cảnh báo','cmp.basis':'Cơ sở độ trễ',
-  'basis.base':'Độ trễ trung bình có trọng số theo số tiền; chi theo lịch sử nhà cung cấp','basis.optimistic':'Độ trễ P25 (thu sớm hơn); phải trả quá hạn rải muộn hơn',
-  'basis.conservative':'Độ trễ P75 (thu chậm hơn); trả nhà cung cấp đúng hạn','basis.stress_7':'Như Base, khoản thu ước tính chậm thêm 7 ngày','basis.continuing_sales':'Base cộng doanh thu mới hằng tuần (tham chiếu)',
-  'chart.band':'Dải Lạc quan – Thận trọng',
-  'blk.title':'Khối 2 tuần','blk.sub':'Trạng thái theo ngày thấp nhất trong khối (không theo số dư cuối khối); xếp Thiếu trước, rồi Dư, rồi Cân bằng.','blk.n':'Khối {k}',
-  'blk.shortage':'Thiếu','blk.surplus':'Dư','blk.balanced':'Cân bằng','blk.min':'thấp nhất {v} ngày {d}','blk.gap':'thiếu {v}','blk.ex':'trên Rupper {v}',
-  'blk.persist':'Thiếu kéo dài','blk.persist.sub':'{n} khối Thiếu liên tiếp ({a}–{b}); cần tiền từ {d}; mức thiếu lớn nhất của chuỗi {g}. Thẻ này không tự nâng màu các ngày.',
-  'ep.alert':'Cảnh báo {l}','ep.open':'chưa kết thúc','ep.days':'{n} ngày','ep.recovery':'phục hồi ngày {d}','ep.notended':'chưa kết thúc trong phạm vi dự báo',
-  'stuck.line':'Tiền kẹt (tham chiếu, không phải dòng tiền vào): phải thu quá hạn {ar} · tồn kho chậm luân chuyển hoặc gắn đơn hủy {inv}.',
-  'col.date':'Ngày','col.opening':'Đầu ngày','col.in':'Thu','col.out':'Chi','col.closing':'Cuối ngày',
-  'c0.title':'Cash0 và ngưỡng dự trữ','c0.sub':'Giá trị nhập tại đây tạo phiên bản cấu hình mới (owner_policy; hiện hành {v}); kết quả trước đó bị đánh dấu “đã cũ”. Không thay đổi qua Chat.',
-  'c0.total':'Tổng tiền tại ngày chốt (VND)','c0.restricted':'Tiền bị hạn chế (VND)','c0.method':'Phương pháp','c0.m.industry':'Chuẩn ngành','c0.m.critical_days':'Số ngày chi thiết yếu','c0.m.direct':'Nhập trực tiếp',
-  'c0.basis':'Cơ sở số tiền hóa đơn','c0.vat':'Thuế suất VAT (%)','c0.vat.ph':'để trống = chưa mô hình hóa','c0.ess':'Nhà cung cấp thiết yếu (luôn trả đúng hạn)','c0.reason.ph':'Ví dụ: theo hạn mức thấu chi hiện có',
-  'c0.ref':'Tham chiếu ngành ({m}): Rmin {a} · Rtarget {b} · Rupper {c}.','c0.days':'Chi thiết yếu bình quân theo Base: {d} mỗi ngày.',
-  'c0.w.p25':'Rtarget thấp hơn ngưỡng thiếu của ngành (P25). Vẫn cho phép lưu.','c0.w.days':'Rmin thấp hơn 15 ngày chi thiết yếu ({d}). Vẫn cho phép lưu.',
-  'c0.e.total':'Tổng tiền phải từ 0 trở lên.','c0.e.restr':'Tiền bị hạn chế phải từ 0 đến tổng tiền.','c0.e.rt':'Rtarget phải lớn hơn 0.',
-  'c0.e.rmin':'Rmin phải từ 0 đến Rtarget.','c0.e.rup':'Rupper phải lớn hơn Rtarget.','c0.e.vat':'Thuế suất VAT phải từ 0 đến 100%.',
-  'c0.save':'Xác nhận và lưu','c0.saved':'Đã lưu thành {v}; dự báo được tính lại, kết quả trước đó đã cũ.'
-});
 
 /* ---------- Contributing factors, UC01 links and gap_request ---------- */
 addStrings('en',{
@@ -234,7 +127,7 @@ addStrings('en',{
   'cf.delay.customer':'delay {d} days from this customer’s own history ({n} samples)','cf.delay.customer_cond':'overdue: conditional delay {d} days from this customer’s history',
   'cf.delay.pool':'delay {d} days from the company-wide history (fallback, {n} samples)','cf.delay.pool_cond':'overdue: conditional delay {d} days from the company-wide history (fallback)',
   'cf.delay.default':'default delay {d} days (fallback, not an observation)','cf.delay.residual':'overdue {dpd} days: {dpd} days + residual, total {d} days (fallback)',
-  'cf.note':'Contributing factors, not causes. Amounts are references: they are not added together and not added to the shortfall.','cf.fallback':'Some delays come from the company-wide history or the default, so no single receipt is called the main cause.',
+  'cf.note':'These are contributing factors only. Amounts are references: they are not added together and not added to the shortfall.','cf.fallback':'Some delays come from the company-wide history or the default, so no single receipt is singled out.',
   'link.L1.AR':'{obj} ({v}): this receipt contributes to the shortfall and the customer is above a UC01 threshold ({f}) · evidence {ev}.',
   'link.L1.AP':'{obj} ({v}): overdue payments fall into this shortfall and the supplier has a UC01 finding ({f}) · evidence {ev}.',
   'link.L2':'Money already spent on goods that have not turned over ({v} of purchases up to the low day; inventory finding {f}) · evidence {ev}.',
@@ -252,32 +145,6 @@ addStrings('en',{
   'gr.block.expired':'The data is older than 72 hours (expired); refresh the data before sending a request.','gr.block.not_th01':'The Base forecast has no day below Rtarget (not TH01), so there is no shortfall to finance.',
   'gr.block.not_routed':'No matrix cell is assigned yet (W and TH must come from the same snapshot).',
   'mh.insufficient_sample':'not enough reconciled invoices yet','mh.ok':'good','mh.watch':'watch – forecast drifting','mh.degraded':'degraded – do not rely on it alone'
-});
-addStrings('vi',{
-  'cf.title':'Yếu tố góp phần · đợt thiếu {k}','cf.sub':'Các khoản chi lớn nhất đến ngày thấp nhất và các khoản thu dự kiến sau ngày đó; finding UC01 gắn kèm để tham chiếu.',
-  'cf.intro':'Mỗi thẻ dưới đây liệt kê yếu tố góp phần của một đợt thiếu; đợt lớn nhất đang mở.','cf.focus':'Yếu tố góp phần của','cf.from':'Việc so khớp bắt đầu từ yếu tố góp phần ở bước trước{k}:',
-  'cf.out':'Khoản chi lớn nhất đến ngày thấp nhất','cf.after':'Khoản thu dự kiến sau ngày thấp nhất','cf.expected':'dự kiến {d}','cf.beyond':'sau phạm vi dự báo',
-  'cf.delay.customer':'độ trễ {d} ngày theo lịch sử của chính khách hàng ({n} mẫu)','cf.delay.customer_cond':'quá hạn: độ trễ có điều kiện {d} ngày theo lịch sử của khách hàng',
-  'cf.delay.pool':'độ trễ {d} ngày theo lịch sử toàn doanh nghiệp (cấp dự phòng, {n} mẫu)','cf.delay.pool_cond':'quá hạn: độ trễ có điều kiện {d} ngày theo lịch sử toàn doanh nghiệp (dự phòng)',
-  'cf.delay.default':'độ trễ mặc định {d} ngày (dự phòng, không phải số liệu quan sát)','cf.delay.residual':'quá hạn {dpd} ngày: {dpd} ngày + phần dư, tổng {d} ngày (dự phòng)',
-  'cf.note':'Đây là yếu tố góp phần, không phải nguyên nhân. Số tiền chỉ để tham chiếu: không cộng với nhau và không cộng vào mức thiếu.','cf.fallback':'Một số độ trễ lấy từ lịch sử toàn doanh nghiệp hoặc giá trị mặc định nên không gọi khoản nào là nguyên nhân chính.',
-  'link.L1.AR':'{obj} ({v}): khoản thu này góp phần vào đợt thiếu và khách hàng vượt ngưỡng ở UC01 ({f}) · mức bằng chứng {ev}.',
-  'link.L1.AP':'{obj} ({v}): khoản chi quá hạn rơi vào đợt thiếu và nhà cung cấp có finding ở UC01 ({f}) · mức bằng chứng {ev}.',
-  'link.L2':'Tiền đã chi cho hàng chưa quay vòng ({v} chi mua đến ngày thấp nhất; finding tồn kho {f}) · mức bằng chứng {ev}.',
-  'link.L3':'Chưa thấy khoản mục nào của UC01 gắn với đợt thiếu này; đợt thiếu do lịch thu chi.','link.squeeze':'Ép hai phía: một khoản thu chậm và một khoản chi quá hạn cùng rơi vào đợt thiếu.',
-  'ev.candidate':'ứng viên (candidate)','ev.supported':'có căn cứ (supported)','ev.not_applicable':'không áp dụng',
-  'gr.open':'Tìm giải pháp cho đợt thiếu','gr.idle':'Xem phương án sử dụng tiền nhàn rỗi (giai đoạn 2)','gr.title':'Yêu cầu tìm giải pháp (gap_request)',
-  'gr.sub':'Kiểm tra yêu cầu trước khi gửi sang bước tìm giải pháp (UC03). Yêu cầu được lưu bất biến cùng lần chạy và snapshot nguồn.',
-  'gr.send':'Xác nhận gửi','gr.sent':'Đã gửi yêu cầu {id} sang bước tìm giải pháp.','gr.peaknote':'Mức thiếu lớn nhất không phải số tiền phải huy động ngay ngày đầu.',
-  'gr.used':'Yêu cầu {id}: cần tiền từ {d}, mức thiếu lớn nhất {p}, ô ma trận {c}, liên kết {l} ({e}).',
-  'gr.need_date':'Cần tiền từ','gr.peak_gap':'Mức thiếu lớn nhất','gr.cash0_need':'Cash0 cần có','gr.episodes':'Các đợt thiếu','gr.matrix':'Ô ma trận','gr.bottleneck':'Điểm nghẽn chính (UC01)',
-  'gr.pattern':'Mẫu và khoản mục','gr.findings':'Finding UC01','gr.obligation':'Nghĩa vụ quá hạn','gr.link':'Liên kết và bằng chứng','gr.scenario':'Kịch bản','gr.cash0':'Trạng thái Cash0','gr.health':'Độ tin cậy dự báo',
-  'gr.ids':'Lần chạy và snapshot','gr.versions':'Phiên bản',
-  'gr.block.th03':'Dự báo Base là dư tiền (TH03); phương án sử dụng tiền nhàn rỗi thuộc giai đoạn 2 nên không tạo yêu cầu tài trợ.',
-  'gr.block.status':'Lần chạy dự báo thiếu hoặc sai dữ liệu nên chưa gửi được yêu cầu.','gr.block.w_unknown':'Chưa xếp được trục W (W unknown); cần bổ sung dữ liệu cho UC01 trước.',
-  'gr.block.expired':'Dữ liệu đã quá 72 giờ (hết hạn); cần làm mới dữ liệu trước khi gửi yêu cầu.','gr.block.not_th01':'Dự báo Base không có ngày nào dưới Rtarget (không phải TH01) nên không có đợt thiếu cần tài trợ.',
-  'gr.block.not_routed':'Chưa gán ô ma trận (W và TH phải cùng snapshot).',
-  'mh.insufficient_sample':'chưa đủ hóa đơn đối chiếu','mh.ok':'tốt','mh.watch':'cần theo dõi – dự báo đang lệch','mh.degraded':'kém tin cậy – không dùng làm căn cứ duy nhất'
 });
 
 /* ---------- Chat answers (UC01 five parts, UC02 four parts), routing replies, chips, feedback loop ---------- */
@@ -311,7 +178,7 @@ addStrings('en',{
   'na.uc02.p2.eps':'There are {n} shortfall episodes{last}.','na.uc02.p2.open':', the last one not yet ended within the horizon','na.uc02.p2.none':'No day falls below Rtarget.',
   'na.uc02.p2.week':'The tightest week is week {w} ({a}–{b}) with a lowest balance of {v}.','na.uc02.p2.band':'On the lowest day the scenario band runs from {c} (conservative) to {o} (optimistic).',
   'na.uc02.p3.out':'Largest outflow up to the lowest day: {c} {v} on {d}.','na.uc02.p3.in':'Receipt expected after it: {c} {v} on {d}.',
-  'na.uc02.p3.link':'Link to the diagnosis {l} ({e}): findings {f}; these are contributing factors, not causes.',
+  'na.uc02.p3.link':'Link to the diagnosis {l} ({e}): findings {f}; these are contributing factors only.',
   'na.uc02.p3.stuck':'Money tied up, for reference and not a cash inflow: overdue receivables {ar}, slow-moving stock {inv}.',
   'na.lim.cash0.prov':'Cash0 is provisional ({c} from the data).','na.lim.cash0':'Cash0 is confirmed ({c}).','na.lim.runoff':'Run-off mode: no new sales or costs are added.',
   'na.lim.delay':'Receipt delays use each customer’s history when there are enough samples, otherwise the company-wide history or a default value.','na.lim.vat':'VAT is not modelled.',
@@ -319,75 +186,20 @@ addStrings('en',{
   'na.fb.uc02':'Lowest balance {min} on {d}; Cash0 needed {need}. The detailed answer could not be verified and is not shown.',
   'rt.policy':'Thresholds, Rtarget, Rmin, Rupper and Cash0 cannot be changed in the chat; nothing was changed and no analysis was run. Use the threshold policy screen or the Cash0 form: changes need a reason and create a new configuration version.',
   'rt.policy.thr':'Open threshold policy','rt.policy.c0':'Open the Cash0 form',
-  'rt.causal':'I cannot confirm that {c} is the cause of the shortfall. What the data shows:','rt.causal.none':'I cannot confirm a cause of the shortfall; the data only shows contributing factors.',
+  'rt.causal':'I cannot confirm that {c} alone created the shortfall. What the data shows:','rt.causal.none':'I cannot confirm what created the shortfall; the data only shows contributing factors.',
   'rt.causal.ar':'{c} holds {v} of receivables ({s}), of which {o} is overdue; its average delay is {l} days.','rt.causal.rc':'Receipts of {c} expected after the lowest day: {v}.',
-  'rt.causal.note':'This is a contributing factor, not a cause: the shortfall also depends on the timing of payroll, supplier payments and other receipts.',
+  'rt.causal.note':'This is one contributing factor: the shortfall also depends on the timing of payroll, supplier payments and other receipts.',
   'rt.scope.uc02':'When cash may run short is answered by the cash forecast step, not by the working-capital diagnosis, which only looks at balances at the cut-off date. Related part of the diagnosis:',
   'rt.scope.uc03':'The copilot does not choose a lender or a loan, and the forecast is not a borrowing decision. The financing step compares indicative products from a synthetic catalogue against the shortfall; lenders decide.',
   'rt.scen':'{s}: lowest balance {v} on {d}, Cash0 needed {need}, alert level {lv}. TH and the matrix cell stay on Base ({th}).','rt.scen.cont':'Reference mode – assumed new revenue, without the matching costs.',
   'rt.scen.all':'All five scenarios of the same run:','rt.cash0':'Cash0 needed to stay at or above Rtarget {rt}: {need}; to stay at or above zero: {zero}. Current Cash0: {c} ({st}). Cash0 needed does not depend on the current Cash0.',
   'rt.week':'The tightest week is week {w} ({a}–{b}): lowest balance {v} on {d}, alert level {lv}.',
-  'chip.f0':'Where is my working capital stuck?','chip.f0b':'Which customer holds most of my receivables?','chip.f1':'Why am I short of cash? Show me the cause.',
-  'chip.f2':'Rank the financing options that fit this cause.','chip.f2b':'Why were some products rejected?','chip.gx':'Explain gap {k}','chip.rall':'Rank financing for all gaps',
+  'chip.f0':'Where is my working capital stuck?','chip.f0b':'Which customer holds most of my receivables?','chip.f1':'Why am I short of cash? Show me the contributing factors.',
+  'chip.f2':'Rank the financing options that fit these factors.','chip.f2b':'Why were some products rejected?','chip.gx':'Explain gap {k}','chip.rall':'Rank financing for all gaps',
   'chip.week':'Which week is the tightest?','chip.cash0':'How much Cash0 do I need?','chip.scen':'Compare the scenarios',
   'fb.title':'Forecast reliability','fb.none':'No earlier forecast to reconcile yet: not enough reconciled invoices to judge accuracy (insufficient_sample).',
   'fb.res':'{n} invoices reconciled against the forecast of {d}: receipt bias {b}, receipt error {w}, median delay error {l} days.','fb.missed':'The earlier forecast had no shortfall but actual cash fell below Rtarget.',
-  'fb.h3':'Suggested review (not applied): default delay and overdue residual of {d} days.','fb.logged':'Forecast logged as {id} (one log per snapshot and configuration version).',
-  'set.lang':'Language','set.lang.sub':'Language of the working-capital and cash-forecast screens and of the chat answers.'
-});
-addStrings('vi',{
-  'tools.used':'Công cụ đã dùng',
-  'na.uc01.h1':'Kết luận chung','na.uc01.h2':'Vốn nằm ở đâu','na.uc01.h3':'Do ai giữ','na.uc01.h4':'Mức độ đáng lo','na.uc01.h5':'Việc cần kiểm tra và giới hạn',
-  'na.uc01.p1.W2':'Doanh nghiệp đang có điểm nghẽn trọng yếu ở {main}.','na.uc01.p1.W1':'Có dấu hiệu cần theo dõi ở {items}, chưa đạt mức trọng yếu.',
-  'na.uc01.p1.bn0':'Tại ngày chốt, chưa thấy khoản mục nào vượt ngưỡng theo dõi: DSO {dso} ngày (ngưỡng {a}), DIO {dio} ngày (ngưỡng {b}), DPO {dpo} ngày.',
-  'na.uc01.p1.near':'{item} đang ở mức {p} ngưỡng theo dõi.','na.uc01.p1.unknown':'Chưa xác định được trục vốn lưu động vì thiếu dữ liệu cốt lõi ({f}).',
-  'na.uc01.p1.inactive':'Doanh thu hoặc giá vốn trong kỳ bằng 0 nên coi là không hoạt động và chưa phân lớp.',
-  'na.uc01.p2.ar':'Khách hàng đang giữ {v}, tương đương {d} ngày doanh thu, {cmp} mức theo dõi {w} ngày ({s}).','na.above':'cao hơn','na.below':'trong',
-  'na.uc01.p2.inv':'Hàng tồn sở hữu {v}, tương đương {d} ngày giá vốn, {cmp} mức theo dõi {w} ngày.',
-  'na.uc01.p2.ap':'Doanh nghiệp còn nợ nhà cung cấp {v}, tương đương {d} ngày giá vốn; DPO cao do trả trễ không phải là tốt.',
-  'na.uc01.p3.cust':'{c} chiếm {s} phải thu, trong đó {o} đã quá hạn.','na.uc01.p3.lot':'Lô chậm luân chuyển giá trị lớn nhất là {l}: {v}, {d} ngày trong kho.',
-  'na.uc01.p3.old':'Lô sở hữu nằm kho lâu nhất là {l} ({d} ngày).','na.uc01.p3.sup':'{s} có {o} phải trả quá hạn (nhà cung cấp thiết yếu: {e}).',
-  'na.uc01.p4':'Phần vượt mức bình thường khoảng {mar}, bằng {s} tài sản ngắn hạn (mẫu {bn}).',
-  'na.uc01.p4.ob':'Hóa đơn mua quá hạn {o} là nghĩa vụ phải trả, báo riêng.',
-  'na.uc01.p4.conc.concentrated':'{c} giữ {s} phần phải thu vượt mức bình thường (tập trung).',
-  'na.uc01.p4.conc.dispersed':'Không khách hàng nào giữ từ một nửa phần phải thu vượt mức bình thường (phân tán).',
-  'na.uc01.p4.bn0':'Không báo vốn vượt ngưỡng vì chưa khoản mục nào có tín hiệu; khả năng đủ tiền do bước dự báo dòng tiền trả lời.',
-  'na.uc01.p4.unknown':'Chưa đánh giá mức trọng yếu cho đến khi bổ sung dữ liệu còn thiếu.','na.uc01.p5':'Nên kiểm tra: {c}.',
-  'na.chk.cust':'đối chiếu các hóa đơn quá hạn của {c}','na.chk.lot':'rà soát lô hàng {l}','na.chk.sup':'thống nhất lịch trả các hóa đơn quá hạn với {s}',
-  'na.chk.AR':'rà soát điều khoản bán chịu đằng sau DSO','na.chk.INV':'rà soát mức tồn kho đằng sau DIO','na.chk.AP':'rà soát tốc độ trả nhà cung cấp khi đệm tiền mỏng',
-  'na.uc01.lim':'Đây là chẩn đoán theo số dư tại {d} trên kỳ {n} ngày; chưa bao gồm dự báo thời điểm thiếu tiền.',
-  'na.lim.cogs':'Giá vốn quy đổi từ báo cáo {d} ngày về {n} ngày nên DIO, DPO, CCC là tạm tính.','na.lim.ca':'Tài sản ngắn hạn được ước bằng tiền, phải thu và tồn kho.',
-  'na.fb.uc01':'Chẩn đoán vốn lưu động tại {asof} trên kỳ {n} ngày có trong Dashboard; câu trả lời chi tiết chưa qua được bước kiểm tra nên không hiển thị.',
-  'na.uc02.h1':'Tổng quan','na.uc02.h2':'Giai đoạn đáng chú ý','na.uc02.h3':'Yếu tố góp phần','na.uc02.h4':'Giả định và giới hạn',
-  'na.uc02.p1.prov':'Theo chế độ run-off và Cash0 tạm tính, cảnh báo ở mức {lv}: số dư thấp nhất là {min} vào ngày {d} trong {w} tuần. Để duy trì mức mục tiêu {rt}, tiền đầu kỳ cần ít nhất {need} (Cash0 cần có). Trạng thái tiền: {th}.',
-  'na.uc02.p1':'Theo chế độ run-off và Cash0 đã xác nhận, cảnh báo ở mức {lv}: số dư thấp nhất là {min} vào ngày {d} trong {w} tuần. Để duy trì mức mục tiêu {rt}, tiền đầu kỳ cần ít nhất {need} (Cash0 cần có). Trạng thái tiền: {th}.',
-  'na.uc02.p1.first':'Số dư xuống dưới Rtarget lần đầu ngày {d}; xuống dưới 0 lần đầu: {z}.',
-  'na.uc02.p2.eps':'Có {n} đợt thiếu{last}.','na.uc02.p2.open':', đợt cuối chưa kết thúc trong phạm vi dự báo','na.uc02.p2.none':'Không có ngày nào dưới Rtarget.',
-  'na.uc02.p2.week':'Tuần căng nhất là tuần {w} ({a}–{b}) với số dư thấp nhất {v}.','na.uc02.p2.band':'Tại ngày thấp nhất, dải kịch bản từ {c} (thận trọng) đến {o} (lạc quan).',
-  'na.uc02.p3.out':'Khoản chi lớn nhất đến ngày thấp nhất: {c} {v} ngày {d}.','na.uc02.p3.in':'Khoản thu dự kiến sau đó: {c} {v} ngày {d}.',
-  'na.uc02.p3.link':'Liên kết với chẩn đoán {l} ({e}): finding {f}; đây là yếu tố góp phần, không phải nguyên nhân.',
-  'na.uc02.p3.stuck':'Tiền kẹt để tham chiếu, không phải dòng tiền vào: phải thu quá hạn {ar}, tồn kho chậm luân chuyển {inv}.',
-  'na.lim.cash0.prov':'Cash0 đang tạm tính ({c} theo dữ liệu).','na.lim.cash0':'Cash0 đã xác nhận ({c}).','na.lim.runoff':'Chế độ run-off: không cộng doanh thu và chi phí mới.',
-  'na.lim.delay':'Độ trễ thu lấy theo lịch sử từng khách hàng khi đủ mẫu, còn lại dùng lịch sử toàn doanh nghiệp hoặc giá trị dự phòng.','na.lim.vat':'Chưa mô hình hóa VAT.',
-  'na.lim.reserve':'Rmin và Rupper là giả định trình diễn suy từ Rtarget.','na.lim.decision':'Đây là ước tính tham khảo, không phải quyết định cấp tín dụng.',
-  'na.fb.uc02':'Số dư thấp nhất {min} ngày {d}; Cash0 cần có {need}. Câu trả lời chi tiết chưa qua được bước kiểm tra nên không hiển thị.',
-  'rt.policy':'Không thể đổi ngưỡng, Rtarget, Rmin, Rupper hay Cash0 qua Chat; chưa có gì thay đổi và không chạy phân tích. Hãy dùng màn Chính sách ngưỡng hoặc form Thiết lập Cash0: thay đổi cần lý do và tạo phiên bản cấu hình mới.',
-  'rt.policy.thr':'Mở Chính sách ngưỡng','rt.policy.c0':'Mở form Thiết lập Cash0',
-  'rt.causal':'Tôi không thể xác nhận {c} là nguyên nhân của thiếu tiền. Số liệu cho thấy:','rt.causal.none':'Tôi không thể xác nhận nguyên nhân của thiếu tiền; số liệu chỉ cho thấy các yếu tố góp phần.',
-  'rt.causal.ar':'{c} giữ {v} phải thu ({s}), trong đó {o} đã quá hạn; độ trễ bình quân {l} ngày.','rt.causal.rc':'Khoản thu của {c} dự kiến sau ngày thấp nhất: {v}.',
-  'rt.causal.note':'Đây là yếu tố góp phần, không phải nguyên nhân: thiếu tiền còn phụ thuộc lịch trả lương, trả nhà cung cấp và các khoản thu khác.',
-  'rt.scope.uc02':'Thời điểm có thể thiếu tiền do bước dự báo dòng tiền trả lời, không thuộc chẩn đoán vốn lưu động (chỉ xem số dư tại ngày chốt). Phần chẩn đoán liên quan:',
-  'rt.scope.uc03':'Copilot không chọn ngân hàng hay khoản vay, và dự báo không phải quyết định vay. Bước tìm giải pháp chỉ so sánh các sản phẩm tham khảo trong danh mục giả lập với mức thiếu; quyết định thuộc về bên cho vay.',
-  'rt.scen':'{s}: số dư thấp nhất {v} ngày {d}, Cash0 cần có {need}, mức cảnh báo {lv}. TH và ô ma trận vẫn theo Base ({th}).','rt.scen.cont':'Chế độ tham chiếu – có doanh thu mới giả định, chưa có chi phí tương ứng.',
-  'rt.scen.all':'Năm kịch bản của cùng lần chạy:','rt.cash0':'Cash0 cần có để không dưới Rtarget {rt}: {need}; để không âm: {zero}. Cash0 hiện có: {c} ({st}). Cash0 cần có không phụ thuộc Cash0 hiện có.',
-  'rt.week':'Tuần căng nhất là tuần {w} ({a}–{b}): số dư thấp nhất {v} ngày {d}, mức cảnh báo {lv}.',
-  'chip.f0':'Vốn lưu động của tôi đang kẹt ở đâu?','chip.f0b':'Khách hàng nào đang giữ nhiều phải thu nhất?','chip.f1':'Vì sao tôi thiếu tiền? Cho xem yếu tố góp phần.',
-  'chip.f2':'Xếp hạng giải pháp tài trợ phù hợp.','chip.f2b':'Vì sao một số sản phẩm bị loại?','chip.gx':'Giải thích đợt thiếu {k}','chip.rall':'Xếp hạng tài trợ cho mọi đợt thiếu',
-  'chip.week':'Tuần nào căng nhất?','chip.cash0':'Tôi cần Cash0 bao nhiêu?','chip.scen':'So sánh các kịch bản',
-  'fb.title':'Độ tin cậy dự báo','fb.none':'Chưa có dự báo trước đó để đối chiếu: chưa đủ hóa đơn đối chiếu để đánh giá độ chính xác (insufficient_sample).',
-  'fb.res':'{n} hóa đơn được đối chiếu với dự báo ngày {d}: thiên lệch thu {b}, sai số thu {w}, sai số độ trễ trung vị {l} ngày.','fb.missed':'Dự báo trước không có thiếu tiền nhưng tiền thực tế đã xuống dưới Rtarget.',
-  'fb.h3':'Đề xuất xem xét (chưa áp dụng): độ trễ mặc định và phần dư quá hạn {d} ngày.','fb.logged':'Đã ghi nhật ký dự báo {id} (mỗi snapshot và phiên bản cấu hình một nhật ký).',
-  'set.lang':'Ngôn ngữ','set.lang.sub':'Ngôn ngữ của màn chẩn đoán vốn lưu động, dự báo dòng tiền và câu trả lời Chat.'
+  'fb.h3':'Suggested review (not applied): default delay and overdue residual of {d} days.','fb.logged':'Forecast logged as {id} (one log per snapshot and configuration version).'
 });
 
 addStrings('en',{
@@ -395,15 +207,7 @@ addStrings('en',{
   'cat.invoice_receipt':'Customer collections','cat.planned_inflow':'Planned inflows','cat.supplier_payment':'Supplier payments','cat.planned_outflow':'Planned outflows','cat.payroll':'Payroll and allowances',
   'cat.rent':'Rent','cat.utilities':'Utilities','cat.new_materials':'New raw-material purchases','cat.tax':'Tax','cat.debt_service':'Loan repayments','cat.capex':'Equipment investment','cat.new_sales':'New sales (assumed)'
 });
-addStrings('vi',{
-  'hero.hi':'Chào {n}.','hero.tv1':'Tình hình thanh khoản của {s} hôm nay thế nào?','na.ccc':'Vòng quay tiền CCC của {f} là {ccc} ngày = DSO {dso} + DIO {dio} − DPO {dpo}.',
-  'cat.invoice_receipt':'Thu tiền khách hàng','cat.planned_inflow':'Thu theo kế hoạch','cat.supplier_payment':'Trả nhà cung cấp','cat.planned_outflow':'Chi theo kế hoạch','cat.payroll':'Lương và phụ cấp',
-  'cat.rent':'Tiền thuê','cat.utilities':'Điện nước, tiện ích','cat.new_materials':'Mua nguyên liệu mới','cat.tax':'Thuế','cat.debt_service':'Trả nợ vay','cat.capex':'Đầu tư thiết bị','cat.new_sales':'Doanh thu mới (giả định)'
-});
 
 addStrings('en',{'m.M1':'Short from a timing mismatch','m.M2':'Balanced, no bottleneck yet','m.M3':'Surplus, no bottleneck yet','m.M4':'Short, signs to check','m.M5':'Balanced, signs to watch',
   'm.M6':'Surplus, signs to watch','m.M7':'Short and materially blocked','m.M8':'Enough cash, capital tied up','m.M9':'Surplus and materially blocked',
   'gap.h.forecast':'{h}-week cash forecast','gap.h.daily':'Daily cash balance','gap.h.gaps':'Cash gaps','gap.h.rank':'Financing ranking · gap {k}'});
-addStrings('vi',{'m.M1':'Thiếu do lệch lịch thu chi','m.M2':'Cân bằng, chưa thấy nghẽn','m.M3':'Dư, chưa thấy nghẽn','m.M4':'Thiếu, có dấu hiệu cần kiểm','m.M5':'Cân bằng, có dấu hiệu',
-  'm.M6':'Dư, có dấu hiệu','m.M7':'Thiếu và nghẽn trọng yếu','m.M8':'Đủ tiền, vốn bị giữ lớn','m.M9':'Dư và nghẽn trọng yếu',
-  'gap.h.forecast':'Dự báo dòng tiền {h} tuần','gap.h.daily':'Số dư tiền theo ngày','gap.h.gaps':'Các đợt thiếu tiền','gap.h.rank':'Xếp hạng tài trợ · đợt thiếu {k}'});

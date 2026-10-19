@@ -7,26 +7,29 @@ const ENGINE=(()=>{
   const diso=n=>new Date(n*DAYMS).toISOString().slice(0,10);
   const sum=(a,f=x=>x)=>a.reduce((s,x)=>s+f(x),0);
   const round=(v,d=0)=>{const p=10**d;return Math.round(v*p)/p};
-  const normName=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/[^a-z0-9]+/g,' ').trim();
+  const normName=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').replace(/[^a-z0-9]+/g,' ').trim();
+  // Upload alias keywords (js/config.js), without accents, as a regex alternation: kw('lot','NVL') → 'nguyen|phu lieu|…'.
+  const kw=(kind,canon)=>UPLOAD_ALIASES.filter(a=>a[2]===kind&&(canon==null||a[1]===canon)).map(a=>normName(a[0])).join('|');
+  const aliasWords=canon=>UPLOAD_ALIASES.filter(a=>a[2]==='val'&&a[1]===canon).map(a=>normName(a[0]));
   // FNV-1a: deterministic ids (snapshot, run) so the same inputs always give the same id.
   const hash=s=>{let h=2166136261;for(const ch of String(s)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(36).toUpperCase()};
   // SRS-DECISION: threshold comparisons on unrounded values use a relative tolerance of 1e-9 so binary rounding cannot flip exact decimal boundaries
   // (5.00 % materiality is W2, T07; DSO equal to the watch threshold gives no signal, T08).
   const EPS=1e-9,tol=b=>EPS*Math.max(1,Math.abs(b)),GT=(a,b)=>a>b+tol(b),GE=(a,b)=>a>=b-tol(b),LT=(a,b)=>a<b-tol(b);
-  const tri=v=>{const s=String(v==null?'':v).trim().toLowerCase();return ['1','true','yes','y','có','co'].includes(s)?'yes':['0','false','no','n','không','khong'].includes(s)?'no':'unknown'};
+  const tri=v=>{const s=normName(v);return ['1','true','yes','y',...aliasWords('yes')].includes(s)?'yes':['0','false','no','n',...aliasWords('no')].includes(s)?'no':'unknown'};
 
   /* ---------- Inventory hints (suggestions only, never applied without confirmation) ---------- */
   // inventory_type inferred from the lot name when the file has no inventory_type column (provisional, Table 2-43).
   function inferLotType(name){
     const n=normName(name);
-    if(/work in progress|\bwip\b|semi.?finished|ban thanh pham|do dang|on the line/.test(n))return 'BTP';
-    if(/finished|carton|thanh pham|awaiting shipment|cho xuat/.test(n))return 'TP';
-    if(/for resale|trading goods|hang hoa|merchandise/.test(n))return 'HH';
-    if(/fabric|trim|thread|button|zipper|label|yarn|paper|ink|glue|material|nguyen|phu lieu|vai|chi|nut|khoa|giay|muc|keo/.test(n))return 'NVL';
+    if(new RegExp('work in progress|\\bwip\\b|semi.?finished|on the line|'+kw('lot','BTP')).test(n))return 'BTP';
+    if(new RegExp('finished|carton|awaiting shipment|'+kw('lot','TP')).test(n))return 'TP';
+    if(new RegExp('for resale|trading goods|merchandise|'+kw('lot','HH')).test(n))return 'HH';
+    if(new RegExp('fabric|trim|thread|button|zipper|label|yarn|paper|ink|glue|material|'+kw('lot','NVL')).test(n))return 'NVL';
     return null;
   }
-  const customerOwnedHint=name=>/subcontract|customer.?owned|consign|supplied by|held for|giao de gia cong|hang gia cong|nhan gia cong/.test(normName(name));
-  const cancelledHint=name=>/\bhuy\b|cancel/.test(normName(name));
+  const customerOwnedHint=name=>new RegExp('subcontract|customer.?owned|consign|supplied by|held for|'+kw('owner')).test(normName(name));
+  const cancelledHint=name=>new RegExp('\\b('+kw('cancel')+')\\b|cancel').test(normName(name));
 
   /* ---------- Snapshot normalisation ---------- */
   // Financial rows: [{period_start, period_end, days, revenue, cogs, opening_cash, current_assets, st_investments}].
@@ -314,11 +317,12 @@ const ENGINE=(()=>{
   // SRS-DECISION: the data has no goods category per supplier; it is inferred from the name and labelled provisional.
   function supplierCategory(name){
     const n=normName(name);
-    if(/logistic|customs|thong quan/.test(n))return {cat:'logistics_customs',extendable:false};
-    if(/electric|power|water|utility|dien|nuoc/.test(n))return {cat:'utilities',extendable:false};
-    if(/transport|freight|van tai/.test(n))return {cat:'transport',extendable:true};
-    if(/trim|thread|button|zipper|label|packag|carton|phu lieu|bao bi|ink|consumable|muc in|chi|nut|khoa/.test(n))return {cat:'trims_packaging',extendable:true};
-    if(/fabric|yarn|paper roll|mill|vai|giay cuon|soi/.test(n))return {cat:'main_material',extendable:false};
+    const has=(en,c)=>new RegExp(en+'|'+kw('supplier',c)).test(n);
+    if(has('logistic|customs','logistics_customs'))return {cat:'logistics_customs',extendable:false};
+    if(has('electric|power|water|utility','utilities'))return {cat:'utilities',extendable:false};
+    if(has('transport|freight','transport'))return {cat:'transport',extendable:true};
+    if(has('trim|thread|button|zipper|label|packag|carton|ink|consumable','trims_packaging'))return {cat:'trims_packaging',extendable:true};
+    if(has('fabric|yarn|paper roll|mill','main_material'))return {cat:'main_material',extendable:false};
     return {cat:'unknown',extendable:null};
   }
   function companySize(annual){

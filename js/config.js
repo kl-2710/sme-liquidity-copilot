@@ -41,8 +41,28 @@ const CFG={
 };
 // Where each threshold comes from; shown next to every threshold in the dashboard.
 const THRESHOLD_SOURCE={
-  verified_reference:{en:'Garment industry benchmark, FiinTrade 2016–2025',vi:'Chuẩn ngành may, FiinTrade 2016–2025'},
-  owner_policy:{en:'Company policy',vi:'Chính sách của doanh nghiệp'},
-  firm_profile:{en:'Company profile (declared by the owner)',vi:'Hồ sơ doanh nghiệp (chủ doanh nghiệp khai báo)'},
-  demo_assumption:{en:'Demo assumption',vi:'Giả định trình diễn'}
+  verified_reference:'Garment industry benchmark, FiinTrade 2016–2025',
+  owner_policy:'Company policy',
+  firm_profile:'Company profile (declared by the owner)',
+  demo_assumption:'Demo assumption'
 };
+// Hidden upload aliases: the Vietnamese column headers, cell values and name keywords that uploaded files may use. This array is the
+// only Vietnamese text in the app; it is never shown. [alias, canonical, kind]: col = column header, val = cell value,
+// lot / owner / cancel / supplier = keyword in a lot or supplier name (matched without accents, like the English keywords).
+const UPLOAD_ALIASES=[
+  ['Mã số thuế','tax_code','col'],['MST','tax_code','col'],['Loại hàng','inventory_type','col'],['Loại tồn kho','inventory_type','col'],['Chủ sở hữu','owner','col'],
+  ['Đã hủy','cancelled','col'],['Cầm cố','pledged','col'],['Thiết yếu','essential','col'],['Số tiền đã thu','paid_amount','col'],['Số tiền đã trả','paid_amount','col'],
+  ['Ngày','date','col'],['Mức chắc chắn','certainty','col'],['Tài sản ngắn hạn','current_assets_vnd','col'],['Mô hình kinh doanh','business_model','col'],
+  ['Số tiền','amount_vnd','col'],['Giá trị','amount_vnd','col'],['Khách hàng','buyer','col'],['Nhà cung cấp','supplier','col'],['Ngày phát hành','issue_date','col'],
+  ['Ngày lập','issue_date','col'],['Hạn thanh toán','due_date','col'],['Ngày đến hạn','due_date','col'],['Ngày thanh toán','paid_date','col'],['Số hóa đơn','invoice_id','col'],
+  ['Mã hóa đơn','invoice_id','col'],['Tên hàng','product_line','col'],['Mặt hàng','product_line','col'],['Số lượng','qty','col'],['Đơn giá','unit_cost_vnd','col'],
+  ['Số ngày tồn','days_in_stock','col'],['Doanh thu','revenue_vnd','col'],['Giá vốn','cogs_vnd','col'],['Tiền đầu kỳ','opening_cash_vnd','col'],['Tuần','week','col'],
+  ['Hạng mục','category','col'],['Tên','name','col'],['Ngành','industry','col'],['Tiền đệm tối thiểu','min_cash_buffer_vnd','col'],
+  ['có','yes','val'],['không','no','val'],['ngày','days','val'],['đ','vnd','val'],['gia công','CMT','val'],
+  ['bán thành phẩm','BTP','lot'],['dở dang','BTP','lot'],['thành phẩm','TP','lot'],['chờ xuất','TP','lot'],['hàng hóa','HH','lot'],
+  ['nguyên','NVL','lot'],['phụ liệu','NVL','lot'],['vải','NVL','lot'],['chỉ','NVL','lot'],['nút','NVL','lot'],['khóa','NVL','lot'],['giấy','NVL','lot'],['mực','NVL','lot'],['keo','NVL','lot'],
+  ['giao để gia công','customer','owner'],['hàng gia công','customer','owner'],['nhận gia công','customer','owner'],['hủy','cancelled','cancel'],
+  ['thông quan','logistics_customs','supplier'],['điện','utilities','supplier'],['nước','utilities','supplier'],['vận tải','transport','supplier'],
+  ['phụ liệu','trims_packaging','supplier'],['bao bì','trims_packaging','supplier'],['mực in','trims_packaging','supplier'],['chỉ','trims_packaging','supplier'],
+  ['nút','trims_packaging','supplier'],['khóa','trims_packaging','supplier'],['vải','main_material','supplier'],['giấy cuộn','main_material','supplier'],['sợi','main_material','supplier']
+];

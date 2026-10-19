@@ -3,14 +3,14 @@
    and falls back to a minimal deterministic answer if anything does not match. */
 const NARR=(()=>{
   // Phrases the answer must never contain (certainty, causal claims, forecasts presented as facts).
-  const BANNED=[/chắc chắn/i,/chỉ cần/i,/gây ra thiếu tiền/i,/số dư cuối kỳ sẽ là/i,/\bcertainly\b/i,/\bguarantee/i,/\bjust need/i,/\bonly need/i,/caused? the (cash )?short(age|fall)/i,
-    /closing balance will be/i,/main cause/i,/nguyên nhân chính/i,/không có vấn đề về tiền/i,/no (cash|money) problem/i];
+  const BANNED=[/\bcertainly\b/i,/\bguarantee/i,/\bjust need/i,/\bonly need/i,/caused? the (cash )?short(age|fall)/i,
+    /closing balance will be/i,/main cause/i,/no (cash|money) problem/i];
   const tools=list=>`<p class="tools-used">${t('tools.used')}: ${list.join(', ')}</p>`;
   // Fact registry: id → {value, display}. Displays are exactly the strings written in the answer.
   function registry(){const f={};return {f,add:(id,value,display)=>{f[id]={value,display:String(display)};return String(display)}}}
   /* ---------- UC01 · five parts (Table 2-35) ---------- */
   function uc01Answer(d,firmName,opts={}){
-    const R=registry(),A=R.add,m=d.metrics,P=d.profiles,th=d.thresholds,items=d.item_states,src=d.model.src==='owner_policy'?THRESHOLD_SOURCE.owner_policy[LANG]:THRESHOLD_SOURCE.verified_reference[LANG];
+    const R=registry(),A=R.add,m=d.metrics,P=d.profiles,th=d.thresholds,items=d.item_states,src=d.model.src==='owner_policy'?THRESHOLD_SOURCE.owner_policy:THRESHOLD_SOURCE.verified_reference;
     A('firm',firmName,firmName);A('asof',d.as_of,fd(d.as_of));A('N',d.N,d.N);A('model',d.model.model,d.model.model);
     const it=k=>items.find(i=>i.item===k),name=k=>t('item.'+k);
     let p1;
@@ -76,8 +76,8 @@ const NARR=(()=>{
   /* ---------- Controls (E5 / EC-6) ---------- */
   const plain=html=>String(html).replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim();
   // Numeric tokens not glued to letters (codes such as W2, BN7, P75, M7, TH01, F-AR-1 are not quantities).
-  const NUM=/(?<![\p{L}\d\-_.,])[−-]?\d[\d.]*(?:,\d+)?(?:\s?(?:%|M|bn|tr|tỷ|triệu|ngày|days?)(?![\p{L}\d]))?/gu;
-  const DATE=/\b\d{2}\/\d{2}\/\d{4}\b/g;
+  const NUM=/(?<![\p{L}\d\-_.,])[−-]?\d[\d.]*(?:,\d+)?(?:\s?(?:%|M|bn|days?)(?![\p{L}\d]))?/gu;
+  const DATE=/\b\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4}\b/g;
   // opts.foreign: names that belong to other companies or runs; none of them may appear in the answer.
   function verifyAnswer(ans,opts={}){
     const text=plain(ans.html),issues=[],displays=Object.values(ans.facts).map(f=>f.display);
@@ -86,7 +86,7 @@ const NARR=(()=>{
     const dates=text.match(DATE)||[];dates.forEach(x=>{if(!displays.some(s=>s.includes(x)))issues.push('date:'+x)});
     // Part numbers (1.–5.) are single digits; trailing punctuation is not part of a quantity.
     const rest=text.replace(DATE,' ');(rest.match(NUM)||[]).forEach(x=>{const k=x.trim().replace(/[.,]+$/,'');if(/^\d$/.test(k))return;if(!displays.some(s=>s.includes(k)||k.includes(s)&&s.length>1))issues.push('number:'+k)});
-    if(ans.kind==='uc02'){if(ans.cash0Provisional&&!/tạm tính|provisional/i.test(text))issues.push('missing:cash0_provisional');if(ans.runOff&&!/run-off/i.test(text))issues.push('missing:run_off')}
+    if(ans.kind==='uc02'){if(ans.cash0Provisional&&!/provisional|estimate/i.test(text))issues.push('missing:cash0_provisional');if(ans.runOff&&!/run-off/i.test(text))issues.push('missing:run_off')}
     return {ok:!issues.length,issues};
   }
   // Minimal deterministic answer used when a draft fails the controls.

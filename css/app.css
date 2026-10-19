@@ -838,7 +838,7 @@ tr.top1 .rank{background:var(--lc-color-status-success);color:var(--lc-color-tex
 .rename-chat input{width:100%;padding:10px 12px;border:1px solid var(--lc-color-border-default);border-radius:10px;background:var(--lc-color-bg-input);color:var(--lc-color-text-primary);font:inherit;font-size:14px}
 .rename-chat input:focus{outline:0;border-color:var(--lc-color-border-focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--lc-color-border-focus) 22%,transparent)}
 
-/* Trạng thái thanh khoản (SRS v1.3 · trục W × trạng thái tiền TH · ma trận M1–M9). Màu đi kèm nhãn chữ; ô ma trận chỉ được viền, không tô màu cảnh báo. */
+/* Liquidity state (SRS v1.3 · W axis × cash state TH · M1–M9 matrix). Colours always come with a text label; matrix cells are outlined, never filled with alert colours. */
 .lstate{--ls:var(--lc-color-status-neutral);--ls-bg:var(--lc-color-status-neutral-bg);position:relative;background:color-mix(in srgb,var(--ls-bg) 70%,var(--card));border:1px solid color-mix(in srgb,var(--ls) 45%,transparent);border-left:5px solid var(--ls);border-radius:18px;padding:16px 16px 12px;margin-bottom:18px;animation:secIn .55s var(--ease) both}
 .lstate.th01.red{--ls:var(--lc-color-status-error);--ls-bg:var(--lc-color-status-error-bg)}
 .lstate.th01.orange{--ls:var(--lc-color-alert-orange);--ls-bg:var(--lc-color-alert-orange-bg)}

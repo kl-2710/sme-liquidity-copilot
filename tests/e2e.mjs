@@ -516,7 +516,7 @@ for (const theme of ["light", "dark"]) {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await page.goto(URL0);
-  await page.evaluate((t) => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: t, lang: "en" })); }, theme);
+  await page.evaluate((t) => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: t})); }, theme);
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])");
   const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3800); };
   const last = () => page.locator(".messages.on .msg.bot").last();
@@ -576,7 +576,7 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await last().locator(".ans5 > p").count(), 5); assert.match(t, /1\. Overall conclusion\..*5\. What to check and the limits\./s); assert.match(t, /Tools used: diagnose_working_capital/);
   });
   await step(`[${theme}] Task 2 explains every gap; chips stay visible after the 2nd message`, async () => {
-    await ask("Why am I short of cash? Show me the cause.");
+    await ask("Why am I short of cash? Show me the contributing factors.");
     const acc = last().locator(".gap-acc");
     assert.equal(await acc.count(), 5, "one contributing-factors card per gap");
     assert.equal(await last().locator(".ans4 > p").count(), 4); assert.match(await last().innerText(), /Tools used: forecast_cash/); assert.match(await last().innerText(), /forecast_cash/);
@@ -586,7 +586,7 @@ for (const theme of ["light", "dark"]) {
     assert.ok(chips > 0 && chips <= 4, `chips: ${chips}`);
   });
   await step(`[${theme}] Task 3 ranks financing for every gap`, async () => {
-    await ask("Rank the financing options that fit this cause.");
+    await ask("Rank the financing options that fit these factors.");
     assert.equal(await last().locator(".rank-sum tbody tr").count(), 5);
     assert.match(await last().innerText(), /match_financing/);
     assert.doesNotMatch(await page.locator(".messages.on").innerText(), /forecast_liquidity|rank_financing|explain_liquidity_case|get_receivables/);
@@ -760,7 +760,7 @@ for (const theme of ["light", "dark"]) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(URL0);
-  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light", lang: "en" })); });
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light"})); });
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
   const dash = async () => { await page.evaluate(() => { setTab("dash"); setWide(true); }); await page.waitForTimeout(700); };
   await step("D · dashboard order, data source line and gauge scales follow Table 3-1", async () => {
@@ -771,8 +771,8 @@ for (const theme of ["light", "dark"]) {
     assert.deepEqual(r.secs.slice(0, 4), ["Working-capital diagnosis", "Receivables, inventory and payables", "Who holds the money", "Cash conversion cycle"]);
     assert.ok(r.order.indexOf("uc-src") < r.order.indexOf("dsec"));
     assert.equal(r.w, "W2 – Material bottleneck");
-    assert.match(r.src, /sample:F01 · snapshot SNP-F01-20260930-01 · as of 30\/09\/2026 · period 01\/04\/2026–30\/09\/2026 \(183 days\)/); assert.match(r.src, /fresh/);
-    assert.equal(r.chip, "30/09/2026");
+    assert.match(r.src, /sample:F01 · snapshot SNP-F01-20260930-01 · as of 30 Sep 2026 · period 1 Apr 2026–30 Sep 2026 \(183 days\)/); assert.match(r.src, /fresh/);
+    assert.equal(r.chip, "30 Sep 2026");
     assert.ok(r.gaugeMax.length === 4 && !r.gaugeMax.includes("90"), "gauge scales follow the thresholds: " + r.gaugeMax.join(","));
   });
   await step("D · expert mode shows rule ids, versions and raw VND; tables sort and switch order", async () => {
@@ -802,7 +802,7 @@ for (const theme of ["light", "dark"]) {
   await step("D · an earlier cut-off re-runs UC01 only; the matrix cell is not routed across snapshots", async () => {
     await page.fill("#ucAsOf", "2026-08-31"); await page.dispatchEvent("#ucAsOf", "change"); await page.waitForTimeout(500);
     const r = await page.evaluate(() => ({ src: document.querySelector("#pane-dash .uc-src").textContent, chips: document.querySelector("#pane-dash .lstate .ls-chips").textContent, n: uc01().N }));
-    assert.match(r.src, /as of 31\/08\/2026 · period 02\/03\/2026–31\/08\/2026 \(183 days\)/); assert.match(r.chips, /Not routed · W and TH use different snapshots/);
+    assert.match(r.src, /as of 31 Aug 2026 · period 2 Mar 2026–31 Aug 2026 \(183 days\)/); assert.match(r.chips, /Not routed · W and TH use different snapshots/);
     await page.click("#ucReset"); await page.waitForTimeout(400);
     assert.match(await page.locator("#pane-dash .lstate .ls-chips").innerText(), /Cell M7/);
   });
@@ -873,10 +873,10 @@ for (const theme of ["light", "dark"]) {
     const id = await page.evaluate(() => S.gapRequest && S.gapRequest.request_id);
     assert.match(id, /^GR-/);
     await page.evaluate(() => setWide(false));
-    await page.fill("#chatInput", "Why am I short of cash? Show me the cause."); await page.click("#sendBtn"); await page.waitForTimeout(3800);
+    await page.fill("#chatInput", "Why am I short of cash? Show me the contributing factors."); await page.click("#sendBtn"); await page.waitForTimeout(3800);
     const cause = await page.locator(".messages.on .msg.bot").last().innerText();
     assert.match(cause, /Contributing factors · gap/); assert.doesNotMatch(cause, /Why gap|main cause/i);
-    await page.fill("#chatInput", "Rank the financing options that fit this cause."); await page.click("#sendBtn"); await page.waitForTimeout(3800);
+    await page.fill("#chatInput", "Rank the financing options that fit these factors."); await page.click("#sendBtn"); await page.waitForTimeout(3800);
     assert.ok((await page.locator(".messages.on .msg.bot").last().innerText()).includes(`Request ${id}: cash needed from ${need}`));
   });
   await step("G · F02 (Base TH03): the button offers idle-cash options and no request is created", async () => {
@@ -897,7 +897,7 @@ for (const theme of ["light", "dark"]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(URL0);
-  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light", lang: "en" })); });
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light"})); });
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
   const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3800); };
   const last = () => page.locator(".messages.on .msg.bot").last();
@@ -921,38 +921,32 @@ for (const theme of ["light", "dark"]) {
     await ask("Where is my working capital stuck?");
     await ask("K1 is the cause of my cash shortage");
     const t = await last().innerText();
-    assert.match(t, /I cannot confirm that Large Exporter K1 is the cause of the shortfall/); assert.match(t, /contributing factor, not a cause/);
+    assert.match(t, /I cannot confirm that Large Exporter K1 alone created the shortfall/); assert.match(t, /one contributing factor/);
     assert.match(t, /3,89bn of receivables \(79,2%\), of which 817,8M is overdue/);
   });
   await step("H · scenario, Cash0-needed and tightest-week questions; Q70 the same run is reused (same run_id)", async () => {
-    await ask("Why am I short of cash? Show me the cause.");
+    await ask("Why am I short of cash? Show me the contributing factors.");
     const id1 = await last().locator(".toolchip pre").innerText();
     await ask("What happens in the conservative scenario?");
-    assert.match(await last().innerText(), /Conservative: lowest balance -1,01bn on 23\/10\/2026, Cash0 needed 2,71bn, alert level Red\. TH and the matrix cell stay on Base \(TH01 – Cash shortfall\)/);
+    assert.match(await last().innerText(), /Conservative: lowest balance -1,01bn on 23 Oct 2026, Cash0 needed 2,71bn, alert level Red\. TH and the matrix cell stay on Base \(TH01 – Cash shortfall\)/);
     await ask("How much Cash0 do I need?");
     assert.match(await last().innerText(), /Cash0 needed to stay at or above Rtarget 500,0M: 2,32bn; to stay at or above zero: 1,82bn/);
     await ask("Which week is the tightest?");
-    assert.match(await last().innerText(), /The tightest week is week 12 \(17\/12\/2026–23\/12\/2026\): lowest balance -619,3M on 18\/12\/2026, alert level Red/);
-    await ask("Why am I short of cash? Show me the cause.");
+    assert.match(await last().innerText(), /The tightest week is week 12 \(17 Dec 2026–23 Dec 2026\): lowest balance -619,3M on 18 Dec 2026, alert level Red/);
+    await ask("Why am I short of cash? Show me the contributing factors.");
     const id2 = await last().locator(".toolchip pre").innerText();
     const run = (s) => JSON.parse(s).args.run_id;
     assert.match(run(id1), /^RUN-UC02-/); assert.equal(run(id1), run(id2));
     assert.equal(await page.evaluate(() => FEEDBACK.get("F01").logs.length), 1);        // Q68: one forecast log per snapshot and configuration
     assert.equal(await page.evaluate(() => FEEDBACK.health("F01")), "insufficient_sample"); // Q59
   });
-  await step("H · Vietnamese (default language): five-part answer, units tỷ / tr, Vietnamese chips; Settings switches the language", async () => {
-    await page.evaluate(() => { PREF.lang = "vi"; savePrefs(); startNewChat(); }); await page.waitForTimeout(400);
-    assert.match(await page.locator("#demoChips").innerText(), /Vốn lưu động của tôi đang kẹt ở đâu\?/);
-    await ask("Vốn lưu động của tôi đang kẹt ở đâu?");
-    const t = await last().innerText();
-    assert.match(t, /1\. Kết luận chung\./); assert.match(t, /4,91 tỷ/); assert.match(t, /817,8 tr/); assert.match(t, /Công cụ đã dùng: diagnose_working_capital/);
-    await ask("Vì sao tôi thiếu tiền? Cho xem yếu tố góp phần.");
-    const u = await last().innerText();
-    assert.match(u, /1\. Tổng quan\. Theo chế độ run-off và Cash0 tạm tính, cảnh báo ở mức Đỏ: số dư thấp nhất là -619,3 tr vào ngày 18\/12\/2026/); assert.match(u, /Yếu tố góp phần · đợt thiếu/);
+  await step("English only: no language setting, <html lang=en>, English units and dates", async () => {
+    assert.equal(await page.evaluate(() => document.documentElement.lang), "en");
     await page.evaluate(() => { openSettings("General"); }); await page.waitForTimeout(300);
-    await page.click('[data-lang="en"]'); await page.waitForTimeout(300); await page.keyboard.press("Escape");
-    assert.equal(await page.evaluate(() => LANG), "en");
-    assert.match(await page.locator("#demoChips").innerText(), /Rank the financing options/);
+    assert.equal(await page.locator("[data-lang]").count(), 0, "no language selector");
+    await page.keyboard.press("Escape");
+    assert.deepEqual(await page.evaluate(() => [money(11.85e9), money(619.3e6), nInt(1200000000), fd("2026-09-30"), fd("2026-10-01")]), ["11,85bn", "619,3M", "1.200.000.000", "30 Sep 2026", "1 Oct 2026"]);
+    assert.doesNotMatch(await page.locator(".messages.on").innerText(), /[\u00e0-\u00fd\u0103\u0111\u01a1\u01b0\u1ea1-\u1ef9]/i, "no Vietnamese letters in the chat");
   });
   await step("H · no JavaScript errors in the chat checks", async () => assert.deepEqual(errors, []));
   await page.close();

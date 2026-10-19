@@ -136,9 +136,9 @@ def jsrep(m):
 code = re.sub(r"#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z])", jsrep, code)
 code = code.replace("'SME Finance Copilot | AI Agent'", "'Lilact · SME Liquidity Copilot'").replace("'Sign in | SME Finance Copilot'", "'Sign in · Lilact'")
 code = code.replace('<div class="hm" aria-hidden="true">✦</div>', '<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div>')
-code = code.replace("Mọi draft(s) phải được you duyệt in the Approvals tab.", "Every draft needs your approval in the Approvals tab.").replace("</i>Ra ${mm(x.out)}", "</i>Out ${mm(x.out)}")
+code = code.replace("M\u1ecdi draft(s) ph\u1ea3i \u0111\u01b0\u1ee3c you duy\u1ec7t in the Approvals tab.", "Every draft needs your approval in the Approvals tab.").replace("</i>Ra ${mm(x.out)}", "</i>Out ${mm(x.out)}")
 code = code.replace(">Xong<", ">Done<")
-code = code.replace("để đưa on hàng chờ, then duyệt in the Approvals tab.", "to add it to the queue, then approve it in the Approvals tab.").replace(" before / sau</h3>", " before / after</h3>")
+code = code.replace("\u0111\u1ec3 \u0111\u01b0a on h\u00e0ng ch\u1edd, then duy\u1ec7t in the Approvals tab.", "to add it to the queue, then approve it in the Approvals tab.").replace(" before / sau</h3>", " before / after</h3>")
 # Prototype bug: botNote() is called after an approval and on chat errors but was never defined (ReferenceError).
 anchor = "async function say(bot,html,cls=''){"
 assert anchor in code and "function botNote" not in code

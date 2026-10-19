@@ -20,7 +20,7 @@
 ## Kept exactly as in the prototype
 - **Flow and business behaviour:** all screens and their order, the auth flow, chat routing and intents, task unlocking, tool calls and tiers, the calculations, the financing catalogue and ranking, the what-if levers, drafts, approval and rejection dialogs, audit log event collection, data upload, settings and pins.
 - **Data:** the synthetic data (`DATA`) and the scenario presets (`SC`).
-- **Language:** English UI text.
+- **Language:** English UI text. The only Vietnamese left is the hidden list of upload aliases (`UPLOAD_ALIASES` in `js/config.js`), so files with Vietnamese column headers still import.
 
 ## Navigation, formatting and SRS v1.3 states
 - Numbers use the Vietnamese convention `1.234.567,89`, money is shown in `M`/`bn`, dates in `dd/mm/yyyy`; the shared helpers are in `js/formatters.js` (loaded before `js/app.js`).
@@ -44,7 +44,7 @@
 - **Fonts:** Inter and Inter Display are bundled locally instead of system fonts. The prototype's serif headings use Inter Display.
 
 ## Text and bug fixes
-- **Mixed-language strings:** a few leftover Vietnamese strings in an otherwise English UI were translated: "Mọi draft(s) phải được you duyệt…", "…để đưa on hàng chờ, then duyệt…", the "Ra" (out) label in the chart tooltip, the "before / sau" heading and the "Xong" button.
+- **Mixed-language strings:** a few leftover Vietnamese strings in an otherwise English UI were translated: the approval notice, the queue hint, the "Out" label in the chart tooltip, the "before / after" heading and the "Done" button.
 - **Missing function:** `botNote()` was called after an approval, and on chat errors, but was never defined. That threw a ReferenceError and the confirmation message never appeared in the chat. It is now defined with the prototype's own `newBot`, `say` and `suggestRow` helpers.
 
 
@@ -65,6 +65,6 @@ The interface hides the audit log while keeping `addLog` and its in-memory event
 - **UC01:** per-invoice overdue ratio, type-based lot ages, R-AP-OD / R-AP-INFO, E_AR / E_INV / E_AP with double-count protection, c_i, H/L/HL, BN0–BN7, findings, cause breakdown (1)–(7), counterparty and lot profiles, the dashboard of Table 3-1 with evidence and a minimal threshold-policy dialog.
 - **UC02:** delay samples (180 days, truncated open invoices), weighted Base / P25 / P75 with the customer → company → 7-day fallback, conditional delays for overdue invoices, historical / due-date payment timing, five scenarios with the BR-02.16 order check, Cash0 and Rmin / Rtarget / Rupper by source, two-week blocks, episodes coloured by their worst day, TH on Base, matrix cell only for the same snapshot.
 - **Links and request:** contributing factors with L1 / L2 / L3 links (candidate / supported, never confirmed) and an immutable gap_request behind the "Find financing" buttons; rankFor is unchanged.
-- **Chat:** guards for threshold changes, causal claims and out-of-scope questions; deterministic five-part (UC01) and four-part (UC02) answers from a fact registry, checked by verifyAnswer; tool names of Table 2-5 with a "Tools used" line; vi/en (default vi).
+- **Chat:** guards for threshold changes, causal claims and out-of-scope questions; deterministic five-part (UC01) and four-part (UC02) answers from a fact registry, checked by verifyAnswer; tool names of Table 2-5 with a "Tools used" line; English only.
 - **Feedback loop:** one forecast log per snapshot and configuration version; reconciliation of older logs with a newer snapshot (FB-2/3/4/6) and model_health on the Shortfall tab.
 - Decisions taken where the SRS is open are marked `// SRS-DECISION:` in the code.

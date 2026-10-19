@@ -27,7 +27,7 @@ python3 -m http.server 8000        # or any static file server
 - **Company files:** upload CSV, XLSX, XLS and DOCX files. Files stay in this browser's IndexedDB; Word files are reference-only. Recognised tables (sales and purchase invoices, inventory, 13-week plan, financial statements) are read and checked in the background; once financial statements and at least one cash-flow table are present, the company data is updated automatically and each file shows *Used in analysis* (or what is still missing). The newest file of each type wins. Deleting a file keeps the data already in use.
 - **Permission tiers:** T0 Read · T1 Advise · T2 Draft · T3 Approve. Only the Approve click in the UI runs a *simulated* execution.
 - **Data:** three synthetic companies (F01–F03), one per demo account, over a half-year analysis period (N = 183 days). Every figure is computed in the browser by `js/engine.js` (SRS v1.3 UC01/UC02 rules) from the raw invoices, lots and plans in `js/data.js`; uploaded files go through the same engine. This is not a credit decision.
-- **Language:** the working-capital and cash-forecast screens and the chat answers are available in Vietnamese (default) and English (Settings → General → Language).
+- **Language:** English only. Numbers use `1.200.000.000`, money `11,85bn` / `619,3M`, dates `30 Sep 2026`. Uploaded files may still use Vietnamese column headers (hidden aliases in `js/config.js`).
 
 ## Test
 ```bash
@@ -49,7 +49,7 @@ css/app.css             prototype layout and Lilact single-flow styles; every co
 js/data.js              raw sample snapshots (generated), financing catalogue and what-if presets
 js/config.js            SRS v1.3 parameters (Appendix C) and threshold table tv1.threshold.v2
 js/engine.js            deterministic UC01/UC02 engine: snapshot, diagnosis, profiles, five-scenario forecast, reserves, links, gap_request, feedback loop
-js/i18n.js              vi/en strings of the UC01/UC02 screens and chat answers
+js/i18n.js              English strings of the UC01/UC02 screens and chat answers
 js/narrative.js         fact registry, five- and four-part answers, verifyAnswer
 js/app.js               application logic and single-flow UI wiring (four-step chat flow unchanged)
 assets/                 Lilact logos, favicons, Inter fonts (OFL)
