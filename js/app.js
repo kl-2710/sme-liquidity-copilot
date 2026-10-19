@@ -277,7 +277,7 @@ $('#tabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)se
 
 function switchContext(firm,cs,{silent}={}){
   for(const k in TV3_CACHE)delete TV3_CACHE[k];S.causes={};
-  S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;S.uc01Sel=null;S.weeks=CFG.tv2.horizonWeeks;policyCases(firm);
+  S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;S.uc01Sel=null;S.gapRequest=null;S.weeks=CFG.tv2.horizonWeeks;policyCases(firm);
   const c=C();const eps=episodes(c);if(c.defk)S.epIdx=c.defk-1;else if(eps.length)S.epIdx=eps.reduce((a,e,i)=>e.peak>eps[a].peak?i:a,0);
   derive();S.lev=freshLev();$('#firmSel').value=firm;$$('.chipdate b').forEach(b=>b.textContent=fd(C().as_of));
   const w=$('#work');w.classList.add('loading');setTimeout(()=>w.classList.remove('loading'),260);
@@ -290,6 +290,50 @@ $('#firmSel').addEventListener('change',e=>{const f=e.target.value;if(f==='__add
 
 // Numbered section used by the Dashboard and Shortfall tabs.
 const dashSec=(n,col,h,pp,inner)=>`<section class="dsec" style="--sc:${col};--i:${n-1}"><header class="dsh"><span class="dsn">${n}</span><div><h2>${h}</h2><p>${pp}</p></div></header>${inner}</section>`;
+/* ===== UC01 ↔ UC02 links and the gap_request to UC03 (SRS 2.7.11.9, 2.8.5, 2.8.7) ===== */
+const evDate=e=>e.t!=null?fd(isoOf(e.t)):'—';
+// Contributing factors of a gap of the displayed scenario, from the cached UC02 run and UC01 findings (nothing recalculated).
+function gapFactors(e){return ENGINE.contributingFactors(uc02(),uc01(),{start:e.start,end:e.end,low_date:e.peakDay},S.case)}
+function delayNote(e){
+  if(e.tier==null)return '';
+  const m=e.method||'',d=e.delay!=null?nf(e.delay,1):'—';
+  if(/residual/.test(m))return t('cf.delay.residual',{dpd:e.dpd,d});
+  return t('cf.delay.'+e.tier+(/conditional/.test(m)?'_cond':''),{d,n:(uc02().fc.delays.receipts[e.key]||{}).used_n||0});
+}
+function factorsHTML(cf){
+  const L=cf.links;
+  const linkLine=l=>l.type==='L1'?t('link.L1.'+l.item,{obj:esc(l.object),f:l.finding_ids.join(', '),ev:t('ev.'+l.evidence),v:money(l.amount)})
+    :t('link.L2',{f:l.finding_ids.join(', ')||'—',ev:t('ev.'+l.evidence),v:money(l.amount)});
+  return `<div class="cf"><div class="cf-col"><b>${t('cf.out')}</b><ul>${cf.outflows.map(e=>`<li>${esc(lblCat(e.cat))}${e.cat==='supplier_payment'?' · '+esc(e.partner):''}: ${money(e.amt)} · ${evDate(e)}</li>`).join('')||`<li>—</li>`}</ul></div>
+   <div class="cf-col"><b>${t('cf.after')}</b><ul>${cf.receipts_after.map(e=>`<li>${esc(e.partner)} · ${esc(e.id)}: ${money(e.amt)} · ${e.scope==='beyond_horizon'?t('cf.beyond'):t('cf.expected',{d:evDate(e)})}<small>${delayNote(e)}</small></li>`).join('')||`<li>—</li>`}</ul></div></div>
+   <div class="cf-links">${L.length?L.map(l=>`<p class="lk lk-${l.type}"><span class="lt">${l.type}</span>${linkLine(l)}</p>`).join(''):`<p class="lk lk-L3"><span class="lt">L3</span>${t('link.L3')}</p>`}
+    ${cf.squeeze?`<p class="lk sq">⇄ ${t('link.squeeze')}</p>`:''}<p class="cf-note">${t('cf.note')}${cf.fallback_delays?' '+t('cf.fallback'):''}</p></div>`;
+}
+// gap_request (UC02.7): a summary to confirm first; only with an ok/provisional run, TH01 and a matrix cell; never with W unknown or expired data.
+function gapRequestState(){const u=uc02(),d=uc01(),fr=freshness(DATA.snaps[S.firm]).level;return {u,d,chk:ENGINE.gapRequestCheck(u,d,fr)}}
+function gapRequestHTML(gr){
+  const row=(k,v)=>`<div><dt>${t('gr.'+k)}</dt><dd>${v}</dd></div>`;
+  return `<dl class="ev-info gr">${row('need_date',fd(gr.need_date))}${row('peak_gap',`${money(gr.peak_gap)} · ${fd(gr.peak_date)}`)}${row('cash0_need',money(gr.cash0_need))}
+   ${row('episodes',gr.episodes.map(e=>`${fds(e.start)}–${fds(e.end)}${e.censored?' ('+t('ep.open')+')':''}`).join(', '))}${row('matrix',`${gr.matrix_case_id} · ${M_EN[gr.matrix_case_id]}`)}
+   ${row('bottleneck',gr.main_bottleneck?t('item.'+gr.main_bottleneck):t('w.none'))}${row('pattern',`${gr.bn_pattern} · ${gr.cause_items.join(', ')||'—'}`)}${row('findings',gr.finding_ids.join(', ')||'—')}
+   ${row('obligation',money(gr.obligation_overdue))}${row('link',`${gr.link_type} · ${t('ev.'+gr.evidence_level)}`)}${row('scenario',t('sc.'+gr.scenario))}${row('cash0',t('c0.st.'+gr.cash0_status))}
+   ${row('health',t('mh.'+gr.model_health))}${row('ids',`${gr.run_id} · ${esc(gr.snapshot_id)}`)}${row('versions',`${gr.versions.formula} · ${gr.versions.threshold} · ${esc(gr.versions.config)}`)}</dl>
+   <p class="cf-note">${t('gr.peaknote')}</p>`;
+}
+function openGapRequest(after){
+  const {u,d,chk}=gapRequestState();
+  if(!chk.ok){openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${chk.label==='idle_cash'?t('gr.idle'):t('gr.title')}</h3><p>${t('gr.block.'+chk.reason)}</p><div class="acts"><button class="btn sec" id="grClose">${t('pol.cancel')}</button></div></div>`,m=>{m.querySelector('.settings-close').onclick=m.querySelector('#grClose').onclick=closeModal});return}
+  const gr=ENGINE.buildGapRequest(u,d,{scenario:S.case,health:modelHealthNow(),createdAt:new Date().toISOString()});
+  openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${t('gr.title')}</h3><p class="sub">${t('gr.sub')}</p>${gapRequestHTML(gr)}
+    <div class="acts"><button class="btn sec" id="grCancel">${t('pol.cancel')}</button><button class="btn primary" id="grSend">${t('gr.send')}</button></div></div>`,m=>{
+    m.querySelector('.settings-close').onclick=m.querySelector('#grCancel').onclick=closeModal;
+    m.querySelector('#grSend').onclick=()=>{S.gapRequest=gr;closeModal();addLog({tool:'match_financing',tier:1,args:{gap_request:gr.request_id},status:'ok',summary:`gap_request ${gr.request_id} sent: need ${gr.need_date}, peak ${Math.round(gr.peak_gap)}`});
+      toast(t('gr.sent',{id:gr.request_id}));if(after)after(gr)};
+  });
+}
+// Health of the forecast model from the feedback loop (phase H); insufficient_sample until a previous forecast can be reconciled.
+function modelHealthNow(){return (typeof FEEDBACK!=='undefined'&&FEEDBACK.health(S.firm))||'insufficient_sample'}
+
 /* ===== UC02 Shortfall tab (SRS 2.8.1, 2.8.3–2.8.5, Table 3-1): information bar, scenario and horizon selectors, Cash0 banner,
    overview, weekly forecast with an expandable daily table, daily chart with reserve lines and the Optimistic–Conservative band,
    scenario comparison, shortfall episodes, two-week blocks and the financing ranking. TH and the matrix cell always use Base. ===== */
@@ -306,7 +350,7 @@ function uc02HeaderHTML(u,c){
   const bar=`<div class="uc-src uc2-bar" data-wid="uc2bar"><div class="uc-src-l"><span><b>${esc(FIRMS[S.firm].name)}</b> · ${t('gap.asof',{d:fd(u.as_of)})} · ${t('gap.period',{a:fd(u.start),b:fd(u.end),w:u.weeks})} · ${t('gap.mode.'+(sc==='continuing_sales'?'cont':'runoff'))}</span>
      <span class="runst st-${u.status}">${t('run.'+u.status)}</span><span>${scope}</span><span class="fr fr-${fr.level}"><i class="lv-sw" aria-hidden="true"></i>${t('fresh.'+fr.level,{h:CFG.erp.freshMaxHours})}</span></div>
     <div class="uc-ctl"><label>${t('gap.scenario')}<select id="scSel">${opts}</select></label><label>${t('gap.weeks')}<select id="wkSel">${wk}</select></label>
-     <button class="btn sec sm" type="button" id="cash0Btn">${t('c0.open')}</button></div>
+     <button class="btn sec sm" type="button" id="cash0Btn">${t('c0.open')}</button><button class="btn primary sm" type="button" id="grBtn">${u.th.th==='TH03'?t('gr.idle'):t('gr.open')}</button></div>
     ${sc==='continuing_sales'?`<p class="uc-note warn">${t('gap.cont.note')}</p>`:''}${sc!=='base'?`<p class="uc-note">${t('gap.base.note')}</p>`:''}</div>`;
   const banner=u.cash0.status!=='confirmed'?`<div class="callout warn c0b" data-wid="cash0"><span>⚠</span><div><b>${t('c0.banner.t')}</b> ${t('c0.banner',{v:u.cash0.value==null?'—':money(u.cash0.value),need:b.need_rtarget==null?'—':money(b.need_rtarget)})}
      <div style="margin-top:8px"><button class="btn primary sm" type="button" id="cash0Btn2">${t('c0.open')}</button></div></div></div>`:'';
@@ -377,7 +421,7 @@ function renderGap(){
     <div class="card kpi"><div class="t">Cash needed on</div><div class="v num">${fds(EP.start)}</div><div class="f">${dl} days from the cut-off</div></div>
     <div class="card kpi k3"><div class="t">Lowest balance</div><div class="v num">${money(EP.cashMin)}</div><div class="f">on ${fds(EP.peakDay)}</div></div>
     <div class="card kpi k4"><div class="t">Gap ends</div><div class="v num">${fds(EP.end)}</div><div class="f">${EP.censored?'not recovered within the period':'recovered'}</div></div>
-  </div>${blocksHTML(u)}${stuck}`);
+  </div><div class="card cfcard" data-wid="factors"><div class="card-head"><div><h3>${t('cf.title',{k:EP.k})}</h3><p>${t('cf.sub')}</p></div></div>${factorsHTML(gapFactors(EP))}</div>${blocksHTML(u)}${stuck}`);
     const rank=dashSec(4,'var(--lc-color-action-primary)',`Financing ranking · gap ${EP.k}`,'Tier (fully covers and funds in time), then cost relative to the shortfall',
       !t3?`<div class="callout"><span>ℹ</span><div>The ranking appears after the financing step of the conversation.<div style="margin-top:8px"><button class="btn primary sm" type="button" data-ask="${esc(rq)}">${esc(rq)} →</button></div></div></div>`
       :`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div><span class="status amber"><i></i>provisional</span></div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`);
@@ -400,6 +444,7 @@ function bindGapHeader(p){
   const ss=$('#scSel',p);ss&&(ss.onchange=()=>setScenario(ss.value));
   const ws=$('#wkSel',p);ws&&(ws.onchange=()=>setWeeks(+ws.value));
   $$('#cash0Btn,#cash0Btn2',p).forEach(b=>b.onclick=openCash0Form);
+  const gb=$('#grBtn',p);gb&&(gb.onclick=()=>openGapRequest(()=>renderGap()));
 }
 // The scenario selector changes the displayed scenario only; the chat, the stage and TH (Base) stay as they are.
 function setScenario(sc){if(!SC_KEYS.includes(sc))return;S.case=sc;S.epIdx=0;const c=C();if(c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];refreshTab();renderDemoChips()}
@@ -447,7 +492,7 @@ function openCash0Form(){
       if((differs&&reason.length<10)||reason.length>500){err.textContent=t('pol.reason.err');return}
       const md=(m.querySelector('input[name=c0m]:checked')||{}).value||'direct',ess=[...m.querySelectorAll('.c0s input:checked')].map(x=>x.value);
       POLICY.set(f,{cash0:tot==null?null:{total:tot,restricted:res,confirmed:true},reserve:{method:md,rmin,rtarget:rt,rupper:rup,reason},amount_basis:q('#c0Basis').value,vat_rate:vat==null?null:vat/100,essential_suppliers:ess},reason);
-      closeModal();policyCases(f);S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];
+      closeModal();policyCases(f);S.gapRequest=null;S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];
       toast(t('c0.saved',{v:POLICY.versionId(f)}));refreshTab();renderDemoChips()};
   });
 }
@@ -957,7 +1002,7 @@ function advance(n,bot){
   applyStage();
   if(S.panel){if(S.tab!==TASKS[S.task].tab)setTab(TASKS[S.task].tab);else renderTab()}
 }
-function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';applyStage();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
+function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.gapRequest=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';applyStage();if(S.panel&&(S.tab==='gap'||S.tab==='whatif'))setTab('dash')}
 function userFirst(){const n=(S.user&&S.user.name||'you').trim().split(/\s+/);return n[n.length-1]}
 
 
@@ -1093,22 +1138,21 @@ async function respondCause(bot,{focus}={}){
     advance(2,bot);suggestRow(bot,nextSuggest());return;
   }
   const list=focus?EPS.filter(e=>e.k===focus):EPS,big=largestGap(),tb=openAR(c).top[0];
-  if(focus)await say(bot,`<p>Here is the cash bridge for <b>gap ${focus}</b> (${fds(list[0].start)}${list[0].start!==list[0].end?'–'+fds(list[0].end):''}, peak shortfall <b>${mm(list[0].peak)}</b>).</p>`);
-  else await say(bot,`<p>There are <b>${EPS.length} gap${EPS.length>1?'s':''}</b> below the buffer ${money(c.buffer)}:</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>Each card below explains one gap; the largest is open.</p>`);
+  if(focus)await say(bot,`<p>${t('cf.focus',{k:focus})} <b>gap ${focus}</b> (${fds(list[0].start)}${list[0].start!==list[0].end?'–'+fds(list[0].end):''}, peak shortfall <b>${mm(list[0].peak)}</b>).</p>`);
+  else await say(bot,`<p>There are <b>${EPS.length} gap${EPS.length>1?'s':''}</b> below Rtarget ${money(c.buffer)}:</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>${t('cf.intro')}</p>`);
   await toolCall(bot,'explain_liquidity_case',0,{firm_id:S.firm,gaps:list.map(e=>e.k)},()=>{addLog({tool:'explain_liquidity_case',tier:0,args:{firm_id:S.firm,gaps:list.map(e=>e.k)},status:'ok',summary:`Cash bridge for gap${list.length>1?'s':''} ${list.map(e=>e.k).join(', ')}`});return {}},{ms:420});
   S.causes=S.causes||{};
   const wrap=document.createElement('div');wrap.className='gap-accs';
   wrap.innerHTML=list.map(e=>{
-    const k=causeOf(e),drv=k.by.map(([t,v])=>`${CAUSE_LBL[t]||t} ${mm(v)}`);
+    const k=causeOf(e),drv=k.by.map(([lb,v])=>`${CAUSE_LBL[lb]||lb} ${mm(v)}`),cf=gapFactors(e);
     const lateTxt=k.late?`${esc(k.late[3])} ${mm(k.late[4])} arrives only on ${fd(k.late[5])}, after the low point`:'';
     const same=k.late&&tb&&k.late[3]===tb.k;
-    S.causes[e.k]={txt:`${drv.slice(0,2).join(' and ')} fall before the low point${k.late?`, while ${lateTxt}`:''}`};
+    S.causes[e.k]={txt:`${drv.slice(0,2).join(' and ')} fall before the low point${k.late?`, while ${lateTxt}`:''}`,link:cf.link_type,evidence:cf.evidence_level};
     const lv=episodeLevel(c,e);
-    return `<details class="liq gap-acc" data-gap="${e.k}" ${focus||e.k===big.k?'open':''}><summary><span class="ga-t">Why gap ${e.k} happens</span><span class="lv-tag" style="--lvc:${LV[lv].color}"><i class="lv-sw lv-${lv}" aria-hidden="true"></i>${t('ep.alert',{l:lvLabel(lv)})}</span><span class="ga-s">${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''} · peak ${mm(e.peak)}${e.k===big.k?' · largest gap':''}</span></summary>
+    return `<details class="liq gap-acc" data-gap="${e.k}" ${focus||e.k===big.k?'open':''}><summary><span class="ga-t">${t('cf.title',{k:e.k})}</span><span class="lv-tag" style="--lvc:${LV[lv].color}"><i class="lv-sw lv-${lv}" aria-hidden="true"></i>${t('ep.alert',{l:lvLabel(lv)})}</span><span class="ga-s">${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''} · peak ${mm(e.peak)}${e.k===big.k?' · largest gap':''}</span></summary>
     <div class="ga-b"><p class="ga-p">Bridge from the cut-off ${fd(c.as_of)} to the low point ${fd(e.peakDay)}: the balance reaches <b>${money(e.cashMin)}</b>, ${mm(e.peak)} below the buffer.</p>
     <div class="liq-b"><div class="lb"><span>Opening cash</span><b class="num">${money(k.open)}</b></div><div class="lb"><span>+ Cash in</span><b class="num">${money(k.sumIn)}</b></div><div class="lb"><span>− Cash out</span><b class="num">${money(k.sumOut)}</b></div></div>
-    <div class="liq-note"><span>↧</span><div><b>Largest outflows before the low point</b><ul class="cause-list">${k.by.map(([t,v])=>`<li>${CAUSE_LBL[t]||t}: ${money(v)}</li>`).join('')}</ul></div></div>
-    ${k.late?`<div class="liq-note"><span>◷</span><div><b>Largest receipt after the low point</b>: ${lateTxt}.${same?` This is the same customer that holds ${nf(tb.v/openAR(c).tot*100,1)}% of receivables in the diagnosis.`:''} This is timing evidence, not proof that the customer caused the gap; the what-if step tests it.</div></div>`:''}
+    ${factorsHTML(cf)}
     <div class="liq-act"><button class="btn primary sm" type="button" data-gap-open="${e.k}">⚠ Open gap ${e.k} in Shortfall</button></div></div></details>`}).join('');
   S.cause=S.causes[focus||big.k];
   bot.appendChild(wrap);scroll();
@@ -1119,13 +1163,18 @@ async function respondCause(bot,{focus}={}){
 // Financing for every gap (or one named gap): a summary table, then the top 3 per gap, collapsed.
 async function respondRank(bot,{focus}={}){
   if(!EPS.length){await say(bot,'No shortfall, so there is nothing to match against the catalogue yet.');suggestRow(bot,nextSuggest());return}
-  const list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
+  // SRS-DECISION: asking for the financing ranking in the chat is the user's explicit request; the gap_request is created here when
+  // UC02.7 allows it, otherwise the reason is given and nothing is ranked.
+  if(!S.gapRequest){const {u,d,chk}=gapRequestState();
+    if(!chk.ok){await say(bot,`<p>${chk.label==='idle_cash'?t('gr.idle')+': ':''}${t('gr.block.'+chk.reason)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
+    S.gapRequest=ENGINE.buildGapRequest(u,d,{scenario:S.case,health:modelHealthNow(),createdAt:new Date().toISOString()})}
+  const gr=S.gapRequest,list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
   await toolCall(bot,'rank_financing',1,{firm_id:S.firm,episodes:list.map(e=>e.k)},()=>{addLog({tool:'rank_financing',tier:1,args:{firm_id:S.firm,episodes:list.map(e=>e.k)},status:'ok',summary:res.map(({e,t3})=>`gap ${e.k}: ${t3.ranked[0]?t3.ranked[0].product_id:'none'}`).join('; ')});return {}},{ms:520});
   const use=new Map();
   res.forEach(({e,t3})=>t3.ranked.slice(0,3).forEach(x=>{if(x.invoice_id&&x.invoice_id!=='–'){if(!use.has(x.invoice_id))use.set(x.invoice_id,new Set());use.get(x.invoice_id).add(e.k)}}));
   const dups=[...use].filter(([,g])=>g.size>1);
   const cause=focus?(S.causes||{})[focus]:S.cause;
-  await say(bot,`${cause?`<p>Matching starts from the cause found in the last step${focus?` for gap ${focus}`:''}: ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
+  await say(bot,`<p>${t('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p>${cause?`<p>${t('cf.from',{k:focus||''})} ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
   const rows=res.map(({e,t3})=>{const b=t3.ranked[0];return `<tr data-gap="${e.k}"><td><b>Gap ${e.k}</b></td><td class="num">${mm(e.peak)}</td><td class="num">${fd(e.start)}</td><td>${b?`<b>${b.product_id}</b>${b.invoice_id!=='–'?' · '+b.invoice_id:''}`:'—'}</td><td class="num">${b?nf(b.cost/1e6,2)+'M':'—'}</td><td>${!b?'—':b.gap_rem>0?`<span class="status amber">Partly · short ${mm(b.gap_rem)}</span>`:'<span class="status green">Yes</span>'}</td></tr>`}).join('');
   const card=document.createElement('div');card.className='liq rank-all';
   card.innerHTML=`<div class="liq-h"><div><h4>Financing summary</h4><p>Best option per gap · ${CAT.length} products in the synthetic catalogue</p></div><span class="status amber"><i></i>provisional</span></div>
@@ -1971,7 +2020,8 @@ function liquidityStateHTML(){
     ${T.th!=='unknown'?alertLegendHTML({surplus:true}):''}<p class="ls-foot">${foot}</p></section>`;
 }
 // "Find financing" (UC03): solutions only open after diagnosis → cause → ranking, so Copilot runs the next step in the chat.
-function goFinancing(){
+function goFinancing(){openGapRequest(()=>goFinancingFlow())}
+function goFinancingFlow(){
   if(S.stage>=3){setTab('gap');return}
   const list=currentChips(),next=list.find(x=>!S.done.has(x.id))||list[0];
   if(innerWidth<900)closePanel();
@@ -2267,7 +2317,7 @@ function savePins(){try{localStorage.setItem(pinKey(),JSON.stringify(PINS))}catc
 const toggleIn=(arr,v)=>{const i=arr.indexOf(v);if(i>=0){arr.splice(i,1);return false}arr.push(v);return true};
 const PIN_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></svg>';
 const FS_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
-const WNAME={source:'Data source',w:'W axis',mar:'Capital above the normal level',ob:'Overdue obligations',tables:'Customers, lots and suppliers',ar:'Receivables',ap:'Payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance',state:'Liquidity state'};
+const WNAME={factors:'Contributing factors',source:'Data source',w:'W axis',mar:'Capital above the normal level',ob:'Overdue obligations',tables:'Customers, lots and suppliers',ar:'Receivables',ap:'Payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance',state:'Liquidity state'};
 
 function renderPins(){
   const box=$('#pinBox'),list=$('#pinList');if(!box)return;

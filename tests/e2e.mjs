@@ -451,6 +451,38 @@ await step("F · Q52–Q55 cash state TH on Base and Q56 the matrix cell", async
   assert.equal(r[4], "M7"); assert.equal(r[5], "TH01");
 });
 
+// UC01 ↔ UC02 links and gap_request (phase G).
+await step("G · L1 on both sides (two-sided squeeze, supported from the customer's own history); T38 BN0 + TH01 → M1, L3, request allowed", async () => {
+  const r = await ev(() => { const A = ENGINE.dnum("2026-09-30"), d = (x) => ENGINE.diso(A + x);
+    const hist = Array.from({ length: 6 }, (_, i) => ({ id: "H" + i, customer: "Slow Co", amount: 50e6, issue: d(-170 + i * 20 - 30), due: d(-170 + i * 20), paid: d(-170 + i * 20 + 60) }));
+    const input = TMK({ fin: [{ period_start: "2026-07-03", period_end: "2026-09-30", revenue: 30e9, cogs: 24e9, opening_cash: 300e6, current_assets: 20e9 }],
+      sales: [...hist, { id: "LATE", customer: "Slow Co", amount: 900e6, issue: d(-70), due: d(-40), paid: null }, { id: "N1", customer: "Main", amount: 8e9, issue: d(-5), due: d(60), paid: null }],
+      purchases: [{ id: "PO", supplier: "Late Mill", amount: 250e6, issue: d(-70), due: d(-40), paid: null }, { id: "P1", supplier: "Mill", amount: 5e9, issue: d(-5), due: d(70), paid: null }],
+      inventory: [{ name: "Fabric", type: "NVL", qty: 1, unit_cost: 15e9, days: 10, owner: "own" }], planned: [{ id: "PAY", date: d(3), direction: "OUT", category: "payroll", amount: 300e6, certainty: "confirmed" }] });
+    const s = ENGINE.makeSnapshot(input, { periodStart: "2026-07-03" }), w = ENGINE.diagnose(s), run = ENGINE.runUC02(s, {}, { uc01: w });
+    const cf = ENGINE.contributingFactors(run, w, run.episodes[0], "base");
+    // T38: no item above its threshold, a payroll pushes Base below Rtarget.
+    const bn0 = TMK({ sales: [{ id: "S", customer: "K", amount: 40 * 30e9 / 90, issue: d(-10), due: d(20), paid: null }], purchases: [{ id: "P", supplier: "S", amount: 30 * 24e9 / 90, issue: d(-5), due: d(25), paid: null }],
+      inventory: [{ name: "Fabric", type: "NVL", qty: 1, unit_cost: 70 * 24e9 / 90, days: 10, owner: "own" }], planned: [{ id: "PAY", date: d(2), direction: "OUT", category: "payroll", amount: 900e6 }] });
+    const s0 = ENGINE.makeSnapshot(bn0, { periodStart: "2026-07-03" }), w0 = ENGINE.diagnose(s0), r0 = ENGINE.runUC02(s0, {}, { uc01: w0 }), gr0 = ENGINE.buildGapRequest(r0, w0, {});
+    return { rules: w.rule_ids, links: cf.links.map((l) => [l.type, l.item, l.evidence]), squeeze: cf.squeeze, type: cf.link_type,
+      t38: [w0.bn_pattern, r0.th.th, r0.matrix.cell, ENGINE.gapRequestCheck(r0, w0, "fresh").ok, gr0.link_type, gr0.finding_ids.length, Object.isFrozen(gr0)] }; });
+  assert.ok(r.rules.includes("R-AR-OD") && r.rules.includes("R-AP-OD"));
+  assert.deepEqual(r.links.filter((l) => l[0] === "L1"), [["L1", "AR", "supported"], ["L1", "AP", "candidate"]]);
+  assert.equal(r.squeeze, true); assert.equal(r.type, "L1");
+  assert.deepEqual(r.t38, ["BN0", "TH01", "M1", true, "L3", 0, true]);
+});
+await step("G · gap_request of F01 (need date, peak, Cash0 needed, M7, L1) is immutable; UC02.7 refusals", async () => {
+  const r = await ev(() => { const u = uc02("F01"), d = uc01("F01"), gr = ENGINE.buildGapRequest(u, d, {}); let changed = true; try { gr.peak_gap = 1; changed = gr.peak_gap === 1 } catch (e) { changed = false }
+    const unknownW = { ...d, wc_class: "unknown" };
+    return { gr: [gr.need_date, gr.peak_gap, gr.peak_date, gr.cash0_need, gr.matrix_case_id, gr.link_type, gr.evidence_level, gr.bn_pattern, gr.obligation_overdue, gr.scenario, gr.cash0_status], changed,
+      th03: ENGINE.gapRequestCheck(uc02("F02"), uc01("F02"), "fresh"), w: ENGINE.gapRequestCheck(u, unknownW, "fresh").reason, exp: ENGINE.gapRequestCheck(u, d, "expired").reason,
+      miss: ENGINE.gapRequestCheck({ ...u, status: "missing_data" }, d, "fresh").reason }; });
+  assert.deepEqual(r.gr, ["2026-10-07", 1119322000, "2026-12-18", 2319322000, "M7", "L1", "candidate", "BN7", 157980000, "base", "provisional"]);
+  assert.equal(r.changed, false);
+  assert.deepEqual(r.th03, { ok: false, reason: "th03", label: "idle_cash" }); assert.equal(r.w, "w_unknown"); assert.equal(r.exp, "expired"); assert.equal(r.miss, "status");
+});
+
 for (const theme of ["light", "dark"]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
@@ -797,6 +829,32 @@ for (const theme of ["light", "dark"]) {
     const r = await page.evaluate(() => { const u = uc02(); return [u.cash0.status, Math.round(u.cash0.value / 1e6), u.config_version, Math.round(u.summary.base.need_rtarget / 1e6), Math.round(u.summary.base.min / 1e6), u.reserves.src.rtarget]; });
     assert.deepEqual(r, ["confirmed", 2000, `CFG-F01-v${v0 + 1}`, 2319, 181, "owner_policy"]);    // Cash0 needed does not depend on Cash0
     assert.equal(await page.locator("#pane-gap .c0b").count(), 0);
+  });
+
+  await step("G · Find financing shows the gap_request summary; the chat ranking uses the confirmed request; wording is 'contributing factors'", async () => {
+    await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(2); setTab("gap"); setWide(true); }); await page.waitForTimeout(700);
+    assert.match(await page.locator("#pane-gap .cfcard h3").innerText(), /Contributing factors · gap \d/);
+    await page.click("#grBtn"); await page.waitForTimeout(300);
+    const need = await page.evaluate(() => fd(uc02().summary.base.first_below_rtarget));
+    const m = await page.locator("#modal").innerText();
+    assert.match(m, /Request to find financing \(gap_request\)/); assert.ok(m.includes(need), need); assert.match(m, /M7/); assert.match(m, /not the amount to raise on the first day/);
+    await page.click("#grSend"); await page.waitForTimeout(400);
+    const id = await page.evaluate(() => S.gapRequest && S.gapRequest.request_id);
+    assert.match(id, /^GR-/);
+    await page.evaluate(() => setWide(false));
+    await page.fill("#chatInput", "Why am I short of cash? Show me the cause."); await page.click("#sendBtn"); await page.waitForTimeout(3800);
+    const cause = await page.locator(".messages.on .msg.bot").last().innerText();
+    assert.match(cause, /Contributing factors · gap/); assert.doesNotMatch(cause, /Why gap|main cause/i);
+    await page.fill("#chatInput", "Rank the financing options that fit this cause."); await page.click("#sendBtn"); await page.waitForTimeout(3800);
+    assert.ok((await page.locator(".messages.on .msg.bot").last().innerText()).includes(`Request ${id}: cash needed from ${need}`));
+  });
+  await step("G · F02 (Base TH03): the button offers idle-cash options and no request is created", async () => {
+    await page.evaluate(() => { switchContext("F02", "base", { silent: true }); advance(2); setTab("gap"); setWide(true); }); await page.waitForTimeout(700);
+    assert.match(await page.locator("#grBtn").innerText(), /View options for idle cash \(phase 2\)/);
+    await page.click("#grBtn"); await page.waitForTimeout(300);
+    assert.match(await page.locator("#modal").innerText(), /cash surplus \(TH03\)/); assert.equal(await page.locator("#grSend").count(), 0);
+    await page.keyboard.press("Escape"); assert.equal(await page.evaluate(() => S.gapRequest), null);
+    await page.evaluate(() => switchContext("F01", "base", { silent: true }));
   });
   await step("D · no JavaScript errors on the dashboard", async () => assert.deepEqual(errors, []));
   await page.close();

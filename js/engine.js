@@ -623,6 +623,61 @@ const ENGINE=(()=>{
   // Cash0 needed by the formula T2-23 from a cumulative net-flow series (Q38).
   const cashNeeded=(minCum,rt)=>({rtarget:Math.max(0,rt-Math.min(0,minCum)),zero:Math.max(0,-minCum)});
 
+  /* ---------- UC01 ↔ UC02 links and the request to UC03 (sections 2.7.11.9, 2.8.5, 2.8.7, 2.8.9) ---------- */
+  // Contributing factors of one shortfall episode: the 3 largest outflows up to the low day and the receipts expected after it, with
+  // their delay level (customer / company pool / default). UC01 findings are attached with a link type and an evidence level:
+  // L1 – a receipt or payment of a counterparty with an object-level finding (AR customer with R-AR-OD, AP supplier with R-AP-OD);
+  //      candidate, or supported when the date comes from that counterparty's own history; never confirmed (no counterfactual test yet);
+  // L2 – inventory finding: only "money already spent on goods not yet turned over" when the episode has purchase outflows; candidate;
+  // L3 – BN0 or no matching finding: the shortfall comes from the timing of collections and payments.
+  // Amounts attached to links are references: they are not added up and never added to the shortfall.
+  function contributingFactors(run,uc01,episode,scenario='base'){
+    const o=run.fc.scenarios[scenario],start=dnum(run.fc.start),low=dnum(episode.low_date),epS=dnum(episode.start),epE=dnum(episode.end);
+    const inH=o.events.filter(e=>e.scope==='in_horizon');
+    const top3=a=>a.slice().sort((x,y)=>y.amt-x.amt||(x.id<y.id?-1:1)).slice(0,3);
+    const outflows=top3(inH.filter(e=>e.dir==='OUT'&&e.t>=start&&e.t<=low));
+    const receipts=top3(o.events.filter(e=>e.dir==='IN'&&e.src==='sales_invoice'&&(e.scope==='beyond_horizon'||(e.scope==='in_horizon'&&e.t>low))));
+    const W=uc01||{findings:[],cause_items:[],bn_pattern:'unknown'},links=[];
+    const fCust=new Map(),fSup=new Map();W.findings.forEach(f=>{if(f.object.type==='customer')fCust.set(f.object.key,f);if(f.object.type==='supplier')fSup.set(f.object.key,f)});
+    receipts.forEach(e=>{const f=fCust.get(e.key);if(f)links.push({type:'L1',item:'AR',finding_ids:[f.id],object:e.partner,event_ids:[e.id],amount:e.amt,
+      evidence:e.tier==='customer'&&!/residual/.test(e.method||'')?'supported':'candidate',delay_tier:e.tier})});
+    // AP: the overdue-payable schedule (offset + rank mod 5) of a supplier with a finding that falls inside the episode.
+    const apOd=inH.filter(e=>e.dir==='OUT'&&e.src==='purchase_invoice'&&e.method==='overdue_spread'&&e.t>=epS&&e.t<=epE);
+    [...new Set(apOd.map(e=>e.key))].forEach(k=>{const f=fSup.get(k);if(!f)return;const es=apOd.filter(e=>e.key===k);
+      links.push({type:'L1',item:'AP',finding_ids:[f.id],object:es[0].partner,event_ids:es.map(e=>e.id),amount:sum(es,e=>e.amt),evidence:'candidate',method:'overdue_spread'})});
+    const buys=inH.filter(e=>e.dir==='OUT'&&e.t>=start&&e.t<=low&&(e.src==='purchase_invoice'||e.cat==='new_materials'));
+    if(W.cause_items.includes('INV')&&buys.length)links.push({type:'L2',item:'INV',finding_ids:W.findings.filter(f=>f.item==='INV').map(f=>f.id),object:null,
+      event_ids:buys.map(e=>e.id),amount:sum(buys,e=>e.amt),evidence:'candidate'});
+    const squeeze=links.some(l=>l.type==='L1'&&l.item==='AR')&&links.some(l=>l.type==='L1'&&l.item==='AP');
+    const linkType=links.some(l=>l.type==='L1')?'L1':links.some(l=>l.type==='L2')?'L2':'L3';
+    const evidence=linkType==='L3'?'not_applicable':links.some(l=>l.evidence==='supported')?'supported':'candidate';
+    // "Main cause" is never used (no counterfactual test in this phase); with fallback delays only "contributing factor" applies.
+    return {episode,outflows,receipts_after:receipts,links,squeeze,link_type:linkType,evidence_level:evidence,fallback_delays:receipts.some(e=>e.tier!=='customer')};
+  }
+  // Preconditions of UC02.7: run ok or provisional, TH01 with a matrix cell, W known, data not expired; BN0 is allowed (L3).
+  function gapRequestCheck(run,uc01,freshnessLevel){
+    if(run.th.th==='TH03')return {ok:false,reason:'th03',label:'idle_cash'};
+    if(['missing_data','invalid_data','rejected'].includes(run.status))return {ok:false,reason:'status'};
+    if(!uc01||uc01.wc_class==='unknown')return {ok:false,reason:'w_unknown'};
+    if(freshnessLevel==='expired')return {ok:false,reason:'expired'};
+    if(run.th.th!=='TH01')return {ok:false,reason:'not_th01'};
+    if(!run.matrix.cell)return {ok:false,reason:'not_routed'};
+    return {ok:true};
+  }
+  const deepFreeze=o=>{Object.values(o).forEach(v=>{if(v&&typeof v==='object'&&!Object.isFrozen(v))deepFreeze(v)});return Object.freeze(o)};
+  // The immutable gap_request handed to UC03 (Table 2-78). Need date, peak and Cash0 needed come from Base; episodes from Base.
+  function buildGapRequest(run,uc01,{scenario='base',health='insufficient_sample',createdAt}={}){
+    const b=run.summary.base,factors=run.episodes.map(e=>contributingFactors(run,uc01,e,'base'));
+    const order={L1:0,L2:1,L3:2},best=factors.reduce((a,f)=>!a||order[f.link_type]<order[a.link_type]?f:a,null);
+    const findingIds=[...new Set(factors.flatMap(f=>f.links.flatMap(l=>l.finding_ids)))];
+    return deepFreeze({request_id:'GR-'+hash(run.run_id+'|'+scenario),need_date:b.first_below_rtarget,peak_gap:b.peak_buffer,peak_date:b.peak_buffer_date,cash0_need:b.need_rtarget,
+      episodes:run.episodes.map(e=>({start:e.start,end:e.end,low_date:e.low_date,peak_gap:e.peak_gap,censored:e.censored})),matrix_case_id:run.matrix.cell,
+      main_bottleneck:uc01?uc01.main_bottleneck:null,finding_ids:findingIds,bn_pattern:uc01?uc01.bn_pattern:'unknown',cause_items:uc01?uc01.cause_items.slice():[],
+      obligation_overdue:uc01?uc01.obligation_overdue:0,link_type:best?best.link_type:'L3',evidence_level:best?best.evidence_level:'not_applicable',model_health:health,
+      scenario,cash0_status:run.cash0.status,run_id:run.run_id,snapshot_id:run.snapshot_id,
+      versions:{formula:CFG.versions.formula,threshold:CFG.versions.threshold,config:run.config_version},created_at:createdAt||null});
+  }
+
   /* ---------- Legacy case shape used by the chat flow, simulate() and rankFor() ---------- */
   function legacyCase(snap,scenario,{rtarget,cash0,ev,days}){
     const A=dnum(snap.as_of),lots=snap.lots||[];
@@ -648,5 +703,5 @@ const ENGINE=(()=>{
     return out;
   }
   return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
-    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,legacyCase,buildCases};
+    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,contributingFactors,gapRequestCheck,buildGapRequest,legacyCase,buildCases};
 })();

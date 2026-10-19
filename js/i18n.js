@@ -225,3 +225,57 @@ addStrings('vi',{
   'c0.e.rmin':'Rmin phải từ 0 đến Rtarget.','c0.e.rup':'Rupper phải lớn hơn Rtarget.','c0.e.vat':'Thuế suất VAT phải từ 0 đến 100%.',
   'c0.save':'Xác nhận và lưu','c0.saved':'Đã lưu thành {v}; dự báo được tính lại, kết quả trước đó đã cũ.'
 });
+
+/* ---------- Contributing factors, UC01 links and gap_request ---------- */
+addStrings('en',{
+  'cf.title':'Contributing factors · gap {k}','cf.sub':'Largest outflows up to the low day and receipts expected after it; UC01 findings attached as references.',
+  'cf.intro':'Each card below lists the contributing factors of one gap; the largest is open.','cf.focus':'Contributing factors of','cf.from':'Matching starts from the contributing factors found in the last step{k}:',
+  'cf.out':'Largest outflows up to the low day','cf.after':'Receipts expected after the low day','cf.expected':'expected {d}','cf.beyond':'after the forecast horizon',
+  'cf.delay.customer':'delay {d} days from this customer’s own history ({n} samples)','cf.delay.customer_cond':'overdue: conditional delay {d} days from this customer’s history',
+  'cf.delay.pool':'delay {d} days from the company-wide history (fallback, {n} samples)','cf.delay.pool_cond':'overdue: conditional delay {d} days from the company-wide history (fallback)',
+  'cf.delay.default':'default delay {d} days (fallback, not an observation)','cf.delay.residual':'overdue {dpd} days: {dpd} days + residual, total {d} days (fallback)',
+  'cf.note':'Contributing factors, not causes. Amounts are references: they are not added together and not added to the shortfall.','cf.fallback':'Some delays come from the company-wide history or the default, so no single receipt is called the main cause.',
+  'link.L1.AR':'{obj} ({v}): this receipt contributes to the shortfall and the customer is above a UC01 threshold ({f}) · evidence {ev}.',
+  'link.L1.AP':'{obj} ({v}): overdue payments fall into this shortfall and the supplier has a UC01 finding ({f}) · evidence {ev}.',
+  'link.L2':'Money already spent on goods that have not turned over ({v} of purchases up to the low day; inventory finding {f}) · evidence {ev}.',
+  'link.L3':'No UC01 item is linked to this shortfall; it comes from the timing of collections and payments.','link.squeeze':'Two-sided squeeze: a late receipt and an overdue payment fall into the same shortfall.',
+  'ev.candidate':'candidate','ev.supported':'supported','ev.not_applicable':'not applicable',
+  'gr.open':'Find financing for the shortfall','gr.idle':'View options for idle cash (phase 2)','gr.title':'Request to find financing (gap_request)',
+  'gr.sub':'Check the request before sending it to the financing step (UC03). It is stored unchanged with the run and snapshot it comes from.',
+  'gr.send':'Confirm and send','gr.sent':'Request {id} sent to the financing step.','gr.peaknote':'The largest shortfall is not the amount to raise on the first day.',
+  'gr.used':'Request {id}: cash needed from {d}, largest shortfall {p}, matrix cell {c}, link {l} ({e}).',
+  'gr.need_date':'Cash needed from','gr.peak_gap':'Largest shortfall','gr.cash0_need':'Cash0 needed','gr.episodes':'Shortfall episodes','gr.matrix':'Matrix cell','gr.bottleneck':'Main bottleneck (UC01)',
+  'gr.pattern':'Pattern and items','gr.findings':'UC01 findings','gr.obligation':'Overdue obligations','gr.link':'Link and evidence','gr.scenario':'Scenario','gr.cash0':'Cash0 status','gr.health':'Forecast reliability',
+  'gr.ids':'Run and snapshot','gr.versions':'Versions',
+  'gr.block.th03':'The Base forecast is a cash surplus (TH03); options for idle cash belong to phase 2, so no financing request is created.',
+  'gr.block.status':'The forecast run has missing or invalid data, so no request can be sent.','gr.block.w_unknown':'The working-capital diagnosis is not classified (W unknown); add the missing data first.',
+  'gr.block.expired':'The data is older than 72 hours (expired); refresh the data before sending a request.','gr.block.not_th01':'The Base forecast has no day below Rtarget (not TH01), so there is no shortfall to finance.',
+  'gr.block.not_routed':'No matrix cell is assigned yet (W and TH must come from the same snapshot).',
+  'mh.insufficient_sample':'not enough reconciled invoices yet','mh.ok':'good','mh.watch':'watch – forecast drifting','mh.degraded':'degraded – do not rely on it alone'
+});
+addStrings('vi',{
+  'cf.title':'Yếu tố góp phần · đợt thiếu {k}','cf.sub':'Các khoản chi lớn nhất đến ngày thấp nhất và các khoản thu dự kiến sau ngày đó; finding UC01 gắn kèm để tham chiếu.',
+  'cf.intro':'Mỗi thẻ dưới đây liệt kê yếu tố góp phần của một đợt thiếu; đợt lớn nhất đang mở.','cf.focus':'Yếu tố góp phần của','cf.from':'Việc so khớp bắt đầu từ yếu tố góp phần ở bước trước{k}:',
+  'cf.out':'Khoản chi lớn nhất đến ngày thấp nhất','cf.after':'Khoản thu dự kiến sau ngày thấp nhất','cf.expected':'dự kiến {d}','cf.beyond':'sau phạm vi dự báo',
+  'cf.delay.customer':'độ trễ {d} ngày theo lịch sử của chính khách hàng ({n} mẫu)','cf.delay.customer_cond':'quá hạn: độ trễ có điều kiện {d} ngày theo lịch sử của khách hàng',
+  'cf.delay.pool':'độ trễ {d} ngày theo lịch sử toàn doanh nghiệp (cấp dự phòng, {n} mẫu)','cf.delay.pool_cond':'quá hạn: độ trễ có điều kiện {d} ngày theo lịch sử toàn doanh nghiệp (dự phòng)',
+  'cf.delay.default':'độ trễ mặc định {d} ngày (dự phòng, không phải số liệu quan sát)','cf.delay.residual':'quá hạn {dpd} ngày: {dpd} ngày + phần dư, tổng {d} ngày (dự phòng)',
+  'cf.note':'Đây là yếu tố góp phần, không phải nguyên nhân. Số tiền chỉ để tham chiếu: không cộng với nhau và không cộng vào mức thiếu.','cf.fallback':'Một số độ trễ lấy từ lịch sử toàn doanh nghiệp hoặc giá trị mặc định nên không gọi khoản nào là nguyên nhân chính.',
+  'link.L1.AR':'{obj} ({v}): khoản thu này góp phần vào đợt thiếu và khách hàng vượt ngưỡng ở UC01 ({f}) · mức bằng chứng {ev}.',
+  'link.L1.AP':'{obj} ({v}): khoản chi quá hạn rơi vào đợt thiếu và nhà cung cấp có finding ở UC01 ({f}) · mức bằng chứng {ev}.',
+  'link.L2':'Tiền đã chi cho hàng chưa quay vòng ({v} chi mua đến ngày thấp nhất; finding tồn kho {f}) · mức bằng chứng {ev}.',
+  'link.L3':'Chưa thấy khoản mục nào của UC01 gắn với đợt thiếu này; đợt thiếu do lịch thu chi.','link.squeeze':'Ép hai phía: một khoản thu chậm và một khoản chi quá hạn cùng rơi vào đợt thiếu.',
+  'ev.candidate':'ứng viên (candidate)','ev.supported':'có căn cứ (supported)','ev.not_applicable':'không áp dụng',
+  'gr.open':'Tìm giải pháp cho đợt thiếu','gr.idle':'Xem phương án sử dụng tiền nhàn rỗi (giai đoạn 2)','gr.title':'Yêu cầu tìm giải pháp (gap_request)',
+  'gr.sub':'Kiểm tra yêu cầu trước khi gửi sang bước tìm giải pháp (UC03). Yêu cầu được lưu bất biến cùng lần chạy và snapshot nguồn.',
+  'gr.send':'Xác nhận gửi','gr.sent':'Đã gửi yêu cầu {id} sang bước tìm giải pháp.','gr.peaknote':'Mức thiếu lớn nhất không phải số tiền phải huy động ngay ngày đầu.',
+  'gr.used':'Yêu cầu {id}: cần tiền từ {d}, mức thiếu lớn nhất {p}, ô ma trận {c}, liên kết {l} ({e}).',
+  'gr.need_date':'Cần tiền từ','gr.peak_gap':'Mức thiếu lớn nhất','gr.cash0_need':'Cash0 cần có','gr.episodes':'Các đợt thiếu','gr.matrix':'Ô ma trận','gr.bottleneck':'Điểm nghẽn chính (UC01)',
+  'gr.pattern':'Mẫu và khoản mục','gr.findings':'Finding UC01','gr.obligation':'Nghĩa vụ quá hạn','gr.link':'Liên kết và bằng chứng','gr.scenario':'Kịch bản','gr.cash0':'Trạng thái Cash0','gr.health':'Độ tin cậy dự báo',
+  'gr.ids':'Lần chạy và snapshot','gr.versions':'Phiên bản',
+  'gr.block.th03':'Dự báo Base là dư tiền (TH03); phương án sử dụng tiền nhàn rỗi thuộc giai đoạn 2 nên không tạo yêu cầu tài trợ.',
+  'gr.block.status':'Lần chạy dự báo thiếu hoặc sai dữ liệu nên chưa gửi được yêu cầu.','gr.block.w_unknown':'Chưa xếp được trục W (W unknown); cần bổ sung dữ liệu cho UC01 trước.',
+  'gr.block.expired':'Dữ liệu đã quá 72 giờ (hết hạn); cần làm mới dữ liệu trước khi gửi yêu cầu.','gr.block.not_th01':'Dự báo Base không có ngày nào dưới Rtarget (không phải TH01) nên không có đợt thiếu cần tài trợ.',
+  'gr.block.not_routed':'Chưa gán ô ma trận (W và TH phải cùng snapshot).',
+  'mh.insufficient_sample':'chưa đủ hóa đơn đối chiếu','mh.ok':'tốt','mh.watch':'cần theo dõi – dự báo đang lệch','mh.degraded':'kém tin cậy – không dùng làm căn cứ duy nhất'
+});
