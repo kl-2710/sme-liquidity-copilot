@@ -308,7 +308,7 @@ await step("C · T50 company size, T51 size band, T52 new customer, T53 strategi
     { id: "O1", customer: "Old Co", amount: 900e6, issue: "2026-08-01", due: "2026-10-30", paid: null }] });
     const s = ENGINE.makeSnapshot(input, { periodStart: "2026-07-03" }), d = ENGINE.diagnose(s), c = ENGINE.profiles(s, d).customers.find((x) => x.name === "New Co"); return [c.relationship, c.tier, c.action]; });
   assert.deepEqual(t52, ["new", 1, "strict_terms_new_orders"]);
-  const t53 = await ev(() => { const mk = (strat) => { const input = TMK({ firm: { strategic_customers: strat }, sales: Array.from({ length: 12 }, (_, i) => ({ id: "A" + i, customer: "Anchor", amount: 40e6, issue: ENGINE.diso(ENGINE.dnum("2026-04-05") + i * 14), due: "2026-10-20", paid: null }))
+  const t53 = await ev(() => { const mk = (strat) => { const input = TMK({ firm: { strategic_customers: strat }, fin: [{ period_start: null, period_end: "2026-09-30", revenue: null, cogs: 24e9, opening_cash: 1e9, days: 90 }], sales: Array.from({ length: 12 }, (_, i) => ({ id: "A" + i, customer: "Anchor", amount: 40e6, issue: ENGINE.diso(ENGINE.dnum("2026-04-05") + i * 14), due: "2026-10-20", paid: null }))
       .concat(Array.from({ length: 12 }, (_, i) => ({ id: "B" + i, customer: "Other", amount: 60e6, issue: ENGINE.diso(ENGINE.dnum("2026-04-06") + i * 14), due: "2026-10-20", paid: null }))) });
     const s = ENGINE.makeSnapshot(input), d = ENGINE.diagnose(s), c = ENGINE.profiles(s, d).customers.find((x) => x.name === "Anchor"); return [Math.round(c.revenue_share * 100), c.tier, c.notes.includes("strategic_not_confirmed")]; };
     return [mk([]), mk(["Anchor"])]; });
@@ -555,6 +555,94 @@ for (const theme of ["light", "dark"]) {
   });
   // ERR_TUNNEL_CONNECTION_FAILED only comes from a sandbox proxy blocking the XLSX CDN script.
   await step(`[${theme}] no JavaScript errors`, async () => assert.deepEqual(errors.filter((e) => !/ERR_TUNNEL_CONNECTION_FAILED/.test(e)), []));
+  await page.close();
+}
+
+// UC01 dashboard (phase D): order of Table 3-1, data source, evidence, expert mode, cut-off picker, threshold policy, BN0 display.
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(URL0);
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light", lang: "en" })); });
+  await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
+  const dash = async () => { await page.evaluate(() => { setTab("dash"); setWide(true); }); await page.waitForTimeout(700); };
+  await step("D · dashboard order, data source line and gauge scales follow Table 3-1", async () => {
+    await dash();
+    const r = await page.evaluate(() => { const p = document.querySelector("#pane-dash"), kids = [...p.children].map((e) => e.className.split(" ")[0]);
+      return { order: kids, secs: [...p.querySelectorAll(".dsec h2")].map((h) => h.textContent), w: p.querySelector(".wcard .ls-w").textContent,
+        src: p.querySelector(".uc-src").textContent, chip: document.querySelector(".chipdate b").textContent, gaugeMax: [...p.querySelectorAll(".gcard")].map((g) => g.querySelectorAll(".gl")[1].textContent) }; });
+    assert.deepEqual(r.secs.slice(0, 4), ["Working-capital diagnosis", "Receivables, inventory and payables", "Who holds the money", "Cash conversion cycle"]);
+    assert.ok(r.order.indexOf("uc-src") < r.order.indexOf("dsec"));
+    assert.equal(r.w, "W2 – Material bottleneck");
+    assert.match(r.src, /sample:F01 · snapshot SNP-F01-20260930-01 · as of 30\/09\/2026 · period 01\/04\/2026–30\/09\/2026 \(183 days\)/); assert.match(r.src, /fresh/);
+    assert.equal(r.chip, "30/09/2026");
+    assert.ok(r.gaugeMax.length === 4 && !r.gaugeMax.includes("90"), "gauge scales follow the thresholds: " + r.gaugeMax.join(","));
+  });
+  await step("D · expert mode shows rule ids, versions and raw VND; tables sort and switch order", async () => {
+    await page.click("#ucExpert"); await page.waitForTimeout(300);
+    const t = await page.locator("#pane-dash .wcard .expert").innerText();
+    assert.match(t, /R-AR-2, R-INV-2, R-INV-SLOW, R-AP-OD, R-MAT/); assert.match(t, /tv1\.threshold\.v2/);
+    assert.match(await page.locator("#pane-dash .mtile.hl").innerText(), /\d{1,3}(\.\d{3})+ VND/);
+    await page.click("#ucExpert"); await page.waitForTimeout(200);
+    const exposure = await page.locator("#pane-dash .t-cust tbody tr td:first-child b").allInnerTexts();
+    assert.equal(exposure[0], "Large Exporter K1");
+    await page.click('[data-corder="intervention"]'); await page.waitForTimeout(200);
+    const tiers = await page.locator("#pane-dash .t-cust tbody tr td:last-child").allInnerTexts();
+    assert.deepEqual(tiers, ["2", "3", "4"]);
+  });
+  await step("D · evidence panel lists the invoices; an empty filter says no records match", async () => {
+    await page.click('#pane-dash .t-cust tr[data-ev*="large exporter k1"]'); await page.waitForTimeout(300);
+    assert.match(await page.locator("#modal h3").innerText(), /Evidence · Large Exporter K1/);
+    assert.equal(await page.locator("#modal .ev-body tbody tr").count(), 26);
+    await page.selectOption("#evFilter", "overdue"); await page.waitForTimeout(150);
+    assert.equal(await page.locator("#modal .ev-body tbody tr").count(), 2);
+    await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+    await page.click('#pane-dash .t-cust tr[data-ev*="exporter k2"]'); await page.waitForTimeout(300);
+    await page.selectOption("#evFilter", "overdue"); await page.waitForTimeout(150);
+    assert.match(await page.locator("#modal .ev-body").innerText(), /No records match the condition \(Overdue\)/);
+    await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+  });
+  await step("D · an earlier cut-off re-runs UC01 only; the matrix cell is not routed across snapshots", async () => {
+    await page.fill("#ucAsOf", "2026-08-31"); await page.dispatchEvent("#ucAsOf", "change"); await page.waitForTimeout(500);
+    const r = await page.evaluate(() => ({ src: document.querySelector("#pane-dash .uc-src").textContent, chips: document.querySelector("#pane-dash .lstate .ls-chips").textContent, n: uc01().N }));
+    assert.match(r.src, /as of 31\/08\/2026 · period 02\/03\/2026–31\/08\/2026 \(183 days\)/); assert.match(r.chips, /Not routed · W and TH use different snapshots/);
+    await page.click("#ucReset"); await page.waitForTimeout(400);
+    assert.match(await page.locator("#pane-dash .lstate .ls-chips").innerText(), /Cell M7/);
+  });
+  await step("D · threshold policy needs a reason, previews the impact and creates a new configuration version", async () => {
+    await page.click("#ucPolicy"); await page.waitForTimeout(300);
+    await page.selectOption("#polModel", "FOB"); await page.waitForTimeout(150);
+    assert.match(await page.locator("#polPreview").innerText(), /W2 · BN7 → W1 · BN6/);
+    await page.click("#polSave"); assert.match(await page.locator("#polErr").innerText(), /10 to 500 characters/);
+    await page.fill("#polReason", "Board decision: the company works on FOB terms"); await page.click("#polSave"); await page.waitForTimeout(500);
+    const r = await page.evaluate(() => [uc01().wc_class, uc01().policy_version, document.querySelector("#pane-dash .wcard .ls-w").textContent]);
+    assert.deepEqual(r, ["W1", "CFG-F01-v1", "W1 – Watch"]);
+    // Settings › Account sets the model back to CMT (another configuration version).
+    await page.evaluate(() => { openSettings("Account"); }); await page.waitForTimeout(300);
+    await page.selectOption("#bizModel", "CMT"); await page.waitForTimeout(300); await page.keyboard.press("Escape");
+    assert.deepEqual(await page.evaluate(() => [uc01().wc_class, uc01().policy_version]), ["W2", "CFG-F01-v2"]);
+  });
+  await step("D · BN0 company: no capital card, headroom on the items, tables without warning colours, evidence pages", async () => {
+    await page.evaluate(() => {
+      const d = (x) => ENGINE.diso(ENGINE.dnum("2026-09-30") + x), many = Array.from({ length: 260 }, (_, i) => ({ id: "B" + i, customer: "Busy Buyer", amount: 40 * 30e9 / 90 / 260, issue: d(-10), due: d(20), paid: null }));
+      registerCases("X99", { firm: { id: "X99", name: "BN0 Test Co", business_model: "FOB", rtarget: 100e6, essential_suppliers: [] }, snapshot_id: "SNP-X99-1", as_of: "2026-09-30",
+        source: { type: "upload", id: "upload:bn0.csv", at: new Date().toISOString() }, fin: [{ period_start: d(-89), period_end: "2026-09-30", revenue: 30e9, cogs: 24e9, opening_cash: 1e9, current_assets: 20e9 }],
+        config: { amount_basis: "net", vat_rate: null }, tables: { sales: true, purchases: true, inventory: true, planned: true }, sales: many,
+        purchases: [{ id: "P", supplier: "Mill", amount: 30 * 24e9 / 90, issue: d(-5), due: d(25), paid: null }],
+        inventory: [{ name: "Fabric", type: "NVL", qty: 1, unit_cost: 70 * 24e9 / 90, days: 10, owner: "own" }], planned: [] });
+      FIRMS.X99 = { name: "BN0 Test Co", short: "BN0 Test" }; switchContext("X99", "base", { silent: true }); setTab("dash"); setWide(true);
+    });
+    await page.waitForTimeout(500);
+    const r = await page.evaluate(() => { const p = document.querySelector("#pane-dash"); return { w: p.querySelector(".wcard .ls-w").textContent, bn0: !!p.querySelector(".mtile.bn0"), mar: !!p.querySelector(".mtile.hl"),
+      head: p.querySelector(".icard").textContent, flags: p.querySelectorAll(".dtable tr.flag, .dtable .status.red, .dtable .status.amber").length }; });
+    assert.equal(r.w, "W0 – No signs yet"); assert.ok(r.bn0 && !r.mar); assert.match(r.head, /16,7 days to the watch threshold/); assert.equal(r.flags, 0);
+    await page.click("#pane-dash .t-cust tr[data-ev]"); await page.waitForTimeout(300);
+    assert.equal(await page.locator("#modal .ev-body tbody tr").count(), 50);
+    assert.match(await page.locator("#modal .ev-body").innerText(), /Page 1 of 4/); assert.match(await page.locator("#modal .ev-body").innerText(), /Showing 200 of 260 records/);
+    await page.keyboard.press("Escape");
+  });
+  await step("D · no JavaScript errors on the dashboard", async () => assert.deepEqual(errors, []));
   await page.close();
 }
 

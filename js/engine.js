@@ -57,7 +57,8 @@ const ENGINE=(()=>{
   //         planned:[{id,date,week,direction,category,amount,certainty,source_id}], config:{amount_basis,vat_rate}, tables:{sales:bool,...}}
   function makeSnapshot(input,{asOf,periodStart}={}){
     const dataAsOf=input.as_of,cut=asOf||dataAsOf,A=dnum(cut),shift=dnum(dataAsOf)-A;
-    const start=periodStart||diso(A-182),N=A-dnum(start)+1,issues=[];
+    const own=cut===dataAsOf?(input.fin||[]).filter(r=>r.revenue!=null&&r.period_end===cut&&rowDays(r)).sort((a,b)=>rowDays(b)-rowDays(a))[0]:null;
+    const start=periodStart||(own?diso(A-rowDays(own)+1):diso(A-182)),N=A-dnum(start)+1,issues=[];
     if(N<=0)throw new Error('INVALID_PERIOD');
     const party=(name,tax)=>{const t=String(tax||'').replace(/\D/g,'');return t?{key:'TAX:'+t,weak:false}:{key:'NAME:'+normName(name),weak:true}};
     const inv=(r,kind)=>{

@@ -61,9 +61,9 @@ const INV_PRODUCTS=['FAC-001','FAC-002','FAC-003','RF-001','DD-001'];
 /* Sample companies: every case is computed here from the raw snapshots in DATA.raw with the same engine that
    processes uploaded files (BR-02.18). Nothing computed is stored in data.js. */
 const SESSION_LOADED_AT=new Date().toISOString();
-DATA.cases={};DATA.snaps={};
+DATA.cases={};DATA.snaps={};DATA.inputs={};
 function registerCases(id,input){
-  const snap=ENGINE.makeSnapshot(input),cases=ENGINE.buildCases(snap);DATA.snaps[id]=snap;
+  const snap=ENGINE.makeSnapshot(input),cases=ENGINE.buildCases(snap);DATA.snaps[id]=snap;DATA.inputs[id]=input;
   Object.keys(DATA.cases).filter(k=>k.split('|')[0]===id).forEach(k=>delete DATA.cases[k]);
   Object.entries(cases).forEach(([k,c])=>{DATA.cases[id+'|'+k]=c;const eps=episodes(c);
     // Default gap for financing: the largest gap that has ended within the horizon (a still-open gap has no known end), else the largest.
@@ -71,7 +71,7 @@ function registerCases(id,input){
   return snap;
 }
 Object.entries(DATA.raw).forEach(([id,raw])=>registerCases(id,ENGINE.inputFromRaw(raw,SESSION_LOADED_AT)));
-const S={firm:'F01',case:'base',tab:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
+const S={uc01Sel:null,firm:'F01',case:'base',tab:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
 const C=()=>DATA.cases[S.firm+'|'+S.case];
 /* Company policy store: owner declarations and approved settings, one versioned record per account and company.
    Every change bumps the version, so results computed with an older version are no longer reused (they are stale). */
@@ -86,8 +86,13 @@ const POLICY={
 };
 // Results are kept per (snapshot, formula version, configuration version): asking again reuses the stored run (BR-02.28, Q70).
 const RUNS=new Map();
+// UC01 snapshot: the data snapshot, or a re-cut at the cut-off date and period chosen on the dashboard (S.uc01Sel).
+function uc01Snap(firm=S.firm){
+  const sel=firm===S.firm?S.uc01Sel:null;if(!sel)return DATA.snaps[firm];
+  const k=`snap|${firm}|${sel.asOf}|${sel.start}`;if(!RUNS.has(k))RUNS.set(k,ENGINE.makeSnapshot(DATA.inputs[firm],{asOf:sel.asOf,periodStart:sel.start}));return RUNS.get(k);
+}
 function uc01(firm=S.firm){
-  const snap=DATA.snaps[firm];if(!snap)return null;
+  const snap=uc01Snap(firm);if(!snap)return null;
   const p=POLICY.get(firm),vid=POLICY.versionId(firm),key='uc01|'+[snap.snapshot_id,CFG.versions.formula,vid].join('|');
   if(!RUNS.has(key)){
     const prev=LABELS.previous(firm,snap.snapshot_id),d=ENGINE.diagnose(snap,{business_model:p.business_model||null,materiality:p.materiality??null,version_id:vid,prevLabels:prev});
@@ -165,7 +170,7 @@ function openModal(html,onMount){const m=$('#modal');modalReturnFocus=document.a
 function closeModal(){$('#scrim').classList.remove('show');modalReturnFocus?.focus?.();modalReturnFocus=null}
 $('#scrim').addEventListener('mousedown',e=>{if(e.target.id==='scrim')closeModal()});
 document.addEventListener('keydown',e=>{
-  if($('#scrim').classList.contains('show')){const m=$('#modal'),f=[...m.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter(x=>!x.hidden);if(e.key==='Escape'){e.preventDefault();closeModal();return}if(e.key==='Tab'&&f.length){if(e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===f.at(-1)){e.preventDefault();f[0].focus()}}return}
+  if($('#scrim').classList.contains('show')){const m=$('#modal'),f=[...m.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter(x=>!x.hidden);if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeModal();return}if(e.key==='Tab'&&f.length){if(e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===f.at(-1)){e.preventDefault();f[0].focus()}}return}
   const tag=(e.target.tagName||'').toLowerCase();
   if(['input','textarea','select'].includes(tag)||e.metaKey||e.ctrlKey)return;
   const map={'1':'dash','2':'gap','3':'whatif','4':'appr'};
@@ -244,9 +249,9 @@ $('#tabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)se
 
 function switchContext(firm,cs,{silent}={}){
   for(const k in TV3_CACHE)delete TV3_CACHE[k];S.causes={};
-  S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;
+  S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;S.uc01Sel=null;
   const c=C();const eps=episodes(c);if(c.defk)S.epIdx=c.defk-1;else if(eps.length)S.epIdx=eps.reduce((a,e,i)=>e.peak>eps[a].peak?i:a,0);
-  derive();S.lev=freshLev();$('#firmSel').value=firm;
+  derive();S.lev=freshLev();$('#firmSel').value=firm;$$('.chipdate b').forEach(b=>b.textContent=fd(C().as_of));
   const w=$('#work');w.classList.add('loading');setTimeout(()=>w.classList.remove('loading'),260);
   $('#panelSub').textContent=`${firm} · ${FIRMS[firm].name}`;renderDemoChips();refreshTab();
   Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});S.done=new Set();resetFlow();
@@ -1401,17 +1406,28 @@ $('#dataAddSources').onclick=()=>$('#dataFileInput').click();
 async function acceptFiles(files,{firmId=S.firm}={}){const out=[];for(const f of files){try{const ext=String(f.name.split('.').pop()||'').toLowerCase();if(!FILE_EXTS.has(ext))throw new Error(`${f.name}: unsupported file type. Choose CSV, XLSX, XLS or DOCX.`);if(f.size>FILE_MAX)throw new Error(`${f.name}: file exceeds the 10 MB limit.`);const text=ext==='docx'?null:await fileText(f),detected=detectedFileType(text),status=ext==='docx'?'Reference only':detected?'Pending review':'Not recognised';out.push(await FILES.put(f,{firmId,status}))}catch(e){toast(e.message||`Could not read ${f.name}`)}}return out}
 $('#dataFileInput').onchange=async e=>{const added=await acceptFiles([...e.target.files]);e.target.value='';if(!added.length)return;renderFiles();const r=await autoImportFiles();toast(importNote(added.length,r));renderFiles()};
 function sizeLabel(n){if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(0)} KB`;return `${(n/1024/1024).toFixed(1)} MB`}
-function renderFiles(){if($('#dataScreen').hidden)return Promise.resolve();loadFileFilters();const root=$('#dataFiles');return FILES.list().then(files=>{
+// The toolbar (search, type filter, sort) is built once per account and never replaced, so typing or choosing a filter always
+// acts on live controls; each render only rewrites the list. Only the latest asynchronous render may write the screen.
+let filesRenderToken=0;
+function filesToolbar(root){
+  root.dataset.uid=S.user.id;loadFileFilters();
+  root.innerHTML=`<div class="files-toolbar"><label class="sr" for="filesSearch">Search files</label><input id="filesSearch" type="search" placeholder="Search files by name"><label class="sr" for="filesType">Filter by file type</label><select id="filesType"><option value="all">All types</option><option value="docx">Word (.docx)</option><option value="tables">Excel &amp; CSV (.xlsx, .xls, .csv)</option></select><label class="sr" for="filesSort">Sort files</label><select id="filesSort"><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="alpha">Alphabetical</option></select></div><div class="file-selection" id="fileSelection" hidden></div><div id="filesList"></div>`;
+  const q=$('#filesSearch',root),ty=$('#filesType',root),so=$('#filesSort',root);q.value=fileFilters.q;ty.value=fileFilters.type;so.value=fileFilters.sort;
+  q.oninput=()=>{fileFilters.q=q.value;saveFileFilters();renderFiles()};ty.onchange=()=>{fileFilters.type=ty.value;saveFileFilters();renderFiles()};so.onchange=()=>{fileFilters.sort=so.value;saveFileFilters();renderFiles()};
+}
+function renderFiles(){if($('#dataScreen').hidden)return Promise.resolve();const root=$('#dataFiles');if(root.dataset.uid!==S.user.id||!$('#filesList',root))filesToolbar(root);
+  const tok=++filesRenderToken;return FILES.list().then(files=>{if(tok!==filesRenderToken)return;
   const filtered=files.filter(f=>(!fileFilters.q||f.name.toLowerCase().includes(fileFilters.q.toLowerCase()))&&(fileFilters.type==='all'||(fileFilters.type==='docx'?f.ext==='docx':['csv','xlsx','xls','txt'].includes(f.ext))));
   filtered.sort((a,b)=>fileFilters.sort==='oldest'?Date.parse(a.uploadedAt)-Date.parse(b.uploadedAt):fileFilters.sort==='alpha'?a.name.localeCompare(b.name):Date.parse(b.uploadedAt)-Date.parse(a.uploadedAt));
   const empty=!files.length,none=!filtered.length;const row=f=>`<tr data-file-row="${esc(f.id)}"><td><input type="checkbox" class="file-select" value="${esc(f.id)}" aria-label="Select ${esc(f.name)}" ${selectedFiles.has(f.id)?'checked':''}></td><td><span class="file-name"><span aria-hidden="true">${f.kind==='document'?'▤':'▦'}</span><b>${esc(f.name)}</b></span></td><td>${f.ext.toUpperCase()}</td><td>${sizeLabel(f.size)}</td><td>${new Date(f.uploadedAt).toLocaleString('en-GB')}</td><td><span class="status ${f.status.startsWith('Used')?'green':f.status==='Not recognised'||f.status.startsWith('Waiting')||f.status.startsWith('Missing')||f.status.startsWith('Could not')?'amber':f.kind==='document'?'blue':'gray'}">${esc(fileStatusLabel(f.status))}</span></td><td><button type="button" class="file-delete" aria-label="Delete ${esc(f.name)}" data-file-delete="${esc(f.id)}">⌫</button></td></tr>`;
-  root.innerHTML=`<div class="files-toolbar"><label class="sr" for="filesSearch">Search files</label><input id="filesSearch" type="search" placeholder="Search files by name" value="${esc(fileFilters.q)}"><label class="sr" for="filesType">Filter by file type</label><select id="filesType"><option value="all">All types</option><option value="docx">Word (.docx)</option><option value="tables">Excel &amp; CSV (.xlsx, .xls, .csv)</option></select><label class="sr" for="filesSort">Sort files</label><select id="filesSort"><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="alpha">Alphabetical</option></select></div><div class="file-selection" id="fileSelection" hidden></div>${empty?`<div class="files-empty"><b>No files uploaded yet</b><button class="btn primary" type="button" data-empty-add>Add sources</button></div>`:none?`<div class="files-empty"><b>No files match your search</b><button class="btn sec" type="button" data-clear-filters>Clear filters</button></div>`:`<div class="files-table-wrap"><table class="files-table"><thead><tr><th><input id="filesSelectAll" type="checkbox" aria-label="Select all visible files"></th><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Status</th><th></th></tr></thead><tbody>${filtered.map(row).join('')}</tbody></table></div>`}`;
-  $('#filesType').value=fileFilters.type;$('#filesSort').value=fileFilters.sort;
-  $('#filesSearch').oninput=e=>{const pos=e.target.selectionStart;fileFilters.q=e.target.value;saveFileFilters();renderFiles().then(()=>{const input=$('#filesSearch');if(input){input.focus();input.setSelectionRange(pos,pos)}})};$('#filesType').onchange=e=>{fileFilters.type=e.target.value;saveFileFilters();renderFiles()};$('#filesSort').onchange=e=>{fileFilters.sort=e.target.value;saveFileFilters();renderFiles()};
-  const boxes=$$('.file-select',root),all=$('#filesSelectAll');if(all){const count=boxes.filter(x=>x.checked).length;all.checked=boxes.length>0&&count===boxes.length;all.indeterminate=count>0&&count<boxes.length;all.onchange=()=>{boxes.forEach(x=>{x.checked=all.checked;if(all.checked)selectedFiles.add(x.value);else selectedFiles.delete(x.value)});renderFiles()}}
+  const list=$('#filesList',root);
+  list.innerHTML=empty?`<div class="files-empty"><b>No files uploaded yet</b><button class="btn primary" type="button" data-empty-add>Add sources</button></div>`:none?`<div class="files-empty"><b>No files match your search</b><button class="btn sec" type="button" data-clear-filters>Clear filters</button></div>`:`<div class="files-table-wrap"><table class="files-table"><thead><tr><th><input id="filesSelectAll" type="checkbox" aria-label="Select all visible files"></th><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Status</th><th></th></tr></thead><tbody>${filtered.map(row).join('')}</tbody></table></div>`;
+  const boxes=$$('.file-select',list),all=$('#filesSelectAll',list);if(all){const count=boxes.filter(x=>x.checked).length;all.checked=boxes.length>0&&count===boxes.length;all.indeterminate=count>0&&count<boxes.length;all.onchange=()=>{boxes.forEach(x=>{x.checked=all.checked;if(all.checked)selectedFiles.add(x.value);else selectedFiles.delete(x.value)});renderFiles()}}
   boxes.forEach(x=>x.onchange=()=>{x.checked?selectedFiles.add(x.value):selectedFiles.delete(x.value);renderFiles()});
-  if(selectedFiles.size){const bar=$('#fileSelection');bar.hidden=false;bar.innerHTML=`<b>${selectedFiles.size} selected</b><button type="button" class="btn danger sm" id="deleteSelected">Delete selected</button><button type="button" class="btn sec sm" id="clearSelected">Clear</button>`;$('#deleteSelected').onclick=()=>confirmDeleteFiles([...selectedFiles]);$('#clearSelected').onclick=()=>{selectedFiles.clear();renderFiles()}}
-  $$('[data-file-delete]',root).forEach(b=>b.onclick=()=>confirmDeleteFiles([b.dataset.fileDelete]));$('[data-empty-add]',root)?.addEventListener('click',()=>$('#dataFileInput').click());$('[data-clear-filters]',root)?.addEventListener('click',()=>{fileFilters={q:'',type:'all',sort:fileFilters.sort};saveFileFilters();renderFiles()});
+  const bar=$('#fileSelection',root);bar.hidden=!selectedFiles.size;bar.innerHTML=selectedFiles.size?`<b>${selectedFiles.size} selected</b><button type="button" class="btn danger sm" id="deleteSelected">Delete selected</button><button type="button" class="btn sec sm" id="clearSelected">Clear</button>`:'';
+  if(selectedFiles.size){$('#deleteSelected').onclick=()=>confirmDeleteFiles([...selectedFiles]);$('#clearSelected').onclick=()=>{selectedFiles.clear();renderFiles()}}
+  $$('[data-file-delete]',list).forEach(b=>b.onclick=()=>confirmDeleteFiles([b.dataset.fileDelete]));$('[data-empty-add]',list)?.addEventListener('click',()=>$('#dataFileInput').click());
+  $('[data-clear-filters]',list)?.addEventListener('click',()=>{fileFilters={q:'',type:'all',sort:fileFilters.sort};saveFileFilters();$('#filesSearch',root).value='';$('#filesType',root).value='all';renderFiles()});
 })}
 function confirmDeleteFiles(ids){openModal(`<h3>Delete ${ids.length} ${ids.length===1?'file':'files'}?</h3><p>Data already used in your analysis is kept.</p><div class="acts"><button class="btn sec" id="filesNo">Cancel</button><button class="btn danger" id="filesYes">Delete</button></div>`,m=>{$('#filesNo',m).onclick=closeModal;$('#filesYes',m).onclick=async()=>{await FILES.remove(ids);selectedFiles.clear();closeModal();addLog({tool:'delete_files',tier:1,args:{count:ids.length},status:'ok',summary:`Deleted ${ids.length} uploaded file${ids.length===1?'':'s'}`});toast(`${ids.length} file${ids.length===1?'':'s'} deleted`);renderFiles()}})}
 const DW={view:'list',firmId:null,files:{},fmt:'auto',mode:'replace',form:{},pick:{},err:'',registryIds:[]};
@@ -1769,11 +1785,11 @@ function wNoteHTML(){
 }
 // Liquidity-state card at the top of the dashboard: rendered by cash state TH01 / TH02 / TH03 combined with the W axis.
 function liquidityStateHTML(){
-  const c=baseCase(),W=classifyW(c),T=computeTH(c),cell=W.w!=='unknown'&&T.th!=='unknown'?MATRIX[W.w][T.th]:null;
+  const c=baseCase(),W=classifyW(c),T=computeTH(c),same=W.snapshot_id===(DATA.snaps[S.firm]||{}).snapshot_id,cell=same&&W.w!=='unknown'&&T.th!=='unknown'?MATRIX[W.w][T.th]:null;
   const main=W.main?ITEM_EN[W.main]:'',tile=(lb,v,sub,cls='')=>`<div class="ls-tile ${cls}"><span>${lb}</span><b class="num">${v}</b><small>${sub}</small></div>`;
   const marTile=W.mar>0?tile('Capital tied up above threshold',money(W.mar),`money_at_risk · ${main||'—'} · ${pct(W.share)} of current assets`,'hl'):tile('Capital tied up above threshold','0',`No item above its threshold (${W.bn})`);
   const grid=`<div class="ls-matrix" role="img" aria-label="Nine-case matrix, current cell ${cell||'not routed'}"><span></span><span class="h">TH01</span><span class="h">TH02</span><span class="h">TH03</span>${['W0','W1','W2'].map(w=>`<span class="h">${w}</span>${['TH01','TH02','TH03'].map(t=>`<span class="${MATRIX[w][t]===cell?'on':''}" title="${MATRIX[w][t]} · ${M_EN[MATRIX[w][t]]}">${MATRIX[w][t]}</span>`).join('')}`).join('')}</div>`;
-  const chips=`<div class="ls-chips">${T.shown?`<span class="lv-pill lv-${T.shown}" data-lv="${T.shown}"><i class="lv-sw lv-${T.shown}" aria-hidden="true"></i>${T.shown==='blue'?'Blue · cash surplus':`Highest alert: ${LV[T.shown].label}`}</span>`:''}<span class="ls-w ${W.w}">${W_EN[W.w]}</span><span class="ls-chip">${TH_EN[T.th]}</span><span class="ls-chip">Pattern ${W.bn} · ${BN_EN[W.bn]}</span>${cell?`<span class="ls-chip strong">Cell ${cell} · ${M_EN[cell]}</span>`:'<span class="ls-chip">Not routed</span>'}</div>`;
+  const chips=`<div class="ls-chips">${T.shown?`<span class="lv-pill lv-${T.shown}" data-lv="${T.shown}"><i class="lv-sw lv-${T.shown}" aria-hidden="true"></i>${T.shown==='blue'?'Blue · cash surplus':`Highest alert: ${LV[T.shown].label}`}</span>`:''}<span class="ls-w ${W.w}">${W_EN[W.w]}</span><span class="ls-chip">${TH_EN[T.th]}</span><span class="ls-chip">Pattern ${W.bn} · ${BN_EN[W.bn]}</span>${cell?`<span class="ls-chip strong">Cell ${cell} · ${M_EN[cell]}</span>`:`<span class="ls-chip">Not routed${same?'':' · W and TH use different snapshots'}</span>`}</div>`;
   let cls='unknown',icon='?',title='Liquidity state could not be routed',badge='',lead='',tiles='',body='',acts='';
   if(T.th==='TH01'){
     cls='th01 '+T.level;icon='⚠';title='Liquidity Shortfall Alert';badge=`Highest alert level: ${LV[T.level].label}`;
@@ -1822,32 +1838,223 @@ function goFinancing(){
   toast('Copilot goes step by step: diagnosis → cause of the shortfall → financing ranking.',2800);
   if(next)sendChat(next.ask);
 }
+/* ===== UC01 dashboard (SRS 2.7.1, 2.7.3, Table 3-1): data source line and controls, W card, capital above the normal
+   level, item cards with threshold bars, detail tables with evidence, cash-cycle gauges. Display only reads the cached UC01
+   run; nothing is recalculated when the screen is drawn. ===== */
+S.dash={custOrder:'exposure',sort:{},expert:false};
+try{S.dash.expert=localStorage.getItem('lilact.expert.v1')==='1'}catch(e){}
+function freshness(snap){
+  const at=snap&&snap.source&&snap.source.at?Date.parse(snap.source.at):NaN;if(isNaN(at))return {level:'unknown'};
+  const h=(Date.now()-at)/36e5;return {level:h<=CFG.erp.freshMaxHours?'fresh':h<=CFG.erp.staleHours?'stale':'expired',hours:h,at:snap.source.at};
+}
+const fdt=s=>{const d=new Date(s),p=n=>String(n).padStart(2,'0');return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`};
+const thrSrcName=k=>(THRESHOLD_SOURCE[k]||{})[LANG]||k;
+const pctS=(v,dg=1)=>v==null?'—':nf(v*100,dg)+'%';
+const daysS=v=>v==null?t('st.n/a'):nf(v,1);
+const rawVND=v=>S.dash.expert&&v!=null?` <small class="raw num" title="${esc(t('exp.raw'))}">${nf(Math.round(v),0)} VND</small>`:'';
+const lbl=k=>t('lbl.'+k);
+function dataSourceHTML(d,snap){
+  const fr=freshness(snap),at=snap.source.at?fdt(snap.source.at):'—',base=DATA.snaps[S.firm];
+  const iss=(base.sales||[]).concat(base.purchases||[]).map(x=>x.issue).filter(Boolean).sort();
+  const minAsOf=iss.length?isoOf(dn(iss[0])+1):base.data_as_of;
+  return `<div class="uc-src" data-wid="source"><div class="uc-src-l"><span>${t('src.line',{src:esc(snap.source.id),sid:esc(d.snapshot_id),asof:fd(d.as_of),start:fd(d.period_start),end:fd(d.as_of),n:d.N})}</span>
+    <span class="fr fr-${fr.level}"><i class="lv-sw" aria-hidden="true"></i>${t(snap.source.type==='upload'?'src.uploaded':'src.loaded',{at})} · ${t('fresh.'+fr.level,{h:CFG.erp.freshMaxHours})}</span></div>
+   <div class="uc-ctl"><label>${t('ctl.asof')}<input type="date" id="ucAsOf" value="${d.as_of}" min="${minAsOf}" max="${base.data_as_of}"></label>
+    <label>${t('ctl.start')}<input type="date" id="ucStart" value="${d.period_start}" max="${isoOf(dn(d.as_of)-1)}"></label>
+    ${S.uc01Sel?`<button class="btn sec sm" type="button" id="ucReset">${t('ctl.reset')}</button>`:''}
+    <label class="uc-exp"><input type="checkbox" id="ucExpert" ${S.dash.expert?'checked':''}> ${t('ctl.expert')}</label>
+    <button class="btn sec sm" type="button" id="ucPolicy">${t('ctl.policy')}</button></div>
+   ${S.uc01Sel?`<p class="uc-note">${t('ctl.note')}</p>`:''}</div>`;
+}
+function wCardHTML(d){
+  const W=d.wc_class,main=d.main_bottleneck?t('item.'+d.main_bottleneck):'',share=pctS(d.materiality_share,1);
+  const s=W==='unknown'?(d.inactive?t('w.s.inactive'):t('w.s.unknown',{fields:d.missing.join(', ')})):W==='W0'?t('w.s.W0')
+    :W==='W1'?t('w.s.W1',{items:d.cause_items.map(k=>t('item.'+k)).join(', '),share})
+    :d.rule_ids.some(r=>r==='R-AR-2'||r==='R-INV-2')?t('w.s.W2sev',{main}):t('w.s.W2mat',{main,share});
+  const causes=d.cause_items.map(k=>{const it=d.item_states.find(i=>i.item===k);return `${t('item.'+k)} (c=${it.c}, ${it.shape})`}).join(' · ');
+  const prov=d.provisional.length?`<span class="prov">${t('w.prov')}</span>`:'';
+  return `<div class="card wcard ${W}" data-wid="w"><div class="wc-h"><span class="ls-w ${W}">${t('w.'+W)}</span>${prov}</div>
+   <p class="wc-s">${esc(s)}</p>
+   <dl class="wc-dl"><div><dt>${t('w.main')}</dt><dd>${main||t('w.none')}</dd></div><div><dt>${t('w.pattern')}</dt><dd>${d.bn_pattern}${causes?' · '+causes:''}</dd></div>
+    <div><dt>${t('w.model')}</dt><dd>${d.model.model} · ${thrSrcName(d.model.src==='owner_policy'?'owner_policy':d.model.src==='firm_profile'?'firm_profile':'demo_assumption')}${d.model.declared?'':` · <b class="warn">${t('w.model.unconfirmed')}</b>`}</dd></div></dl>
+   ${S.dash.expert?`<p class="expert">${t('exp.rules')}: ${d.rule_ids.join(', ')||'—'}${d.info_rules.length?' · '+d.info_rules.join(', '):''} · ${t('exp.run')}: ${d.run_id} · ${t('exp.versions')}: ${d.formula_version}, ${d.threshold_version}, ${esc(d.policy_version)}</p>`:''}</div>`;
+}
+function marTilesHTML(d){
+  if(d.wc_class==='unknown')return '';
+  const ob=`<div class="card mtile ob" data-wid="ob"><span>${t('ob.t')}</span><b class="num">${money(d.obligation_overdue)}</b>${rawVND(d.obligation_overdue)}<small>${t('ob.sub')}</small></div>`;
+  if(d.bn_pattern==='BN0')return `<div class="card mtile bn0" data-wid="mar"><span>✓ ${t('bn0.t')}</span><small>${t('bn0.sub')}</small></div>`+ob;
+  const ca=money(d.metrics.ca),assumed=d.metrics.ca_src==='assumed'?t('mar.assumed'):'';
+  return `<div class="card mtile hl" data-wid="mar"><span>${t('mar.t')}</span><b class="num">${money(d.money_at_risk)}</b>${rawVND(d.money_at_risk)}<small>${t('mar.sub')}</small></div>
+   <div class="card mtile"><span>${t('mar.share')}</span><b class="num">${pctS(d.materiality_share,1)}</b><small>${t('mar.share.sub',{ca,assumed,mat:pctS(d.materiality,0)})}</small></div>`+ob;
+}
+function tbarHTML(it){
+  const marks=it.item==='AP'?[['low',it.low],['high',it.high]]:[['ref',it.ref],['watch',it.watch],['severe',it.severe]];
+  const max=Math.max(...marks.map(m=>m[1]),it.value||0)*1.18,X=v=>Math.max(0,Math.min(100,v/max*100));
+  const zones=it.item==='AP'?'':`<span class="tb-zone z1" style="left:${X(it.watch)}%;width:${X(it.severe)-X(it.watch)}%"></span><span class="tb-zone z2" style="left:${X(it.severe)}%;width:${100-X(it.severe)}%"></span>`;
+  return `<div class="tbar" role="img" aria-label="${it.metric} ${daysS(it.value)}; ${marks.map(m=>t('mk.'+m[0])+' '+nf(m[1],1)).join(', ')}"><div class="tb-track">${zones}
+    ${it.value!=null?`<span class="tb-fill" style="width:${X(it.value)}%"></span><span class="tb-val" style="left:${X(it.value)}%"></span>`:''}
+    ${marks.map(m=>`<span class="tb-mk mk-${m[0]}" style="left:${X(m[1])}%" title="${t('mk.'+m[0])} ${nf(m[1],1)}"></span>`).join('')}</div>
+   <div class="tb-lbl">${marks.map((m,i)=>{const close=i>0&&X(m[1])-X(marks[i-1][1])<16;return `<span class="${close&&i%2?'r2':''}" style="left:${X(m[1])}%"><b>${nf(m[1],1)}</b>${t('mk.'+m[0]).replace(/ P\d+.*$/,'')}</span>`}).join('')}</div></div>`;
+}
+function itemCardHTML(d,it){
+  const n=d.N,m=d.metrics,bn0=d.bn_pattern==='BN0',notes=[];
+  if(it.item!=='AP'&&it.c===0&&it.headroom!=null)notes.push((it.near_threshold?`<b class="near">⚑ ${t('item.near',{p:pctS(it.value/it.watch,0)})}</b> · `:'')+t('item.headroom',{d:nf(it.headroom,1)}));
+  if(it.item!=='AP'&&it.value!=null&&it.value>it.watch)notes.push(t('item.above',{d:nf(it.value-it.watch,1)}));
+  if(it.c>0)notes.push(`${t('item.E',{v:money(it.E)})}${rawVND(it.E)} · ${t('item.shape',{s:it.shape})} (${t('shape.'+it.shape)})`);
+  if(it.info_high)notes.push(t('item.apinfo'));
+  if(it.item!=='AR'&&m.cogs_src==='converted')notes.push(t('item.cogsprov',{n,d:m.cogs_days}));
+  if(it.value==null)notes.push(t('item.missing',{f:it.balance==null?t('item.'+it.item):it.item==='AR'?'revenue':'cogs'}));
+  const cls=bn0?'gray':it.status==='severe'?'red':it.status==='watch'?'amber':it.status==='n/a'?'gray':'green';
+  const src=thrSrcName(d.model.src==='owner_policy'?'owner_policy':'verified_reference');
+  return `<div class="card icard st-${bn0?'normal':it.status}" data-wid="${it.item.toLowerCase()}"><div class="ic-h"><b>${t('item.'+it.item)}</b><span class="status ${cls}"><i></i>${t('st.'+it.status)}</span></div>
+   <div class="ic-v"><span class="num big">${it.balance!=null?money(it.balance):'—'}</span>${rawVND(it.balance)}<span class="ic-d"><b class="num">${daysS(it.value)}</b> ${t('unit.days')} · ${it.metric}</span></div>
+   ${tbarHTML(it)}<p class="ic-cap">${t('item.cap.'+it.item,{n})}</p>${notes.map(x=>`<p class="ic-n">${x}</p>`).join('')}
+   <p class="ic-src">${t('thr.src',{s:src,v:d.threshold_version})}${it.provisional?` · <span class="prov">${t('w.prov')}</span>`:''}</p>
+   ${S.dash.expert?`<p class="expert">${it.item==='AR'?`DSO = AR × N ÷ Revenue = ${nf(Math.round(it.balance||0),0)} × ${n} ÷ ${nf(Math.round(m.rev||0),0)}`:it.item==='INV'?`DIO = INV × N ÷ COGS = ${nf(Math.round(it.balance||0),0)} × ${n} ÷ ${nf(Math.round(m.cogs||0),0)}`:`DPO = AP × N ÷ COGS = ${nf(Math.round(it.balance||0),0)} × ${n} ÷ ${nf(Math.round(m.cogs||0),0)}`} · c=${it.c} · E=${nf(Math.round(it.E),0)}</p>`:''}</div>`;
+}
+// Sortable detail tables (allowed columns only). BN0: no warning colours.
+function sortRows(rows,kind,cols){
+  const s=S.dash.sort[kind];if(!s||!cols[s.col])return rows;
+  return rows.slice().sort((a,b)=>{const x=cols[s.col](a),y=cols[s.col](b);return (x>y?1:x<y?-1:0)*(s.dir==='asc'?1:-1)});
+}
+const sortTh=(kind,col,label)=>{const s=S.dash.sort[kind],on=s&&s.col===col;return `<th class="num sortable${on?' on':''}" data-sort="${kind}|${col}" aria-sort="${on?(s.dir==='asc'?'ascending':'descending'):'none'}" tabindex="0">${label}${on?(s.dir==='asc'?' ▲':' ▼'):''}</th>`};
+function detailTablesHTML(d){
+  const P=d.profiles,bn0=d.bn_pattern==='BN0',flagged=new Set(d.findings.filter(f=>f.object.type==='customer').map(f=>f.object.key));
+  const cols={ar:x=>x.ar,share:x=>x.ar_share,overdue:x=>x.overdue,maxod:x=>x.max_overdue,late:x=>x.late_pos_wavg??-1,tier:x=>x.tier};
+  const order=S.dash.custOrder==='intervention'?P.interventionOrder:P.exposureOrder,byKey=new Map(P.customers.map(c=>[c.key,c]));
+  const custs=sortRows(order.map(k=>byKey.get(k)),'cust',cols);
+  const cRows=custs.map(c=>`<tr data-ev="cust|${esc(c.key)}" tabindex="0" class="${!bn0&&flagged.has(c.key)?'flag':''}"><td><b>${esc(c.name)}</b>${c.notes.length?`<small>${c.notes.map(x=>t('note.'+x)).join(' · ')}</small>`:''}</td>
+    <td class="num">${money(c.ar)}</td><td class="num">${pctS(c.ar_share,1)}</td><td class="num ${!bn0&&c.overdue>0?'neg':''}">${money(c.overdue)}</td><td class="num">${c.max_overdue}</td>
+    <td class="num">${c.late_pos_wavg==null?'—':nf(c.late_pos_wavg,1)}</td><td>${lbl(c.size)} · ${lbl(c.relationship)}<small>${lbl(c.behaviour)}${c.behaviour_status!=='ok'?` (${t('w.prov')})`:''}</small></td>
+    <td>${!bn0&&c.debt_status!=='none'?`<span class="status ${c.debt_status==='overdue_long'?'red':'amber'}">${lbl(c.debt_status)}</span>`:lbl(c.debt_status)}</td><td class="num"><b>${c.tier}</b></td></tr>`).join('');
+  const lcols={age:x=>x.days??-1,value:x=>x.value};
+  const lots=sortRows(P.lots,'lot',lcols);
+  const lRows=lots.map(l=>`<tr data-ev="lot|${esc(l.name)}" tabindex="0" class="${!bn0&&(l.status==='slow'||l.status==='cancelled')?'flag':''}"><td><b>${esc(l.name)}</b>${l.checks.length?`<small>${l.checks.join(' · ')}</small>`:''}</td>
+    <td>${l.type||'—'}${l.type_src==='inferred'?` <small>(${t('w.prov')})</small>`:''}${l.suggested_type?` → ${l.suggested_type}`:''}</td><td class="num">${l.days==null?'—':l.days}</td><td class="num">${l.threshold==null?'—':l.threshold}</td>
+    <td class="num">${money(l.value)}</td><td>${!bn0&&l.status!=='normal'&&l.status!=='excluded'?`<span class="status amber">${lbl(l.status)}</span>`:lbl(l.status)}${l.cancel_status==='proposed'?` <small>(${lbl('proposed')})</small>`:''}</td>
+    <td class="num">${l.collateral?money(l.collateral):'—'}${l.collateral_pending?` <small>(${t('tbl.pending')})</small>`:''}</td></tr>`).join('');
+  const scols={purch:x=>x.purchases,dep:x=>x.dependency,ap:x=>x.ap,overdue:x=>x.overdue,press:x=>x.pressure30};
+  const sups=sortRows(P.suppliers.slice().sort((a,b)=>b.ap-a.ap),'sup',scols);
+  const sRows=sups.map(s=>`<tr data-ev="sup|${esc(s.key)}" tabindex="0" class="${!bn0&&s.overdue>0?'flag':''}"><td><b>${esc(s.name)}</b>${s.discount?`<small>${nf(s.discount.pct*100,1)}%/${s.discount.days}d · r_disc ${pctS(s.discount.r_disc,1)}</small>`:''}</td>
+    <td class="num">${money(s.purchases)}</td><td class="num">${pctS(s.dependency,1)}${s.dependency_high?' ⚑':''}</td><td class="num">${money(s.ap)}</td><td class="num ${!bn0&&s.overdue>0?'neg':''}">${money(s.overdue)}</td>
+    <td class="num">${money(s.pressure30)}</td><td>${lbl(s.essential)}</td><td>${lbl(s.conclusion)}${s.pending_confirmation?` <small>(${t('tbl.pending')})</small>`:''}</td></tr>`).join('');
+  const tbl=(cls,head,rows)=>`<div class="table-wrap"><table class="dtable ${cls}"><thead><tr>${head}</tr></thead><tbody>${rows||`<tr><td colspan="11" class="empty">${t('tbl.empty')}</td></tr>`}</tbody></table></div>`;
+  return `<div class="card dtables" data-wid="tables">
+   <div class="dt-h"><h3>${t('tbl.customers')}</h3><div class="seg2" role="group">${['exposure','intervention'].map(o=>`<button type="button" data-corder="${o}" aria-pressed="${S.dash.custOrder===o}" class="${S.dash.custOrder===o?'on':''}">${t('tbl.order.'+o)}</button>`).join('')}</div></div>
+   ${tbl('t-cust',`<th>${t('col.customer')}</th>${sortTh('cust','ar',t('col.ar'))}${sortTh('cust','share',t('col.share'))}${sortTh('cust','overdue',t('col.overdue'))}${sortTh('cust','maxod',t('col.maxod'))}${sortTh('cust','late',t('col.late'))}<th>${t('col.labels')}</th><th>${t('col.debt')}</th>${sortTh('cust','tier',t('col.tier'))}`,cRows)}
+   <div class="dt-h"><h3>${t('tbl.lots')}</h3></div>
+   ${tbl('t-lot',`<th>${t('col.lot')}</th><th>${t('col.type')}</th>${sortTh('lot','age',t('col.age'))}<th>${t('col.thr')}</th>${sortTh('lot','value',t('col.value'))}<th>${t('col.status')}</th><th>${t('col.collateral')}</th>`,lRows)}
+   <div class="dt-h"><h3>${t('tbl.suppliers')}</h3></div>
+   ${tbl('t-sup',`<th>${t('col.supplier')}</th>${sortTh('sup','purch',t('col.purch'))}${sortTh('sup','dep',t('col.dep'))}${sortTh('sup','ap',t('col.ap'))}${sortTh('sup','overdue',t('col.overdue'))}${sortTh('sup','press',t('col.press'))}<th>${t('col.ess')}</th><th>${t('col.concl')}</th>`,sRows)}</div>`;
+}
+// Evidence panel (UC01.3): object information and its invoices / lot, page size 50 (at most 200), filter and sort; read from the run.
+function openEvidence(kind,key){
+  const d=uc01(),snap=uc01Snap(),P=d.profiles,st={filter:'all',sort:{col:'due',dir:'asc'},page:0};
+  let obj,rows,info;
+  if(kind==='cust'){obj=P.customers.find(c=>c.key===key);rows=(snap.sales||[]).filter(s=>s.key===key);
+    const f=d.findings.filter(x=>x.object.key===key);
+    info=[[t('col.ar'),money(obj.ar)],[t('col.overdue'),money(obj.overdue)],['1–30 / 31–60 / 61–90 / >90',['d1_30','d31_60','d61_90','d90p'].map(k=>money(obj.buckets[k])).join(' / ')],
+      [t('col.maxod'),obj.max_overdue+' '+t('unit.days')],[t('col.late'),obj.late_pos_wavg==null?'—':nf(obj.late_pos_wavg,1)+' '+t('unit.days')+` (${obj.paid_count})`],['ρ max',rows.filter(r=>r.rho!=null&&r.open&&r.dpd>0).reduce((a,r)=>Math.max(a,r.rho),0).toFixed(2)],
+      [t('exp.rules'),f.map(x=>`${x.rule_id} (${x.level===2?t('st.severe'):t('st.watch')})`).join(', ')||'—'],['ρ',`${t('st.watch')} > ${CFG.ar.rhoWatch} · ${t('st.severe')} > ${CFG.ar.rhoSevere} (${thrSrcName('demo_assumption')})`]]}
+  else if(kind==='sup'){obj=P.suppliers.find(s=>s.key===key);rows=(snap.purchases||[]).filter(s=>s.key===key);const f=d.findings.filter(x=>x.object.key===key);
+    info=[[t('col.ap'),money(obj.ap)],[t('col.overdue'),money(obj.overdue)],[t('col.maxod'),obj.max_overdue+' '+t('unit.days')],[t('col.dep'),pctS(obj.dependency,1)],[t('col.ess'),lbl(obj.essential)],
+      [t('col.concl'),lbl(obj.conclusion)],[t('exp.rules'),f.map(x=>`${x.rule_id} (${x.level===2?t('st.severe'):t('st.watch')})`).join(', ')||'—']]}
+  else{obj=P.lots.find(l=>l.name===key);rows=[obj];
+    info=[[t('col.type'),obj.type||'—'],[t('col.age'),obj.days==null?'—':obj.days+' '+t('unit.days')],[t('col.thr'),obj.threshold==null?'—':obj.threshold+' '+t('unit.days')],[t('col.value'),money(obj.value)],
+      [t('col.status'),lbl(obj.status)],[t('col.collateral'),obj.collateral?money(obj.collateral):'—'],[t('exp.rules'),d.findings.filter(x=>x.object.type==='lot'&&x.object.name===key).map(x=>x.rule_id).join(', ')||'—']]}
+  const PS=CFG.ui.evidencePageSize,MAX=CFG.ui.evidenceMaxRows;
+  const draw=m=>{
+    let r=kind==='lot'?rows:rows.filter(x=>st.filter==='all'||(st.filter==='open'&&x.open)||(st.filter==='overdue'&&x.open&&x.dpd>0)||(st.filter==='paid'&&!x.open));
+    const key2={amount:x=>x.amount,due:x=>x.due||'9999',dpd:x=>x.dpd??-1,age:x=>x.days??-1}[st.sort.col]||(x=>0);
+    r=r.slice().sort((a,b)=>{const x=key2(a),y=key2(b);return (x>y?1:x<y?-1:0)*(st.sort.dir==='asc'?1:-1)});
+    const total=r.length,capped=r.slice(0,MAX),pages=Math.max(1,Math.ceil(capped.length/PS));st.page=Math.min(st.page,pages-1);
+    const page=capped.slice(st.page*PS,st.page*PS+PS),th=(c,l)=>`<th class="sortable${st.sort.col===c?' on':''}" data-esort="${c}">${l}${st.sort.col===c?(st.sort.dir==='asc'?' ▲':' ▼'):''}</th>`;
+    const body=kind==='lot'?`<thead><tr><th>${t('col.lot')}</th><th>${t('col.type')}</th>${th('age',t('col.age'))}${th('amount',t('col.value'))}<th>${t('col.status')}</th></tr></thead><tbody>${page.map(l=>`<tr><td>${esc(l.name)}</td><td>${l.type||'—'}</td><td class="num">${l.days??'—'}</td><td class="num">${money(l.value)}${rawVND(l.value)}</td><td>${lbl(l.status)}</td></tr>`).join('')}</tbody>`
+      :`<thead><tr><th>${t('col.inv')}</th><th>${t('col.issue')}</th>${th('due',t('col.due'))}<th>${t('col.paid')}</th>${th('amount',t('col.amount'))}<th>${t('col.open')}</th>${th('dpd',t('col.dpd'))}<th>${t('col.rho')}</th></tr></thead>
+       <tbody>${page.map(x=>`<tr class="${x.open&&x.dpd>0?'flag':''}"><td class="num">${esc(x.id)}</td><td class="num">${x.issue?fd(x.issue):'—'}</td><td class="num">${x.due?fd(x.due):'—'}</td><td class="num">${x.paid&&!x.open?fd(x.paid):'—'}</td><td class="num">${money(x.amount)}${rawVND(x.amount)}</td><td class="num">${x.open?money(x.open_amount):'0'}</td><td class="num">${x.dpd??'—'}</td><td class="num">${x.rho!=null&&x.open&&x.dpd>0?x.rho.toFixed(2):'—'}</td></tr>`).join('')}</tbody>`;
+    m.querySelector('.ev-body').innerHTML=total?`<div class="table-wrap"><table class="dtable">${body}</table></div>${total>PS?`<div class="ev-pg"><button class="btn sec sm" data-pg="-1" ${st.page?'':'disabled'}>${t('ev.prev')}</button><span>${t('ev.page',{p:st.page+1,n:pages})}</span><button class="btn sec sm" data-pg="1" ${st.page<pages-1?'':'disabled'}>${t('ev.next')}</button></div>`:''}${total>MAX?`<p class="ev-more">${t('ev.more',{n:MAX,total,p:PS,max:MAX})}</p>`:''}`
+      :`<div class="empty">${t('ev.none',{f:t('ev.'+st.filter)})}</div>`;
+    $$('[data-esort]',m).forEach(h=>h.onclick=()=>{const c=h.dataset.esort;st.sort={col:c,dir:st.sort.col===c&&st.sort.dir==='asc'?'desc':'asc'};draw(m)});
+    $$('[data-pg]',m).forEach(b=>b.onclick=()=>{st.page+=+b.dataset.pg;draw(m)});
+  };
+  openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${t('ev.title',{name:esc(kind==='lot'?obj.name:obj.name)})}</h3>
+    <dl class="ev-info">${info.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
+    ${kind==='lot'?'':`<label class="ev-f">${t('ev.filter')} <select id="evFilter">${['all','open','overdue','paid'].map(f=>`<option value="${f}">${t('ev.'+f)}</option>`).join('')}</select></label>`}
+    <div class="ev-body"></div><p class="ev-src">${t('ev.from',{run:d.run_id})}</p></div>`,m=>{
+    m.querySelector('.settings-close').onclick=closeModal;const fsel=m.querySelector('#evFilter');if(fsel)fsel.onchange=()=>{st.filter=fsel.value;st.page=0;draw(m)};draw(m)});
+  addLog({tool:'view_evidence',tier:0,args:{firm_id:S.firm,object:kind,key},status:'ok',summary:`Evidence for ${obj&&obj.name}`});
+}
+// Threshold policy (UC01.4, minimal): thresholds by model with source and version; business model and materiality are changed
+// here (never through Chat) with a reason, a preview of the impact and a new configuration version.
+function openPolicy(){
+  const f=S.firm,d=uc01(),p=POLICY.get(f),T=CFG.wc.thr;
+  const row=(lb,k,s)=>`<tr><td>${lb}</td><td class="num">${k.CMT}</td><td class="num">${k.FOB}</td><td>${s}</td></tr>`,src=thrSrcName('verified_reference');
+  openModal(`<div class="evid pol"><button class="settings-close" aria-label="Close">×</button><h3>${t('pol.title')}</h3><p class="sub">${t('pol.sub',{v:CFG.versions.threshold,cfg:esc(POLICY.versionId(f))})}</p>
+   <div class="table-wrap"><table class="dtable"><thead><tr><th>${t('pol.metric')}</th><th>CMT</th><th>FOB</th><th>${t('pol.source')}</th></tr></thead><tbody>
+    ${row('DSO P50 / P75 / P90',{CMT:[T.CMT.dso.ref,T.CMT.dso.watch,T.CMT.dso.severe].map(v=>nf(v,1)).join(' / '),FOB:[T.FOB.dso.ref,T.FOB.dso.watch,T.FOB.dso.severe].map(v=>nf(v,1)).join(' / ')},src)}
+    ${row('DIO P50 / P75 / P90',{CMT:[T.CMT.dio.ref,T.CMT.dio.watch,T.CMT.dio.severe].map(v=>nf(v,1)).join(' / '),FOB:[T.FOB.dio.ref,T.FOB.dio.watch,T.FOB.dio.severe].map(v=>nf(v,1)).join(' / ')},src)}
+    ${row('DPO P10 / P75',{CMT:nf(T.CMT.dpo.low,1)+' / '+nf(T.CMT.dpo.high,1),FOB:nf(T.FOB.dpo.low,1)+' / '+nf(T.FOB.dpo.high,1)},src)}
+    ${row(t('pol.buffer'),{CMT:pctS(T.CMT.bufThin,1),FOB:pctS(T.FOB.bufThin,1)},src)}
+    ${row('ρ',{CMT:'0,5 / 1,0',FOB:'0,5 / 1,0'},thrSrcName('demo_assumption'))}
+    ${row(t('pol.lot'),{CMT:'60 / 30',FOB:'60 / 30'},thrSrcName('demo_assumption'))}</tbody></table></div>
+   <div class="pol-form"><label>${t('w.model')}<select id="polModel"><option value="undeclared">${t('pol.undeclared')}</option><option value="CMT">CMT</option><option value="FOB">FOB</option></select></label>
+    <label>${t('mar.share')}<select id="polMat">${[0.03,0.05,0.1].map(v=>`<option value="${v}">${pctS(v,0)}</option>`).join('')}</select></label>
+    <label class="wide">${t('pol.reason')}<textarea id="polReason" rows="2" maxlength="500" placeholder="${t('pol.reason.ph')}"></textarea></label></div>
+   <div id="polPreview" class="pol-prev"></div><p id="polErr" class="settings-error"></p>
+   <div class="acts"><button class="btn sec" id="polCancel">${t('pol.cancel')}</button><button class="btn primary" id="polSave">${t('pol.save')}</button></div></div>`,m=>{
+    const ms=m.querySelector('#polModel'),mt=m.querySelector('#polMat');ms.value=p.business_model||(DATA.snaps[f].firm.business_model||'undeclared');mt.value=String(p.materiality??CFG.wc.materiality);
+    const prev=()=>{const x=ENGINE.diagnose(uc01Snap(f),{business_model:ms.value,materiality:+mt.value,version_id:'preview'});
+      m.querySelector('#polPreview').innerHTML=t('pol.preview',{from:`${d.wc_class} · ${d.bn_pattern}`,to:`${x.wc_class} · ${x.bn_pattern}`,mar:money(x.money_at_risk),share:pctS(x.materiality_share,1)})};
+    ms.onchange=mt.onchange=prev;prev();
+    m.querySelector('.settings-close').onclick=m.querySelector('#polCancel').onclick=closeModal;
+    m.querySelector('#polSave').onclick=()=>{const r=m.querySelector('#polReason').value.trim();
+      if(r.length<10||r.length>500){m.querySelector('#polErr').textContent=t('pol.reason.err');return}
+      POLICY.set(f,{business_model:ms.value,materiality:+mt.value},r);closeModal();toast(t('pol.saved',{v:POLICY.versionId(f)}));refreshTab()};
+  });
+}
+function uc01SelChange(asOf,start){
+  const base=DATA.snaps[S.firm];
+  if(!asOf||asOf>base.data_as_of){toast(t('ctl.bad'));return}
+  const st=start||isoOf(dn(asOf)-182);if(st>=asOf){toast(t('ctl.bad'));return}
+  S.uc01Sel=asOf===base.data_as_of&&st===isoOf(dn(asOf)-182)?null:{asOf,start:st};
+  renderDash();
+}
+function cccGaugesHTML(d,c){
+  const T=d.thresholds,m=d.metrics,dso=m.dso,dio=m.dio,dpo=m.dpo,ccc=m.ccc,n=d.N;
+  // Gauge scales follow the thresholds of the model (no fixed 90-day scale).
+  const mx=(v,ref)=>Math.ceil(Math.max(v||0,ref)*1.15/10)*10;
+  return `<div class="gauges">${dso==null?'':gauge(dso,mx(dso,T.dso.severe),'var(--lc-color-data-receivables)',t('unit.days'),'DSO',`${t('item.cap.AR',{n})} ${t('mk.watch')} ${nf(T.dso.watch,1)} · ${t('mk.severe')} ${nf(T.dso.severe,1)}`)}
+   ${dio==null?'':gauge(dio,mx(dio,T.dio.severe),'var(--lc-color-data-inventory)',t('unit.days'),'DIO',`${t('item.cap.INV',{n})} ${t('mk.watch')} ${nf(T.dio.watch,1)} · ${t('mk.severe')} ${nf(T.dio.severe,1)}`)}
+   ${dpo==null?'':gauge(dpo,mx(dpo,T.dpo.high),'var(--lc-color-data-payables)',t('unit.days'),'DPO',`${t('item.cap.AP',{n})} ${t('mk.low')} ${nf(T.dpo.low,1)} · ${t('mk.high')} ${nf(T.dpo.high,1)}`)}
+   ${ccc==null?'':gauge(ccc,mx(ccc,T.dso.severe+T.dio.severe),'var(--lc-color-data-cash)',t('unit.days'),'CCC',t('ccc.cap'))}</div>`;
+}
 function renderDash(){
-  const c=C(),p=$('#pane-dash'),M=weeklyModel(c),AG=agingModel(c);
-  const dso=c.ar/c.rev*c.N,dio=c.invv/c.cogs*c.N,dpo=c.ap/c.cogs*c.N,ccc=dso+dio-dpo;
-  const own=isUserFirm(S.firm),f=own?dstore.load().firms[S.firm]:null,snap=f&&activeSnap(f);
-  const slow=c.inv.filter(x=>x.slow&&x.own>0).reduce((a,x)=>a+x.own,0);
-  const kc=(t,v,sub,sp,col,ic,cls='',wid='')=>`<div class="card kc ${cls}" data-wid="${wid}" style="--kc:${col}"><div class="ki" aria-hidden="true">${ic}</div><div class="kv num">${v}</div><div class="kt">${t}</div><div class="ks">${sub}</div>${sp||''}</div>`;
-  const wkSeries=cat=>M.W.map((_,i)=>M.groups.filter(g=>g.cat===cat).reduce((a,g)=>a+g.wk[i],0));
-  // The 13-week forecast, daily balance and gaps live in the Shortfall tab.
+  const c=C(),p=$('#pane-dash'),AG=agingModel(c),d=uc01(),snap=uc01Snap();
+  const own=isUserFirm(S.firm),f=own?dstore.load().firms[S.firm]:null,fs=f&&activeSnap(f);
+  $$('.chipdate b').forEach(b=>b.textContent=fd(c.as_of));
   p.innerHTML=`
-  <div class="dsrc ${own?'own':''}">${own?`<span><b>${esc(f.name)}</b> · your uploaded data · version ${snap.id} · as of ${fd(snap.asOf)} · estimated figures</span><span class="dsa"><button class="btn primary sm" data-go="upd">Update data</button><button class="btn sec sm" data-go="hist">Version history</button></span>`
+  <div class="dsrc ${own?'own':''}">${own?`<span><b>${esc(f.name)}</b> · your uploaded data · version ${fs.id} · as of ${fd(fs.asOf)} · estimated figures</span><span class="dsa"><button class="btn primary sm" data-go="upd">Update data</button><button class="btn sec sm" data-go="hist">Version history</button></span>`
    :`<span>Viewing <b>sample data ${S.firm}</b>. Want to analyse your own business?</span><span class="dsa"><button class="btn primary sm" data-go="new">⇪ Upload data</button></span>`}</div>
+  ${dataSourceHTML(d,snap)}
+  ${dashSec(1,'var(--lc-color-alert-orange-mark)',t('sec.w'),t('sec.w.sub'),`<div class="wgrid">${wCardHTML(d)}<div class="mtiles">${marTilesHTML(d)}</div></div>`)}
+  ${dashSec(2,'var(--lc-color-data-receivables)',t('sec.items'),t('sec.items.sub'),`<div class="icards">${d.item_states.map(it=>itemCardHTML(d,it)).join('')}</div>`)}
+  ${dashSec(3,'var(--lc-color-data-inventory)',t('sec.tables'),t('sec.tables.sub'),detailTablesHTML(d))}
   ${liquidityStateHTML()}
-  ${dashSec(1,'var(--lc-color-data-receivables)','Working capital overview','What is tying up and holding your business’s cash',`<div class="kcs">
-   ${kc('Open receivables',money(c.ar),`${c.sales.filter(s=>s[4]===1).length} invoices`,spk(wkSeries('invoice_receipt'),'var(--lc-color-data-receivables)'),'var(--lc-color-data-receivables)','↘','','ar')}
-   ${kc('Open payables',money(c.ap),`${c.pur.filter(s=>s[3]===1).length||'–'} purchase invoices`,spk(wkSeries('supplier_payment'),'var(--lc-color-status-error)'),'var(--lc-color-status-error)','↗','','ap')}
-   ${kc('Owned inventory',money(c.inv.reduce((a,x)=>a+x.own,0)),slow?`Aged stock ${money(slow)}`:'No aged stock','','var(--lc-color-data-inventory)','▦','','inv')}
-  </div>`)}
-  ${dashSec(2,'var(--lc-color-data-cash)','Cash conversion cycle','DSO, DIO, DPO and how due amounts spread over time',`<div class="dmid">
-   <div class="gauges">${gauge(dso,90,'var(--lc-color-data-receivables)','days','DSO',`Days to collect = Receivables ÷ Revenue × ${c.N}`)}${gauge(dio,90,'var(--lc-color-data-inventory)','days','DIO',`Days in stock = Owned inventory ÷ COGS × ${c.N}`)}${gauge(dpo,90,'var(--lc-color-data-payables)','days','DPO',`Days to pay suppliers = Payables ÷ COGS × ${c.N}`)}${gauge(ccc,120,'var(--lc-color-data-cash)','days','CCC','CCC = DSO + DIO − DPO')}</div>
+  ${dashSec(4,'var(--lc-color-data-cash)',t('sec.ccc'),t('sec.ccc.sub'),`<div class="dmid">${cccGaugesHTML(d,c)}
    <div class="card agc" data-wid="aging"><div class="card-head"><div><h3>Receivables and payables by due bucket</h3><p>VND million · from the cut-off date</p></div></div><div class="chartbox">${agingSVG(AG)}</div>
-    <div class="legend"><span><i style="background:var(--lc-color-data-receivables)"></i>Receivables</span><span><i style="background:var(--lc-color-status-error)"></i>Overdue receivables</span><span><i style="background:var(--lc-color-data-payables)"></i>Payables</span></div></div>
-  </div>`)}
-  <div class="foot-note">CCC uses period-end balances, ${c.N}-day period; goods held for subcontracting are excluded from owned inventory. Cash-flow projections, the daily balance and the cash gaps are in the Shortfall tab. Synthetic data.</div>`;
+    <div class="legend"><span><i style="background:var(--lc-color-data-receivables)"></i>Receivables</span><span><i style="background:var(--lc-color-status-error)"></i>Overdue receivables</span><span><i style="background:var(--lc-color-data-payables)"></i>Payables</span></div></div></div>`)}
+  <div class="foot-note">${t('foot.uc01')} ${d.N}-day period; goods held for subcontracting are excluded from owned inventory. Cash-flow projections, the daily balance and the cash gaps are in the Shortfall tab. Synthetic data.</div>`;
   $$('.gv b[data-v]',p).forEach(e=>animNum(e,+e.dataset.v,v=>nf(v,1),1000));
   $$('[data-go]',p).forEach(b=>b.onclick=()=>{const g=b.dataset.go;if(g==='new')startImport(null);else if(g==='upd')startImport(S.firm);else{DW.view='hist';DW.firmId=S.firm;openDataScreen('businesses')}});
   $$('[data-liq="fund"]',p).forEach(b=>b.onclick=goFinancing);
+  const ao=$('#ucAsOf',p),so=$('#ucStart',p);
+  if(ao)ao.onchange=()=>uc01SelChange(ao.value,null);if(so)so.onchange=()=>uc01SelChange(ao.value,so.value);
+  const rs=$('#ucReset',p);if(rs)rs.onclick=()=>{S.uc01Sel=null;renderDash()};
+  $('#ucExpert',p).onchange=e=>{S.dash.expert=e.target.checked;try{localStorage.setItem('lilact.expert.v1',S.dash.expert?'1':'0')}catch(x){}renderDash()};
+  $('#ucPolicy',p).onclick=openPolicy;
+  $$('[data-corder]',p).forEach(b=>b.onclick=()=>{S.dash.custOrder=b.dataset.corder;S.dash.sort.cust=null;renderDash()});
+  $$('[data-sort]',p).forEach(h=>{const go=()=>{const [k,col]=h.dataset.sort.split('|'),s=S.dash.sort[k];S.dash.sort[k]={col,dir:s&&s.col===col&&s.dir==='desc'?'asc':'desc'};renderDash()};h.onclick=go;h.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}});
+  $$('[data-ev]',p).forEach(r=>{const go=()=>{const i=r.dataset.ev.indexOf('|');openEvidence(r.dataset.ev.slice(0,i),r.dataset.ev.slice(i+1))};r.onclick=go;r.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();go()}}});
   decorateWidgets(p);
 }
 
@@ -1920,7 +2127,7 @@ function savePins(){try{localStorage.setItem(pinKey(),JSON.stringify(PINS))}catc
 const toggleIn=(arr,v)=>{const i=arr.indexOf(v);if(i>=0){arr.splice(i,1);return false}arr.push(v);return true};
 const PIN_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></svg>';
 const FS_SVG='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
-const WNAME={ar:'Open receivables',ap:'Open payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance',state:'Liquidity state'};
+const WNAME={source:'Data source',w:'W axis',mar:'Capital above the normal level',ob:'Overdue obligations',tables:'Customers, lots and suppliers',ar:'Receivables',ap:'Payables',inv:'Owned inventory',min:'Lowest balance',dso:'DSO',dio:'DIO',dpo:'DPO',ccc:'CCC',aging:'Receivables vs payables by due date',flow:'13-week cash forecast',daily:'Daily cash balance',state:'Liquidity state'};
 
 function renderPins(){
   const box=$('#pinBox'),list=$('#pinList');if(!box)return;
@@ -2005,7 +2212,7 @@ const toggleSideDesk=()=>setSide($('#app').classList.contains('side-collapsed'))
 $('#sideToggle').addEventListener('click',toggleSideDesk);$('#sideFold').addEventListener('click',toggleSideDesk);
 addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();toggleSideDesk();return}
-  if(e.key==='Escape'){if(fsEl){closeFS();e.stopPropagation();return}if($('#work').classList.contains('wide'))setWide(false)}},true);
+  if(e.key==='Escape'){if($('#scrim').classList.contains('show'))return;if(fsEl){closeFS();e.stopPropagation();return}if($('#work').classList.contains('wide'))setWide(false)}},true);
 setSide(PREF.side!=='closed',false);
 const _cp=closePanel;closePanel=function(){setWide(false);return _cp.apply(this,arguments)};
 
