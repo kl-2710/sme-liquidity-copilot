@@ -1039,3 +1039,10 @@ svg .gapax{fill:var(--lc-color-status-error);font-weight:800}
 .cfcard{margin-top:14px;padding:12px 14px}
 .ev-info.gr dd{font-weight:600}
 @media (max-width:700px){.cf{grid-template-columns:1fr}}
+
+/* ===== Chat answers, tool line and forecast reliability ===== */
+.ans p{margin:0 0 8px}.ans p:last-child{margin-bottom:0}
+.tools-used{margin:8px 0 0;font-size:11px;color:var(--lc-color-text-muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.fbcard{margin:10px 0 0;padding:10px 14px;border-left:4px solid var(--lc-color-status-neutral)}
+.fbcard h3{font-size:13px;margin:0}.fbcard p{margin:4px 0 0;font-size:12px;color:var(--lc-color-text-secondary)}
+.fbcard.mh-ok{border-left-color:var(--lc-color-status-success)}.fbcard.mh-watch{border-left-color:var(--lc-color-alert-yellow)}.fbcard.mh-degraded{border-left-color:var(--lc-color-status-error)}

@@ -10,7 +10,7 @@ const ENGINE=(()=>{
   const normName=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/[^a-z0-9]+/g,' ').trim();
   // FNV-1a: deterministic ids (snapshot, run) so the same inputs always give the same id.
   const hash=s=>{let h=2166136261;for(const ch of String(s)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(36).toUpperCase()};
-  // Threshold comparisons on unrounded values: a relative tolerance keeps binary rounding from flipping exact decimal boundaries
+  // SRS-DECISION: threshold comparisons on unrounded values use a relative tolerance of 1e-9 so binary rounding cannot flip exact decimal boundaries
   // (5.00 % materiality is W2, T07; DSO equal to the watch threshold gives no signal, T08).
   const EPS=1e-9,tol=b=>EPS*Math.max(1,Math.abs(b)),GT=(a,b)=>a>b+tol(b),GE=(a,b)=>a>=b-tol(b),LT=(a,b)=>a<b-tol(b);
   const tri=v=>{const s=String(v==null?'':v).trim().toLowerCase();return ['1','true','yes','y','có','co'].includes(s)?'yes':['0','false','no','n','không','khong'].includes(s)?'no':'unknown'};
@@ -57,6 +57,7 @@ const ENGINE=(()=>{
   //         planned:[{id,date,week,direction,category,amount,certainty,source_id}], config:{amount_basis,vat_rate}, tables:{sales:bool,...}}
   function makeSnapshot(input,{asOf,periodStart}={}){
     const dataAsOf=input.as_of,cut=asOf||dataAsOf,A=dnum(cut),shift=dnum(dataAsOf)-A;
+    // SRS-DECISION: the default period is that of the financial statements ending at the cut-off (the data's own N); otherwise as_of − 182.
     const own=cut===dataAsOf?(input.fin||[]).filter(r=>r.revenue!=null&&r.period_end===cut&&rowDays(r)).sort((a,b)=>rowDays(b)-rowDays(a))[0]:null;
     const start=periodStart||(own?diso(A-rowDays(own)+1):diso(A-182)),N=A-dnum(start)+1,issues=[];
     if(N<=0)throw new Error('INVALID_PERIOD');
@@ -67,6 +68,7 @@ const ENGINE=(()=>{
       const paidAt=r.paid&&dnum(r.paid)<=A,paidAmt=paidAt?(r.paid_amount!=null?r.paid_amount:r.amount):0;
       let open=r.amount-paidAmt,advance=0;if(open<0){advance=-open;open=0}     // overpayment is an advance, not a negative receivable
       const due=r.due||null,issue=r.issue||null,dpd=open>0&&due?Math.max(0,A-dnum(due)):null;
+      // SRS-DECISION: a term shorter than one day (due = issue) counts as one day in ρ = overdue days ÷ term.
       let term=due&&issue?dnum(due)-dnum(issue):null,termAssumed=false;
       if(term==null&&due){term=CFG.ar.termFallbackDays;termAssumed=true}       // invoice without issue date: fallback term, flagged
       const p=party(kind==='sale'?r.customer:r.supplier,r.tax_code);
@@ -132,6 +134,7 @@ const ENGINE=(()=>{
   /* ---------- UC01 · customer tier (Table 2-40), needed for the cause breakdown ---------- */
   // Relationship (Table 2-38): new ≤ cl.newDays of relationship; regular ≥ cl.regularMinInvoices invoices in the period and
   // ≥ cl.regularMinMonths active months; otherwise occasional. Size by revenue share; the ±band applies only when a previous label exists.
+  // SRS-DECISION: the ±band applies only against the label of a previous snapshot; the first snapshot uses the plain thresholds.
   function sizeLabel(share,prev){
     const {largeShare:L,smallShare:S,bandSharePP:B}=CFG.cl;
     if(prev==='large'&&share>=L-B)return 'large';if(prev!=='large'&&prev&&share>=L+B)return 'large';if(!prev&&share>=L)return 'large';
@@ -200,6 +203,7 @@ const ENGINE=(()=>{
     const annualRev=rev>0?rev*365/N:null,cashBuffer=cash!=null&&annualRev?(cash+(f.st_investments||0))/annualRev:null;
     const missing=[];if(rev==null)missing.push('revenue');if(cogs==null)missing.push('cogs');if(ca.value==null)missing.push('current_assets');
     if(AR==null)missing.push('receivables');if(INV==null)missing.push('inventory');if(AP==null)missing.push('payables');
+    // SRS-DECISION: revenue or COGS of 0 is treated as an inactive business (Table 2-32 row 1): W = unknown; DSO/DIO/DPO show 'not applicable'.
     const inactive=(rev!=null&&rev<=0)||(cogs!=null&&cogs<=0);
     // Aggregate signals (strictly greater than the threshold, T08).
     const lvl=(v,t)=>v==null?0:GT(v,t.severe)?2:GT(v,t.watch)?1:0;
@@ -209,6 +213,7 @@ const ENGINE=(()=>{
     // Lot level R-INV-SLOW by type (NVL/HH > 60 days, BTP/TP > 30 days); severe at twice the watch age or a confirmed cancelled order.
     const slow=(lots||[]).filter(l=>l.owner!=='customer').map(l=>{
       const thr=CFG.inv.slowDays[l.type]||CFG.inv.unknownTypeSlowDays,aged=l.days!=null&&l.days>thr,cancelled=l.cancelled==='yes';
+      // SRS-DECISION: a cancelled order proposed from the lot name (not yet confirmed) is not a severe signal; a slow lot with that proposal goes to source (6).
       if(!aged&&!cancelled)return null;
       return {lot:l,thr,over:l.days!=null?l.days-thr:null,level:cancelled||(l.days!=null&&l.days>2*thr)?2:1,cancelled:cancelled||l.cancel_proposed,cancel_confirmed:cancelled};
     }).filter(Boolean);
@@ -306,6 +311,7 @@ const ENGINE=(()=>{
     const late=prev==='frequent_late'?lpw>L-B:prev?lpw>L+B:lpw>L;
     return {label:late?'frequent_late':'on_time',status:nPaid>=CFG.cl.lateConclusionMinPaid?'ok':'provisional'};
   }
+  // SRS-DECISION: the data has no goods category per supplier; it is inferred from the name and labelled provisional.
   function supplierCategory(name){
     const n=normName(name);
     if(/logistic|customs|thong quan/.test(n))return {cat:'logistics_customs',extendable:false};
@@ -320,6 +326,7 @@ const ENGINE=(()=>{
     const z=CFG.size,tier=annual<=z.micro?'micro':annual<=z.small?'small':annual<=z.medium?'medium':'beyond_sme';
     const cap=tier==='micro'?z.micro:tier==='small'?z.small:tier==='medium'?z.medium:null;
     // Without total capital and headcount the tier is provisional by revenue only (Table 2-46, A48).
+    // SRS-DECISION: "near the cap" (T50) = annual revenue ≥ 90 % of the tier cap (the same ratio as bn.near_threshold_ratio).
     return {tier,annual,status:'provisional',near_cap:cap!=null&&annual>=CFG.bn.nearThresholdRatio*cap,cap};
   }
   function profiles(snap,d,opts={}){
@@ -338,6 +345,8 @@ const ENGINE=(()=>{
       if(tier===4&&strat==='unknown')notes.push('strategic_not_confirmed');if(c.new_large)notes.push('new_large');if(c.key_weak)notes.push('counterparty_key_weak');
       const late=c.overdue>0||(lpw??0)>0;
       const action=tier===1?(late?'tighten_now':'strict_terms_new_orders'):tier===2?(late?'tighten_now':'monitor'):TIER_ACTION[tier];
+      // SRS-DECISION: the sample data has no tax codes; a name match is shown as 'name_match_unverified' (T41) and never treated as a verified
+      // whitelist match (T55). The UC03 product filter of rankFor is unchanged.
       const inWl=wlNames.has(normName(c.name)),whitelist=inWl?(c.key_weak?'name_match_unverified':'in_program'):'BUYER_NOT_IN_PROGRAM';
       return {...c,rows:undefined,invoice_ids:c.rows.map(r=>r.id),buckets:b,late_pos_wavg:lpw,paid_count:paid.length,late_rate:paid.length?paid.filter(r=>dnum(r.paid)>dnum(r.due)).length/paid.length:null,
         collect_days_wavg:cdw,behaviour:beh.label,behaviour_status:beh.status,debt_status:debt,disputed:'missing_data',strategic:strat,tier,action,template:TIER_TEMPLATE[tier],notes,whitelist,
@@ -433,6 +442,8 @@ const ENGINE=(()=>{
   function forecast(snap,opts={}){
     const T=CFG.tv2,A=dnum(snap.as_of),start=A+1,HD=7*T.horizonWeeks,end=A+HD,D=delayModel(snap),vat=vatFactor(opts.config||snap.config),issues=[];
     const essential=new Set((opts.essentialSuppliers||snap.firm.essential_suppliers||[]).map(normName));
+    // SRS-DECISION: only suppliers declared essential are paid on the due date; an "unknown" essential flag keeps the historical timing (the
+    // essential_suppliers list of Table 2-79 is explicit), while UC01 still shows the flag as unknown, never as "no".
     const isEssential=p=>p.essential==='yes'||essential.has(normName(p.supplier)),apTiming=opts.apTiming||'historical';
     const openSales=(snap.sales||[]).filter(s=>s.open),openPur=(snap.purchases||[]).filter(p=>p.open);
     const odPur=openPur.filter(p=>p.due&&dnum(p.due)<=A).sort((a,b)=>dnum(a.due)-dnum(b.due)||(a.id<b.id?-1:a.id>b.id?1:0));
@@ -467,6 +478,7 @@ const ENGINE=(()=>{
       if(p.source_id&&invoiceIds.has(p.source_id)){issues.push({code:'PLAN_DUPLICATES_INVOICE',severity:'warning',id:p.id,source:p.source_id});return}
       const known=KNOWN_CAT.has(p.category),base={id:p.id,dir:p.direction,cat:known?p.category:(p.direction==='IN'?'planned_inflow':'planned_outflow'),
         partner:known?'Planned item':(p.category||'Planned item'),amt:p.amount,certainty:p.certainty||'estimated',src:'plan'};
+      // SRS-DECISION: week-only rows are placed on a nominal day of their week for the internal ledger; in weekly_only mode no daily figure is shown.
       let t=null;if(p.date)t=dnum(p.date);else if(p.week){t=A+(p.week-1)*7+4;weeklyOnly=true}   // nominal day inside the week, never published as a daily figure
       if(t!=null&&t<start){issues.push({code:'PLAN_BEFORE_START',severity:'warning',id:p.id});return}
       plans.push({...base,t,method:p.date?'plan_date':p.week?'plan_week':'no_date'});
@@ -639,6 +651,7 @@ const ENGINE=(()=>{
     const receipts=top3(o.events.filter(e=>e.dir==='IN'&&e.src==='sales_invoice'&&(e.scope==='beyond_horizon'||(e.scope==='in_horizon'&&e.t>low))));
     const W=uc01||{findings:[],cause_items:[],bn_pattern:'unknown'},links=[];
     const fCust=new Map(),fSup=new Map();W.findings.forEach(f=>{if(f.object.type==='customer')fCust.set(f.object.key,f);if(f.object.type==='supplier')fSup.set(f.object.key,f)});
+    // SRS-DECISION: L1 needs an object-level finding (a customer with R-AR-OD); a company-level DSO finding does not link a single receipt.
     receipts.forEach(e=>{const f=fCust.get(e.key);if(f)links.push({type:'L1',item:'AR',finding_ids:[f.id],object:e.partner,event_ids:[e.id],amount:e.amt,
       evidence:e.tier==='customer'&&!/residual/.test(e.method||'')?'supported':'candidate',delay_tier:e.tier})});
     // AP: the overdue-payable schedule (offset + rank mod 5) of a supplier with a finding that falls inside the episode.
@@ -678,6 +691,53 @@ const ENGINE=(()=>{
       versions:{formula:CFG.versions.formula,threshold:CFG.versions.threshold,config:run.config_version},created_at:createdAt||null});
   }
 
+  /* ---------- UC02 · feedback loop after operation (section 2.8.15) ---------- */
+  // Immutable forecast log of a run on a confirmed snapshot: daily balances of Base, Conservative, Optimistic and continuing_sales,
+  // expected receipts per invoice with their delay level, TH, the matrix cell and the configuration version (BR-02.23).
+  function forecastLog(run){
+    const sc=run.fc.scenarios,pick=k=>sc[k].days.map(x=>[x.d,Math.round(x.close)]);
+    return Object.freeze({run_id:run.run_id,snapshot_id:run.snapshot_id,as_of:run.as_of,start:run.fc.start,end:run.fc.end,mode:run.mode,config_version:run.config_version,
+      days:{base:pick('base'),conservative:pick('conservative'),optimistic:pick('optimistic'),continuing_sales:pick('continuing_sales')},
+      receipts:sc.base.events.filter(e=>e.src==='sales_invoice').map(e=>({invoice_id:e.id,date:e.t!=null?diso(e.t):null,amount:e.amt,tier:e.tier||null})),
+      th:run.th.th,cell:run.matrix.cell,rtarget:run.reserves.rtarget});
+  }
+  const median=a=>{if(!a.length)return null;const s=a.slice().sort((x,y)=>x-y),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2};
+  const p90=a=>{if(!a.length)return null;const s=a.slice().sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.ceil(.9*s.length)-1)]};
+  // Reconciliation of a log with a newer confirmed snapshot (as_of' inside the log's horizon), matched by invoice_id over (as_of; as_of'].
+  // Run-off logs: FB-2, FB-3, FB-4 and the missed-alert part of FB-6 only (FB-1 and FB-5 need the continuing mode and daily actual cash).
+  function reconcile(log,snap){
+    const A0=dnum(log.as_of),A1=dnum(snap.as_of);if(!(A1>A0)||A1>dnum(log.end))return {status:'not_applicable'};
+    const byId=new Map((snap.sales||[]).map(s=>[s.id,s])),rows=[];let excluded=0;
+    log.receipts.forEach(r=>{const s=byId.get(r.invoice_id);if(!s){excluded++;return}
+      if(!s.fully_paid&&s.paid_amount_asof>0){excluded++;return}                 // partly paid or credited: left out (FB-E3)
+      const paidIn=s.fully_paid&&s.paid&&dnum(s.paid)>A0&&dnum(s.paid)<=A1;
+      const a=paidIn?s.amount:0,p=r.date&&dnum(r.date)>A0&&dnum(r.date)<=A1?r.amount:0;
+      if(a===0&&p===0)return;
+      rows.push({id:r.invoice_id,a,p,lag:paidIn&&r.date?dnum(s.paid)-dnum(r.date):null,tier:r.tier})});
+    const sa=sum(rows,x=>x.a),sp=sum(rows,x=>x.p),lags=rows.filter(x=>x.lag!=null);
+    const byTier={};lags.forEach(x=>{(byTier[x.tier||'none']=byTier[x.tier||'none']||[]).push(Math.abs(x.lag))});
+    const actual=snap.fin.opening_cash,missed=log.th!=='TH01'&&actual!=null&&log.rtarget>0&&actual<log.rtarget;
+    return {status:'ok',window:[log.as_of,snap.as_of],matched:rows.length,excluded,fb1:null,fb5:null,
+      fb2:Math.max(sa,sp)>0?sum(rows,x=>Math.abs(x.a-x.p))/Math.max(sa,sp):null,fb3:sp>0?(sa-sp)/sp:null,
+      fb4:{median:median(lags.map(x=>x.lag)),median_abs:median(lags.map(x=>Math.abs(x.lag))),p90_abs:p90(lags.map(x=>Math.abs(x.lag))),
+        by_tier:Object.fromEntries(Object.entries(byTier).map(([k,v])=>[k,{median:median(v),p90:p90(v)}]))},fb6:{missed,actual_cash:actual}};
+  }
+  // model_health (Table 2-94): insufficient_sample below fb.min_matched; a missed alert degrades at once; otherwise the watch or degraded
+  // thresholds must be exceeded in fb.consecutive_runs reconciliations in a row. It never changes TH, the matrix cell or the colours.
+  function modelHealth(history){
+    if(!history||!history.length)return 'insufficient_sample';
+    const F=CFG.fb,last=history[history.length-1];if(last.matched<F.minMatched)return 'insufficient_sample';
+    if(last.fb6&&last.fb6.missed)return 'degraded';
+    const sev=r=>(r.fb3!=null&&Math.abs(r.fb3)>F.bias.degraded)||(r.fb2!=null&&r.fb2>F.wape.degraded);
+    const wat=r=>(r.fb3!=null&&Math.abs(r.fb3)>F.bias.watch)||(r.fb2!=null&&r.fb2>F.wape.watch);
+    const lastN=history.slice(-F.consecutiveRuns),full=lastN.length===F.consecutiveRuns&&lastN.every(r=>r.matched>=F.minMatched);
+    if(full&&lastN.every(sev))return 'degraded';
+    if(full&&lastN.every(r=>wat(r)||sev(r)))return 'watch';
+    return 'ok';
+  }
+  // H3: a suggested value for the default delay and the overdue residual (median lag), never applied automatically.
+  const calibrationProposal=(history,health)=>health==='watch'||health==='degraded'?{default_late:Math.max(0,Math.round(history[history.length-1].fb4.median??0)),applied:false}:null;
+
   /* ---------- Legacy case shape used by the chat flow, simulate() and rankFor() ---------- */
   function legacyCase(snap,scenario,{rtarget,cash0,ev,days}){
     const A=dnum(snap.as_of),lots=snap.lots||[];
@@ -703,5 +763,5 @@ const ENGINE=(()=>{
     return out;
   }
   return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
-    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,contributingFactors,gapRequestCheck,buildGapRequest,legacyCase,buildCases};
+    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,contributingFactors,gapRequestCheck,buildGapRequest,forecastLog,reconcile,modelHealth,calibrationProposal,legacyCase,buildCases};
 })();

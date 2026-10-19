@@ -483,13 +483,40 @@ await step("G · gap_request of F01 (need date, peak, Cash0 needed, M7, L1) is i
   assert.deepEqual(r.th03, { ok: false, reason: "th03", label: "idle_cash" }); assert.equal(r.w, "w_unknown"); assert.equal(r.exp, "expired"); assert.equal(r.miss, "status");
 });
 
+// Feedback loop and answer controls (phase H).
+await step("H · Q59–Q67 reconciliation by invoice_id, FB-2/3/4/6 and model_health", async () => {
+  const r = await ev(() => { const A = ENGINE.dnum("2026-09-30"), d = (x) => ENGINE.diso(A + x);
+    const sales = [{ id: "A", customer: "K1", amount: 400, issue: d(-20), due: d(10), paid: null }, { id: "B", customer: "K2", amount: 600, issue: d(-20), due: d(12), paid: null },
+      { id: "C", customer: "K3", amount: 300, issue: d(-20), due: d(15), paid: null }];
+    const s0 = ENGINE.makeSnapshot(TMK({ sales }), { periodStart: "2026-07-03" }), run = ENGINE.runUC02(s0, {}, {}), log = ENGINE.forecastLog(run);
+    const exp = Object.fromEntries(log.receipts.map((x) => [x.invoice_id, x.date]));
+    const later = TMK({ sales: [{ ...sales[0], paid: exp.A }, { ...sales[1], paid: ENGINE.diso(ENGINE.dnum(exp.B) + 5) }, { ...sales[2], paid: d(20), paid_amount: 100 }] });
+    later.as_of = "2026-10-31"; later.snapshot_id = "SNP-T-2";
+    const s1 = ENGINE.makeSnapshot(later), rec = ENGINE.reconcile(log, s1);
+    const H = (list) => ENGINE.modelHealth(list), R = (o) => ({ matched: 25, fb2: 0.1, fb3: 0, fb6: { missed: false }, fb4: { median: 3 }, ...o });
+    return { rec: [rec.status, rec.matched, rec.excluded, Math.round(rec.fb3 * 1000) / 1000, rec.fb4.median, rec.fb1, rec.fb5], frozen: Object.isFrozen(log),
+      health: [H([]), H([R({ fb3: -0.12 })]), H([R({ fb3: -0.12 }), R({ fb3: -0.12 })]), H([R({ fb3: -0.25 }), R({ fb3: -0.25 })]), H([R({ fb6: { missed: true } })]), H([R({ matched: 12, fb3: -0.5 })])],
+      prop: ENGINE.calibrationProposal([R({ fb3: -0.12 }), R({ fb3: -0.12 })], "watch") }; });
+  assert.deepEqual(r.rec, ["ok", 2, 1, 0, 2.5, null, null]);      // C partly paid → excluded; A on time, B five days late; run-off → no FB-1 / FB-5
+  assert.equal(r.frozen, true);
+  assert.deepEqual(r.health, ["insufficient_sample", "ok", "watch", "degraded", "degraded", "insufficient_sample"]);
+  assert.deepEqual(r.prop, { default_late: 3, applied: false });
+});
+await step("H · verifyAnswer: registered numbers and names pass; an unregistered number, a banned phrase or another company's name falls back", async () => {
+  const r = await ev(() => { const a = NARR.uc01Answer(uc01("F01"), "Alpha Garment Subcontractor"), ok = NARR.verifyAnswer(a, { foreign: ["Garment Factory KH5"] });
+    const bad = { ...a, html: a.html + "<p>It will certainly recover 999,9M by Garment Factory KH5.</p>" }, v = NARR.verifyAnswer(bad, { foreign: ["Garment Factory KH5"] }), fin = NARR.finalize(bad, { foreign: ["Garment Factory KH5"] });
+    const bn0 = NARR.uc01Answer({ ...uc01("F03"), bn_pattern: "BN0", wc_class: "W0", cause_items: [], findings: [] }, "Gamma"), vb = NARR.verifyAnswer(bn0);
+    return { ok: ok.ok, issues: v.issues.map((x) => x.split(":")[0]).sort(), fb: fin.fallback, bn0: vb.ok && !/no (cash|money) problem/i.test(NARR.plain(bn0.html)) }; });
+  assert.equal(r.ok, true); assert.deepEqual(r.issues, ["banned", "entity", "number"]); assert.equal(r.fb, true); assert.equal(r.bn0, true);
+});
+
 for (const theme of ["light", "dark"]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await page.goto(URL0);
-  await page.evaluate((t) => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: t })); }, theme);
+  await page.evaluate((t) => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: t, lang: "en" })); }, theme);
   await page.reload(); await page.waitForSelector("#authRoot:not([hidden])");
   const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3800); };
   const last = () => page.locator(".messages.on .msg.bot").last();
@@ -546,11 +573,13 @@ for (const theme of ["light", "dark"]) {
     await ask("Where is my working capital stuck?");
     const t = await last().innerText();
     assert.match(t, /diagnose_working_capital/); assert.match(t, /68[.,]7/);
+    assert.equal(await last().locator(".ans5 > p").count(), 5); assert.match(t, /1\. Overall conclusion\..*5\. What to check and the limits\./s); assert.match(t, /Tools used: diagnose_working_capital/);
   });
   await step(`[${theme}] Task 2 explains every gap; chips stay visible after the 2nd message`, async () => {
     await ask("Why am I short of cash? Show me the cause.");
     const acc = last().locator(".gap-acc");
-    assert.equal(await acc.count(), 5, "one 'Why gap N happens' card per gap");
+    assert.equal(await acc.count(), 5, "one contributing-factors card per gap");
+    assert.equal(await last().locator(".ans4 > p").count(), 4); assert.match(await last().innerText(), /Tools used: forecast_cash/); assert.match(await last().innerText(), /forecast_cash/);
     assert.deepEqual(await acc.evaluateAll((els) => els.filter((e) => e.open).map((e) => e.dataset.gap)), ["5"], "largest gap open");
     assert.equal(await page.locator("#demoChips").isVisible(), true);
     const chips = await page.locator("#demoChips button").count();
@@ -559,6 +588,8 @@ for (const theme of ["light", "dark"]) {
   await step(`[${theme}] Task 3 ranks financing for every gap`, async () => {
     await ask("Rank the financing options that fit this cause.");
     assert.equal(await last().locator(".rank-sum tbody tr").count(), 5);
+    assert.match(await last().innerText(), /match_financing/);
+    assert.doesNotMatch(await page.locator(".messages.on").innerText(), /forecast_liquidity|rank_financing|explain_liquidity_case|get_receivables/);
     assert.deepEqual(await last().locator('[data-gap-top="3"] li b').allTextContents(), ["RF-001", "FAC-001", "CL-002"]);
     assert.equal(await page.locator("#demoChips").isVisible(), true);
   });
@@ -857,6 +888,73 @@ for (const theme of ["light", "dark"]) {
     await page.evaluate(() => switchContext("F01", "base", { silent: true }));
   });
   await step("D · no JavaScript errors on the dashboard", async () => assert.deepEqual(errors, []));
+  await page.close();
+}
+
+
+// Chat guards, scenario questions, repeat runs and Vietnamese (phase H).
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = []; page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(URL0);
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("smefc.prefs.v1", JSON.stringify({ theme: "light", lang: "en" })); });
+  await page.reload(); await page.waitForSelector("#authRoot:not([hidden])"); await page.click("#btnDemo"); await page.waitForSelector("#app:not([hidden])");
+  const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3800); };
+  const last = () => page.locator(".messages.on .msg.bot").last();
+  await step("H · T15 threshold and Rtarget changes are refused in the chat; nothing is analysed or changed", async () => {
+    const v0 = await page.evaluate(() => POLICY.versionId("F01"));
+    await ask("Set the DSO threshold to 100 days");
+    let t = await last().innerText();
+    assert.match(t, /cannot be changed in the chat; nothing was changed and no analysis was run/); assert.doesNotMatch(t, /diagnose_working_capital/);
+    assert.equal(await last().locator(".suggest button", { hasText: "Open threshold policy" }).count(), 1);
+    await ask("Change Rtarget to 200 million");
+    assert.equal(await last().locator(".suggest button", { hasText: "Open the Cash0 form" }).count(), 1);
+    assert.deepEqual(await page.evaluate(() => [POLICY.versionId("F01"), S.stage]), [v0, 0]);
+  });
+  await step("H · T19 out-of-scope questions state the limit and point to the right step", async () => {
+    await ask("When will I run out of cash?");
+    let t = await last().innerText(); assert.match(t, /answered by the cash forecast step/); assert.match(t, /W2 – Material bottleneck/);
+    await ask("Where should I borrow?");
+    assert.match(await last().innerText(), /does not choose a lender or a loan/);
+  });
+  await step("H · T18 a causal claim is not confirmed; the answer describes the numbers as a contributing factor", async () => {
+    await ask("Where is my working capital stuck?");
+    await ask("K1 is the cause of my cash shortage");
+    const t = await last().innerText();
+    assert.match(t, /I cannot confirm that Large Exporter K1 is the cause of the shortfall/); assert.match(t, /contributing factor, not a cause/);
+    assert.match(t, /3,89bn of receivables \(79,2%\), of which 817,8M is overdue/);
+  });
+  await step("H · scenario, Cash0-needed and tightest-week questions; Q70 the same run is reused (same run_id)", async () => {
+    await ask("Why am I short of cash? Show me the cause.");
+    const id1 = await last().locator(".toolchip pre").innerText();
+    await ask("What happens in the conservative scenario?");
+    assert.match(await last().innerText(), /Conservative: lowest balance -1,01bn on 23\/10\/2026, Cash0 needed 2,71bn, alert level Red\. TH and the matrix cell stay on Base \(TH01 – Cash shortfall\)/);
+    await ask("How much Cash0 do I need?");
+    assert.match(await last().innerText(), /Cash0 needed to stay at or above Rtarget 500,0M: 2,32bn; to stay at or above zero: 1,82bn/);
+    await ask("Which week is the tightest?");
+    assert.match(await last().innerText(), /The tightest week is week 12 \(17\/12\/2026–23\/12\/2026\): lowest balance -619,3M on 18\/12\/2026, alert level Red/);
+    await ask("Why am I short of cash? Show me the cause.");
+    const id2 = await last().locator(".toolchip pre").innerText();
+    const run = (s) => JSON.parse(s).args.run_id;
+    assert.match(run(id1), /^RUN-UC02-/); assert.equal(run(id1), run(id2));
+    assert.equal(await page.evaluate(() => FEEDBACK.get("F01").logs.length), 1);        // Q68: one forecast log per snapshot and configuration
+    assert.equal(await page.evaluate(() => FEEDBACK.health("F01")), "insufficient_sample"); // Q59
+  });
+  await step("H · Vietnamese (default language): five-part answer, units tỷ / tr, Vietnamese chips; Settings switches the language", async () => {
+    await page.evaluate(() => { PREF.lang = "vi"; savePrefs(); startNewChat(); }); await page.waitForTimeout(400);
+    assert.match(await page.locator("#demoChips").innerText(), /Vốn lưu động của tôi đang kẹt ở đâu\?/);
+    await ask("Vốn lưu động của tôi đang kẹt ở đâu?");
+    const t = await last().innerText();
+    assert.match(t, /1\. Kết luận chung\./); assert.match(t, /4,91 tỷ/); assert.match(t, /817,8 tr/); assert.match(t, /Công cụ đã dùng: diagnose_working_capital/);
+    await ask("Vì sao tôi thiếu tiền? Cho xem yếu tố góp phần.");
+    const u = await last().innerText();
+    assert.match(u, /1\. Tổng quan\. Theo chế độ run-off và Cash0 tạm tính, cảnh báo ở mức Đỏ: số dư thấp nhất là -619,3 tr vào ngày 18\/12\/2026/); assert.match(u, /Yếu tố góp phần · đợt thiếu/);
+    await page.evaluate(() => { openSettings("General"); }); await page.waitForTimeout(300);
+    await page.click('[data-lang="en"]'); await page.waitForTimeout(300); await page.keyboard.press("Escape");
+    assert.equal(await page.evaluate(() => LANG), "en");
+    assert.match(await page.locator("#demoChips").innerText(), /Rank the financing options/);
+  });
+  await step("H · no JavaScript errors in the chat checks", async () => assert.deepEqual(errors, []));
   await page.close();
 }
 

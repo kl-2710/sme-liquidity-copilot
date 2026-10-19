@@ -86,7 +86,7 @@ function uc02(firm=S.firm){
   const snap=DATA.snaps[firm];if(!snap)return null;policyCases(firm);
   const p=POLICY.get(firm),vid=POLICY.versionId(firm),d=uc01(firm),fr=freshness(snap).level;
   const key=['uc02',snap.snapshot_id,CFG.versions.formula,vid,S.weeks,d.snapshot_id,fr].join('|');
-  if(!RUNS.has(key))RUNS.set(key,ENGINE.runUC02(snap,p,{weeks:S.weeks,uc01:d,config_version:vid,freshness:fr,model:d.model.model}));
+  if(!RUNS.has(key)){RUNS.set(key,ENGINE.runUC02(snap,p,{weeks:S.weeks,uc01:d,config_version:vid,freshness:fr,model:d.model.model}));if(typeof FEEDBACK!=='undefined')FEEDBACK.log(firm,RUNS.get(key))}
   return RUNS.get(key);
 }
 // Rmin of the current configuration for the daily colours (alertLevel falls back to 50 % of Rtarget when it is missing).
@@ -290,6 +290,92 @@ $('#firmSel').addEventListener('change',e=>{const f=e.target.value;if(f==='__add
 
 // Numbered section used by the Dashboard and Shortfall tabs.
 const dashSec=(n,col,h,pp,inner)=>`<section class="dsec" style="--sc:${col};--i:${n-1}"><header class="dsh"><span class="dsn">${n}</span><div><h2>${h}</h2><p>${pp}</p></div></header>${inner}</section>`;
+/* ===== Chat guards and deterministic answers (SRS 2.7.2, 2.8.2, 2.8.13; E4, E7, T15, T18, T19) ===== */
+// Requests to change thresholds, reserve levels or Cash0 are refused before any analysis runs (E7, T15).
+const RE_POLICY=/(\bset\b|\bchange\b|\bmodify\b|\bupdate\b|\badjust\b|\braise\b|\blower\b|\bincrease\b|\bdecrease\b|đặt|đổi|sửa|thay|tăng|giảm|chỉnh)[^.?!]*(threshold|ngưỡng|rtarget|rmin|rupper|cash ?0|materiality|trọng yếu|reserve|dự trữ)/i;
+const RE_CAUSAL=/(\bis\b|\bare\b|\bwas\b)\s+(the\s+)?(main\s+)?(cause|reason)\b|\bcaus(e|es|ed)\b[^.?!]*(short|gap|deficit)|gây\s*(ra\s*)?(thiếu|hụt)|là nguyên nhân/i;
+const RE_RUNOUT=/when (will|do|would) (i|we) run out|run out of (cash|money)|bao giờ (tôi )?hết tiền|khi nào (tôi )?hết tiền/i;
+const RE_BORROW=/where should (i|we) borrow|which (bank|lender)|best loan|should (i|we) (take|get) a loan|nên vay ở đâu|vay (ở )?ngân hàng nào/i;
+const RE_SCEN=/optimistic|conservative|pessimistic|stress|7 days late|continuing|scenario|lạc quan|thận trọng|bi quan|chậm 7|tiếp diễn|kịch bản/i;
+const RE_CASH0=/cash ?0\s*(needed|required|need)|how much (cash|cash ?0|opening cash) (do|would) (i|we) need|cần (bao nhiêu )?cash ?0|cash ?0 cần|tiền đầu (kỳ )?(cần|tối thiểu)/i;
+const RE_WEEK=/tightest|worst week|which week|tuần (nào )?căng|tuần (thấp|tệ) nhất/i;
+function guardRoute(t0){
+  if(RE_POLICY.test(t0))return {type:'policy',kind:/rtarget|rmin|rupper|cash ?0|reserve|dự trữ/i.test(t0)?'cash0':'threshold'};
+  if(RE_CAUSAL.test(t0))return {type:'causal'};
+  if(RE_BORROW.test(t0))return {type:'scope',kind:'uc03'};
+  if(RE_RUNOUT.test(t0))return S.stage<1?{type:'scope',kind:'uc02'}:{type:'gap'};
+  if(RE_CASH0.test(t0))return {type:'cash0q'};
+  if(RE_WEEK.test(t0))return {type:'weekq'};
+  if(RE_SCEN.test(t0)&&!/what if|nếu/i.test(t0))return {type:'scenq'};
+  return null;
+}
+const toolLine=list=>NARR.tools(list);
+// Names of the other companies' counterparties and lots: an answer about this company must not mention them.
+function foreignNames(){const out=new Set();Object.entries(DATA.snaps).forEach(([id,s])=>{if(id===S.firm)return;[...(s.sales||[]).map(x=>x.customer),...(s.purchases||[]).map(x=>x.supplier),...(s.lots||[]).map(x=>x.name)].forEach(n=>out.add(n))});return [...out]}
+async function respondPolicy(bot,r){
+  addLog({tool:'chat_guard',tier:0,args:{firm_id:S.firm,request:'change_'+r.kind},status:'blocked',summary:'Threshold or reserve change requested in the chat',reason:'E7'});
+  await say(bot,`<p>${t('rt.policy')}</p>`,'warn');
+  suggestRow(bot,[{t:t('rt.policy.thr'),f:()=>{setTab('dash');setTimeout(openPolicy,300)}},{t:t('rt.policy.c0'),f:()=>{if(S.stage<2)advance(2);setTab('gap');setTimeout(openCash0Form,300)}}]);
+}
+// Causal claims are not confirmed; the answer describes the numbers and calls them contributing factors (T18).
+async function respondCausal(bot,text){
+  const d=uc01(),P=d.profiles,low=text.toLowerCase();
+  // The customer named in the claim: full name, or its short code (K1, KH4, F01) as a whole word.
+  const cust=P.customers.find(x=>low.includes(x.name.toLowerCase()))||P.customers.find(x=>{const tok=x.name.split(/\s+/).pop().toLowerCase().replace(/[()]/g,'');return tok.length>=2&&new RegExp('(^|[^\\p{L}\\d])'+tok+'($|[^\\p{L}\\d])','u').test(low)});
+  const parts=[];
+  if(cust){parts.push(t('rt.causal',{c:esc(cust.name)}));parts.push(t('rt.causal.ar',{c:esc(cust.name),v:money(cust.ar),s:pct(cust.ar_share,1),o:money(cust.overdue),l:cust.late_pos_wavg==null?'—':nf(cust.late_pos_wavg,1)}));
+    const u=uc02(),ep=u.episodes.find(e=>!e.censored)||u.episodes[0];
+    if(ep){const after=u.fc.scenarios.base.events.filter(e=>e.dir==='IN'&&e.key===cust.key&&(e.scope==='beyond_horizon'||(e.t>dn(ep.low_date))));if(after.length)parts.push(t('rt.causal.rc',{c:esc(cust.name),v:money(after.reduce((a,e)=>a+e.amt,0))}))}}
+  else parts.push(t('rt.causal.none'));
+  parts.push(t('rt.causal.note'));
+  addLog({tool:'chat_guard',tier:0,args:{firm_id:S.firm,claim:'causal'},status:'ok',summary:'Causal claim answered descriptively (T18)'});
+  await say(bot,`<p>${parts.join(' ')}</p>${toolLine(['diagnose_working_capital'])}`);suggestRow(bot,nextSuggest());
+}
+// Questions outside the current step: state the limit, give the related diagnosis and point to the right step (E4, T19).
+async function respondScope(bot,r){
+  if(r.kind==='uc03'){await say(bot,`<p>${t('rt.scope.uc03')}</p>`);suggestRow(bot,nextSuggest());return}
+  const d=uc01(),m=d.metrics;
+  await say(bot,`<p>${t('rt.scope.uc02')} ${t(d.wc_class==='unknown'?'w.unknown':'w.'+d.wc_class)}${d.main_bottleneck?' · '+t('w.main')+': '+t('item.'+d.main_bottleneck):''} · DSO ${nf(m.dso,1)} · DIO ${nf(m.dio,1)} · DPO ${nf(m.dpo,1)}.</p>${toolLine(['diagnose_working_capital'])}`);
+  suggestRow(bot,nextSuggest());
+}
+async function respondScenarioQ(bot,text){
+  const u=uc02(),sc=/optimistic|lạc quan/i.test(text)?'optimistic':/conservative|pessimistic|thận trọng|bi quan/i.test(text)?'conservative':/stress|7 days|chậm 7/i.test(text)?'stress_7':/continuing|tiếp diễn/i.test(text)?'continuing_sales':null;
+  await toolCall(bot,'forecast_cash',1,{firm_id:S.firm,horizon_weeks:u.weeks,scenario:sc||'all',run_id:u.run_id},()=>({}),{ms:380});
+  const row=k=>{const s=u.summary[k];return t('rt.scen',{s:t('sc.'+k),v:money(s.min),d:fd(s.min_date),need:money(s.need_rtarget),lv:lvLabel(s.overall),th:t('th.'+u.th.th)})+(k==='continuing_sales'?' '+t('rt.scen.cont'):'')};
+  await say(bot,sc?`<p>${row(sc)}</p>${toolLine(['forecast_cash'])}`:`<p>${t('rt.scen.all')}</p><ul>${SC_KEYS.map(k=>`<li>${row(k)}</li>`).join('')}</ul>${toolLine(['forecast_cash'])}`);
+  suggestRow(bot,nextSuggest());
+}
+async function respondCash0Q(bot){
+  const u=uc02(),b=u.summary.base;
+  await toolCall(bot,'forecast_cash',1,{firm_id:S.firm,horizon_weeks:u.weeks,run_id:u.run_id},()=>({}),{ms:380});
+  await say(bot,`<p>${t('rt.cash0',{rt:money(u.reserves.rtarget),need:money(b.need_rtarget),zero:money(b.need_zero),c:money(u.cash0.value),st:t('c0.st.'+u.cash0.status)})}</p>${toolLine(['forecast_cash'])}`);
+  suggestRow(bot,nextSuggest());
+}
+async function respondWeekQ(bot){
+  const u=uc02(),w=u.weekly.reduce((a,x)=>x.min<a.min?x:a,u.weekly[0]);
+  await toolCall(bot,'forecast_cash',1,{firm_id:S.firm,horizon_weeks:u.weeks,run_id:u.run_id},()=>({}),{ms:380});
+  await say(bot,`<p>${t('rt.week',{w:w.w,a:fd(w.start),b:fd(w.end),v:money(w.min),d:fd(w.min_date),lv:lvLabel(w.level_worst)})}</p>${toolLine(['forecast_cash'])}`);
+  suggestRow(bot,nextSuggest());
+}
+/* ===== Feedback loop (SRS 2.8.15): forecast logs, reconciliation and the "Forecast reliability" card ===== */
+const FEEDBACK={
+  key:f=>`lilact.fclog.v1.${(S.user&&S.user.id)||'anon'}.${f}`,
+  get(f){try{return JSON.parse(localStorage.getItem(this.key(f))||'null')||{logs:[],recon:[]}}catch(e){return {logs:[],recon:[]}}},
+  save(f,x){try{localStorage.setItem(this.key(f),JSON.stringify(x))}catch(e){}},
+  // One immutable log per (snapshot, configuration version) of a full-horizon run; re-running the same key adds nothing (BR-02.23, Q68).
+  log(f,run){if(run.weeks!==CFG.tv2.horizonWeeks||['invalid_data','missing_data'].includes(run.status))return null;
+    const st=this.get(f);if(st.logs.some(l=>l.snapshot_id===run.snapshot_id&&l.config_version===run.config_version))return null;
+    const lg=ENGINE.forecastLog(run);st.logs.push(lg);
+    // A newer confirmed snapshot reconciles every older log whose horizon contains its cut-off (old results are never rewritten).
+    st.logs.filter(l=>l.as_of<run.as_of&&!st.recon.some(r=>r.log===l.run_id&&r.snapshot===run.snapshot_id)).forEach(l=>{const r=ENGINE.reconcile(l,DATA.snaps[f]);if(r.status==='ok')st.recon.push({...r,log:l.run_id,log_as_of:l.as_of,snapshot:run.snapshot_id,at:new Date().toISOString()})});
+    st.logs=st.logs.slice(-30);st.recon=st.recon.slice(-30);this.save(f,st);return lg},
+  health(f){return ENGINE.modelHealth(this.get(f).recon)}
+};
+function reliabilityHTML(){
+  const st=FEEDBACK.get(S.firm),h=ENGINE.modelHealth(st.recon),last=st.recon[st.recon.length-1],prop=last?ENGINE.calibrationProposal(st.recon,h):null;
+  return `<div class="card fbcard mh-${h}" data-wid="reliability"><div class="card-head"><div><h3>${t('fb.title')}: ${t('mh.'+h)}</h3><p>${last?t('fb.res',{n:last.matched,d:fd(last.log_as_of),b:last.fb3==null?'—':pct(last.fb3,1),w:last.fb2==null?'—':pct(last.fb2,1),l:last.fb4.median==null?'—':nf(last.fb4.median,1)})+(last.fb6.missed?' '+t('fb.missed'):''):t('fb.none')}</p>${prop?`<p>${t('fb.h3',{d:prop.default_late})}</p>`:''}</div></div></div>`;
+}
+
 /* ===== UC01 ↔ UC02 links and the gap_request to UC03 (SRS 2.7.11.9, 2.8.5, 2.8.7) ===== */
 const evDate=e=>e.t!=null?fd(isoOf(e.t)):'—';
 // Contributing factors of a gap of the displayed scenario, from the cached UC02 run and UC01 findings (nothing recalculated).
@@ -314,7 +400,7 @@ function gapRequestState(){const u=uc02(),d=uc01(),fr=freshness(DATA.snaps[S.fir
 function gapRequestHTML(gr){
   const row=(k,v)=>`<div><dt>${t('gr.'+k)}</dt><dd>${v}</dd></div>`;
   return `<dl class="ev-info gr">${row('need_date',fd(gr.need_date))}${row('peak_gap',`${money(gr.peak_gap)} · ${fd(gr.peak_date)}`)}${row('cash0_need',money(gr.cash0_need))}
-   ${row('episodes',gr.episodes.map(e=>`${fds(e.start)}–${fds(e.end)}${e.censored?' ('+t('ep.open')+')':''}`).join(', '))}${row('matrix',`${gr.matrix_case_id} · ${M_EN[gr.matrix_case_id]}`)}
+   ${row('episodes',gr.episodes.map(e=>`${fds(e.start)}–${fds(e.end)}${e.censored?' ('+t('ep.open')+')':''}`).join(', '))}${row('matrix',`${gr.matrix_case_id} · ${t('m.'+gr.matrix_case_id)}`)}
    ${row('bottleneck',gr.main_bottleneck?t('item.'+gr.main_bottleneck):t('w.none'))}${row('pattern',`${gr.bn_pattern} · ${gr.cause_items.join(', ')||'—'}`)}${row('findings',gr.finding_ids.join(', ')||'—')}
    ${row('obligation',money(gr.obligation_overdue))}${row('link',`${gr.link_type} · ${t('ev.'+gr.evidence_level)}`)}${row('scenario',t('sc.'+gr.scenario))}${row('cash0',t('c0.st.'+gr.cash0_status))}
    ${row('health',t('mh.'+gr.model_health))}${row('ids',`${gr.run_id} · ${esc(gr.snapshot_id)}`)}${row('versions',`${gr.versions.formula} · ${gr.versions.threshold} · ${esc(gr.versions.config)}`)}</dl>
@@ -363,9 +449,9 @@ function uc02HeaderHTML(u,c){
     ${tile(t('ov.first'),sm.first_below_rtarget?fd(sm.first_below_rtarget):t('ov.none'),t('ov.first.sub',{z:sm.first_negative?fd(sm.first_negative):t('ov.none')}))}
     ${tile(t('ov.need'),sm.need_rtarget==null?'—':money(sm.need_rtarget),t('ov.need.sub',{z:money(sm.need_zero),c:u.cash0.value==null?'—':money(u.cash0.value)}))}
     ${tile(t('ov.peak'),money(sm.peak_buffer),t('ov.peak.sub',{z:money(sm.peak_zero),d:sm.peak_buffer_date?fd(sm.peak_buffer_date):'—'}))}
-    ${tile(t('ov.th'),u.th.th==='unknown'?t('ov.unknown'):t('th.'+u.th.th),`${u.th.reference?t('th.ref')+' · ':''}${cell?t('ov.cell',{c:cell,n:M_EN[cell]}):t('ov.notrouted')}`)}</div>
+    ${tile(t('ov.th'),u.th.th==='unknown'?t('ov.unknown'):t('th.'+u.th.th),`${u.th.reference?t('th.ref')+' · ':''}${cell?t('ov.cell',{c:cell,n:t('m.'+cell)}):t('ov.notrouted')}`)}</div>
    <p class="uc2-res">${t('res.line',{rmin:money(R.rmin),rt:money(R.rtarget),rup:money(R.rupper),s1:srcName(R.src.rmin),s2:srcName(R.src.rtarget),s3:srcName(R.src.rupper)})}${R.annualised&&R.src.rtarget==='verified_reference'?' '+t('res.annual'):''}</p>`;
-  return bar+banner+tiles;
+  return bar+banner+tiles+reliabilityHTML();
 }
 // Comparison of the five scenarios of the same run (UC02.4); nothing is recalculated.
 function scenarioTableHTML(u){
@@ -392,7 +478,7 @@ function renderGap(){
   const head=uc02HeaderHTML(u,c);
   if(u.status==='invalid_data'){p.innerHTML=head;bindGapHeader(p);return}
   const scName=t('sc.'+S.case);
-  const forecast=dashSec(1,'var(--lc-color-data-cash)',`${H}-week cash forecast`,`Cash in, cash out and week-end balance vs Rtarget · ${scName}`,`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${scName} · VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
+  const forecast=dashSec(1,'var(--lc-color-data-cash)',t('gap.h.forecast',{h:H}),`Cash in, cash out and week-end balance vs Rtarget · ${scName}`,`<div class="card fcc" data-wid="flow"><div class="card-head"><div><h3>Weekly cash flow</h3><p>${scName} · VND million · as of ${fd(c.as_of)}${c.est?' · estimated from your file':''}${EP.none?'':` · weeks of gap ${EP.k} outlined`}</p></div><button class="btn sec sm" data-csv="1" type="button">⤓ Export CSV</button></div>
    <div class="fcw"><div class="fcs"><div class="fst"><span class="dot" style="background:var(--lc-color-data-cash)"></span><b class="num">${money(c.cash0??openingCash(c))}</b><small>Cash at cut-off (${t('c0.st.'+u.cash0.status)})</small></div>
     <div class="fst"><b class="num pos">+${money(sumIn)}</b><small>Expected cash in</small><b class="num neg" style="margin-top:8px">−${money(sumOut)}</b><small>Expected cash out</small></div>
     <div class="fst"><b class="num ${minB<c.buffer?'neg':''}">${money(minB)}</b><small>Lowest week-end, week ${minW.w}</small></div></div>
@@ -402,7 +488,7 @@ function renderGap(){
    ${flowTableHTML(c,M,EP)}
    <p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.${weeklyOnly?' '+t('gap.weekly'):''}</p>
    ${weeklyOnly?'':`<button class="btn sec sm" type="button" id="dailyBtn" aria-expanded="${!!S.showDaily}">${S.showDaily?t('gap.daily.hide'):t('gap.daily.show')}</button>${S.showDaily?dailyTableHTML(c):''}`}</div>`);
-  const daily=dashSec(2,'var(--lc-color-status-error)','Daily cash balance','Every gap below Rtarget is shaded; each dot shows that day’s alert level; Rmin, Rtarget and Rupper lines; Optimistic–Conservative band',weeklyOnly?`<div class="card"><div class="empty">${t('gap.weekly')}</div></div>`
+  const daily=dashSec(2,'var(--lc-color-status-error)',t('gap.h.daily'),'Every gap below Rtarget is shaded; each dot shows that day’s alert level; Rmin, Rtarget and Rupper lines; Optimistic–Conservative band',weeklyOnly?`<div class="card"><div class="empty">${t('gap.weekly')}</div></div>`
     :`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${scName}</p></div>
       <label class="legend" style="cursor:pointer;user-select:none;${S.last&&!EP.none?'':'display:none'}" id="ovLbl"><input type="checkbox" id="ovChk" ${S.overlay?'checked':''} style="accent-color:var(--lc-color-status-success)"> Show latest scenario</label></div>
     <div class="chartbox" id="gapChart"></div>
@@ -415,14 +501,14 @@ function renderGap(){
   }else{
     const dl=dn(EP.start)-asOf,rq='Rank the financing options that fit this cause.',t3=S.stage>=3?tv3For(EP):null;
     const card=e=>{const lv=episodeLevel(c,e),rec=e.censored?null:c.days[e.i1+1];return `<button class="ep gap-lv lv-${lv} ${EP.k===e.k?'on':''}" data-ep="${e.k}" data-lv="${lv}" aria-pressed="${EP.k===e.k}"><div class="ep-tags"><span class="lv-tag" style="--lvc:${LV[lv].color}"><i class="lv-sw lv-${lv}" aria-hidden="true"></i>${t('ep.alert',{l:lvLabel(lv)})}</span>${big&&big.k===e.k?'<span class="status blue">Largest gap</span>':''}${e.censored?`<span class="status gray">${t('ep.open')}</span>`:''}</div><div class="k">Gap ${e.k}</div><div class="a num">${mm(e.peak)}</div><div class="d">${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''} · ${t('ep.days',{n:e.i1-e.i0+1})} · lowest ${money(e.cashMin)} on ${fds(e.peakDay)}</div><div class="d">${rec?t('ep.recovery',{d:fds(rec[0])}):t('ep.notended')}</div></button>`};
-    const gaps=dashSec(3,'var(--lc-color-status-error)','Cash gaps',`Gap = a run of consecutive days with balance below Rtarget ${money(c.buffer)} (${scName}). The colour is the worst daily alert level inside the gap. Pick a gap to see its weeks, KPIs and financing ranking.`,`<div class="eps">${EPS.map(card).join('')}</div>
+    const gaps=dashSec(3,'var(--lc-color-status-error)',t('gap.h.gaps'),`Gap = a run of consecutive days with balance below Rtarget ${money(c.buffer)} (${scName}). The colour is the worst daily alert level inside the gap. Pick a gap to see its weeks, KPIs and financing ranking.`,`<div class="eps">${EPS.map(card).join('')}</div>
   <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px">
     <div class="card kpi k2"><div class="t">Peak shortfall · gap ${EP.k}</div><div class="v num">${mm(EP.peak)}</div><div class="f">vs Rtarget</div></div>
     <div class="card kpi"><div class="t">Cash needed on</div><div class="v num">${fds(EP.start)}</div><div class="f">${dl} days from the cut-off</div></div>
     <div class="card kpi k3"><div class="t">Lowest balance</div><div class="v num">${money(EP.cashMin)}</div><div class="f">on ${fds(EP.peakDay)}</div></div>
     <div class="card kpi k4"><div class="t">Gap ends</div><div class="v num">${fds(EP.end)}</div><div class="f">${EP.censored?'not recovered within the period':'recovered'}</div></div>
   </div><div class="card cfcard" data-wid="factors"><div class="card-head"><div><h3>${t('cf.title',{k:EP.k})}</h3><p>${t('cf.sub')}</p></div></div>${factorsHTML(gapFactors(EP))}</div>${blocksHTML(u)}${stuck}`);
-    const rank=dashSec(4,'var(--lc-color-action-primary)',`Financing ranking · gap ${EP.k}`,'Tier (fully covers and funds in time), then cost relative to the shortfall',
+    const rank=dashSec(4,'var(--lc-color-action-primary)',t('gap.h.rank',{k:EP.k}),'Tier (fully covers and funds in time), then cost relative to the shortfall',
       !t3?`<div class="callout"><span>ℹ</span><div>The ranking appears after the financing step of the conversation.<div style="margin-top:8px"><button class="btn primary sm" type="button" data-ask="${esc(rq)}">${esc(rq)} →</button></div></div></div>`
       :`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div><span class="status amber"><i></i>provisional</span></div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`);
     p.innerHTML=head+forecast+daily+gaps+rank+foot;
@@ -836,19 +922,20 @@ function routeBase(raw){
   const prods=(noInv.match(/\b[A-Z]{2,4}-\d{1,3}\b/g)||[]).filter(x=>!CAT.some(c=>c.id===x));
   if(prods.length||/bank\s*z\b|outside (the )?catalogue|not in (the )?catalogue/i.test(t))return {type:'block',kind:'product',ref:prods[0]||'Bank Z'};
   if(/(send|submit|transfer|file)[^.?!]*(now|immediately|right away|directly)|(no need|without|skip|bypass)[^.?!]*approval/i.test(t))return {type:'block',kind:'send'};
+  const g=guardRoute(t);if(g)return g;
   if(/(draft|prepare|write|create)[^.?!]*(draft|proposal)|\bdraft\b/.test(low))return {type:'draft'};
-  if(/rank|reject|catalogue/.test(low)&&!/collect|early|extend|inventory|s-f0/.test(low))return {type:'rank'};
+  if(/rank|reject|catalogue|xếp hạng|bị loại/.test(low)&&!/collect|early|extend|inventory|s-f0/.test(low))return {type:'rank'};
   const pl=parseLev(t);if(pl)return pl.miss.length?{type:'clarify',miss:pl.miss[0]}:{type:'custom',lev:pl.lev};
-  if(/concentrat|which customer|receivable|who owes/.test(low))return {type:'conc'};
-  if(/liquidity|overview|diagnos|situation|health/.test(low))return {type:'liq'};
-  if(/stuck|bottleneck|tied up|locked up/.test(low))return {type:'liq',focus:'stuck'};
-  if(/short|gap|cash ?flow|13.?week|risk|largest|biggest|deficit|cause|root/.test(low))return {type:'gap'};
-  if(/ccc|dso|dio|dpo|working capital|cycle/.test(low))return {type:'ccc'};
-  if(/rank|catalogue|option|compar|financ|reject/.test(low))return {type:'rank'};
+  if(/concentrat|which customer|receivable|who owes|khách hàng nào|phải thu/.test(low))return {type:'conc'};
+  if(/liquidity|overview|diagnos|situation|health|vốn lưu động|chẩn đoán|thanh khoản|tổng quan/.test(low))return {type:'liq'};
+  if(/stuck|bottleneck|tied up|locked up|kẹt|điểm nghẽn/.test(low))return {type:'liq',focus:'stuck'};
+  if(/short|gap|cash ?flow|13.?week|risk|largest|biggest|deficit|cause|root|thiếu tiền|thiếu hụt|đợt thiếu|dòng tiền|dự báo|yếu tố góp phần/.test(low))return {type:'gap'};
+  if(/ccc|dso|dio|dpo|working capital|cycle|vòng quay/.test(low))return {type:'ccc'};
+  if(/rank|catalogue|option|compar|financ|reject|tài trợ|giải pháp/.test(low))return {type:'rank'};
   return {type:'help'};
 }
 // "gap N" anywhere in the question selects that gap first, then the question is answered for it.
-function route(raw){const r=routeBase(raw),m=String(raw).match(/gap\s*(\d+)/i);if(m)r.gap=+m[1];return r}
+function route(raw){const r=routeBase(raw),m=String(raw).match(/(?:gap|đợt thiếu)\s*(\d+)/i);if(m&&!['policy','causal','scope'].includes(r.type))r.gap=+m[1];return r}
 let busy=false;
 async function sendChat(text){
   text=(text||'').trim();if(!text||busy)return;busy=true;$('#sendBtn').disabled=true;$('#chatInput').value='';
@@ -867,23 +954,29 @@ $('#chatForm').addEventListener('submit',async e=>{e.preventDefault();const text
 async function respond(r,text){
   const bot=newBot(),c=C();
   if(r.type==='block'){
-    const msgs2={firm:[`This session can only view data for <b>${S.firm}</b>. The request to access <b>${r.other}</b> was blocked.`,'get_firm_data',0,{firm_id:r.other}],
-      product:[`<b>${esc(r.ref)}</b> is not in the synthetic catalogue, so no figures are given. Products you can use: ${CAT.map(x=>x.id).join(', ')}.`,'lookup_product',1,{product_id:r.ref}],
-      send:[`I only <b>draft proposals</b> (tier 2). Sending or filing only runs at tier 3 and only after you click <b>Approve</b> in the Approvals tab.`,'submit_action',3,{mode:'direct',approved:false}]}[r.kind];
-    await toolCall(bot,msgs2[1],msgs2[2],msgs2[3],()=>({bad:true}),{ms:380});
-    addLog({tool:msgs2[1],tier:msgs2[2],args:msgs2[3],status:'blocked',summary:msgs2[0].replace(/<[^>]+>/g,''),reason:r.kind});
+    const msgs2={firm:[`This session can only view data for <b>${S.firm}</b>. The request to access <b>${r.other}</b> was blocked.`,null,0,{firm_id:r.other}],
+      product:[`<b>${esc(r.ref)}</b> is not in the synthetic catalogue, so no figures are given. Products you can use: ${CAT.map(x=>x.id).join(', ')}.`,'match_financing',1,{product_id:r.ref}],
+      send:[`I only <b>draft proposals</b> (tier 2). Sending or filing only runs at tier 3 and only after you click <b>Approve</b> in the Approvals tab.`,null,3,{mode:'direct',approved:false}]}[r.kind];
+    if(msgs2[1])await toolCall(bot,msgs2[1],msgs2[2],msgs2[3],()=>({bad:true}),{ms:380});
+    addLog({tool:msgs2[1]||'chat_guard',tier:msgs2[2],args:msgs2[3],status:'blocked',summary:msgs2[0].replace(/<[^>]+>/g,''),reason:r.kind});
     await say(bot,msgs2[0],'warn');suggestRow(bot,nextSuggest());return;
   }
   if(r.type==='clarify'){
     await say(bot,`Which <b>${r.miss.what}</b> do you want to apply this to? I did not recognise a name in your question.`);
     suggestRow(bot,r.miss.opts.slice(0,4).map(n=>({t:n,f:()=>sendChat((text+' '+n))})));return;
   }
+  if(r.type==='policy'){await respondPolicy(bot,r);return}
+  if(r.type==='causal'){await respondCausal(bot,text);return}
+  if(r.type==='scope'){await respondScope(bot,r);return}
   if(r.gap!=null&&r.type!=='block'){
     if(!EPS.some(e=>e.k===r.gap)){await say(bot,EPS.length?`There is no gap ${r.gap}. The 13-week forecast has ${EPS.length} gap${EPS.length>1?'s':''}: ${EPS.map(e=>'gap '+e.k).join(', ')}.`:'The 13-week forecast has no cash gaps.');suggestRow(bot,nextSuggest());return}
     selectGap(r.gap);if(S.panel)renderTab();
   }
-  {const need=r.type==='gap'?1:r.type==='rank'?2:['sc','custom','draft','clarify'].includes(r.type)?3:0;
+  {const need=r.type==='gap'||['cash0q','weekq','scenq'].includes(r.type)?1:r.type==='rank'?2:['sc','custom','draft','clarify'].includes(r.type)?3:0;
    if(S.stage<need){await gateMsg(bot);return}}
+  if(r.type==='cash0q'){await respondCash0Q(bot);return}
+  if(r.type==='weekq'){await respondWeekQ(bot);return}
+  if(r.type==='scenq'){await respondScenarioQ(bot,text);return}
   if(r.type==='sc'){await runScenarioInChat(bot,r.sc);return}
   if(r.type==='custom'){await runLevInChat(bot,r.lev,null,text);return}
   if(r.type==='draft'){await draftInChat(bot);return}
@@ -962,7 +1055,7 @@ function bootApp(){
 
 const TASKS={
   tv1:{n:'TV1',title:'Working-capital diagnosis',tab:'dash',
-    hello:s=>`How is ${s}’s liquidity today?`,
+    hello:s=>t('hero.tv1',{s}),
     ph:'Ask where your working capital is stuck…',
     chips:['How is my liquidity?','What is my CCC?','Which customer holds most of my receivables?']},
   tv2:{n:'TV2',title:'Cash-flow forecast',tab:'gap',
@@ -986,9 +1079,9 @@ msgs=THREADS.tv1;
 function currentChips(){
   const st=S.stage|0;
   if(st>=3)return SCEN();
-  if(st===2)return [{id:'f2',ask:'Rank the financing options that fit this cause.'},{id:'f2b',ask:'Why were some products rejected?'}];
-  if(st===1)return [{id:'f1',ask:'Why am I short of cash? Show me the cause.'}];
-  return [{id:'f0',ask:'Where is my working capital stuck?'},{id:'f0b',ask:'Which customer holds most of my receivables?'}];
+  if(st===2)return [{id:'f2',ask:t('chip.f2')},{id:'f2b',ask:t('chip.f2b')},{id:'f2c',ask:t('chip.cash0')}];
+  if(st===1)return [{id:'f1',ask:t('chip.f1')},{id:'f1b',ask:t('chip.week')}];
+  return [{id:'f0',ask:t('chip.f0')},{id:'f0b',ask:t('chip.f0b')}];
 }
 const unlockedTask=k=>k===1||(S.stage|0)>=(k===4?3:k);
 function applyStage(){
@@ -1105,12 +1198,10 @@ function diagCardHTML(){
   ${oldest?`<div class="liq-note"><span>▤</span><div><b>Oldest owned lot</b>: ${esc(oldest.name)}, ${oldest.days} days, ${money(oldest.own)}.${slowest&&slowest!==oldest?` <b>Largest slow-moving value</b>: ${esc(slowest.name)}, ${money(slowest.own)}.`:''}</div></div>`:''}`;
 }
 async function respondLiq(bot,{focus}={}){
-  const c=C(),b=BASE;
-  await toolCall(bot,'diagnose_working_capital',0,{firm_id:S.firm,as_of:c.as_of},()=>{addLog({tool:'compute_ccc',tier:0,args:{firm_id:S.firm},status:'ok',summary:`CCC ${nf(b.ccc,1)} on (DSO ${nf(b.dso,1)}, DIO ${nf(b.dio,1)}, DPO ${nf(b.dpo,1)})`});return {}},{ms:420});
-  const lead=focus==='ccc'
-    ?`<p>CCC of <b>${S.firm}</b> is <b>${nf(b.ccc,1)} days</b> = DSO ${nf(b.dso,1)} + DIO ${nf(b.dio,1)} − DPO ${nf(b.dpo,1)}.</p>`
-    :`<p>Here is where the working capital of <b>${S.firm} · ${esc(FIRMS[S.firm].short)}</b> is held. This is the diagnosis step only; I have not looked at the cash forecast yet.</p>`;
-  await say(bot,lead);
+  const c=C(),b=BASE,d=uc01();
+  await toolCall(bot,'diagnose_working_capital',0,{firm_id:S.firm,as_of:d.as_of,period_days:d.N,focus:focus||'overview',run_id:d.run_id},()=>{addLog({tool:'diagnose_working_capital',tier:0,args:{firm_id:S.firm,run_id:d.run_id},status:'ok',summary:`${d.wc_class} · ${d.bn_pattern} · CCC ${nf(b.ccc,1)} (DSO ${nf(b.dso,1)}, DIO ${nf(b.dio,1)}, DPO ${nf(b.dpo,1)})`});return {}},{ms:420});
+  if(focus==='ccc')await say(bot,`<p>${t('na.ccc',{f:S.firm,ccc:nf(b.ccc,1),dso:nf(b.dso,1),dio:nf(b.dio,1),dpo:nf(b.dpo,1)})}</p>${toolLine(['diagnose_working_capital'])}`);
+  else{const ans=NARR.finalize(NARR.uc01Answer(d,FIRMS[S.firm].name),{foreign:foreignNames()});S.lastAnswer=ans;await say(bot,ans.html)}
   const card=document.createElement('div');card.className='liq';card.innerHTML=diagCardHTML()+
     `<div class="liq-act"><button class="btn primary sm" type="button" data-a="dash">▦ View detailed dashboard</button></div>
      <p class="liq-fn">CCC uses period-end balances, period ${c.N} days; goods held for subcontracting are excluded from owned inventory. W is classified with the garment-industry thresholds (FiinTrade 2016–2025, tv1.threshold.v2) and the default 5% materiality level because no company policy is set, so the result is provisional. ${DISC}</p>`;
@@ -1131,8 +1222,11 @@ function causeOf(ep=EP){
 }
 // Cash bridge for every gap (or one gap when the question names it), shown as an accordion with the largest gap open.
 async function respondCause(bot,{focus}={}){
-  const c=C();
-  await toolCall(bot,'forecast_liquidity',1,{firm_id:S.firm,horizon_weeks:13},()=>{addLog({tool:'get_cash_forecast',tier:1,args:{firm_id:S.firm,horizon_weeks:13},status:'ok',summary:EPS.length?`${EPS.length} gaps; largest ${mm(Math.max(...EPS.map(e=>e.peak)))}`:'No shortfall in 13 weeks'});return {}},{ms:500});
+  const c=C(),u=uc02(),d=uc01();
+  await toolCall(bot,'forecast_cash',1,{firm_id:S.firm,horizon_weeks:u.weeks,scenario:S.case,run_id:u.run_id},()=>{addLog({tool:'forecast_cash',tier:1,args:{firm_id:S.firm,horizon_weeks:u.weeks,run_id:u.run_id},status:'ok',summary:EPS.length?`${EPS.length} gaps; largest ${mm(Math.max(...EPS.map(e=>e.peak)))}`:'No shortfall in the horizon'});return {}},{ms:500});
+  FEEDBACK.log(S.firm,u);
+  const bigB=u.episodes.reduce((a,e)=>!a||e.peak_gap>a.peak_gap?e:a,null),ans=NARR.finalize(NARR.uc02Answer(u,d,{factors:bigB?ENGINE.contributingFactors(u,d,bigB,'base'):null}),{foreign:foreignNames()});S.lastAnswer=ans;
+  if(!focus)await say(bot,ans.html);
   if(!EPS.length){
     await say(bot,`The lowest balance over 13 weeks is <b>${money(Math.min(...c.days.map(d=>d[1])))}</b>, always above the buffer ${money(c.buffer)}. There is no shortfall to explain, so there is nothing to match funding against.`);
     advance(2,bot);suggestRow(bot,nextSuggest());return;
@@ -1140,7 +1234,6 @@ async function respondCause(bot,{focus}={}){
   const list=focus?EPS.filter(e=>e.k===focus):EPS,big=largestGap(),tb=openAR(c).top[0];
   if(focus)await say(bot,`<p>${t('cf.focus',{k:focus})} <b>gap ${focus}</b> (${fds(list[0].start)}${list[0].start!==list[0].end?'–'+fds(list[0].end):''}, peak shortfall <b>${mm(list[0].peak)}</b>).</p>`);
   else await say(bot,`<p>There are <b>${EPS.length} gap${EPS.length>1?'s':''}</b> below Rtarget ${money(c.buffer)}:</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>${t('cf.intro')}</p>`);
-  await toolCall(bot,'explain_liquidity_case',0,{firm_id:S.firm,gaps:list.map(e=>e.k)},()=>{addLog({tool:'explain_liquidity_case',tier:0,args:{firm_id:S.firm,gaps:list.map(e=>e.k)},status:'ok',summary:`Cash bridge for gap${list.length>1?'s':''} ${list.map(e=>e.k).join(', ')}`});return {}},{ms:420});
   S.causes=S.causes||{};
   const wrap=document.createElement('div');wrap.className='gap-accs';
   wrap.innerHTML=list.map(e=>{
@@ -1169,7 +1262,7 @@ async function respondRank(bot,{focus}={}){
     if(!chk.ok){await say(bot,`<p>${chk.label==='idle_cash'?t('gr.idle')+': ':''}${t('gr.block.'+chk.reason)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
     S.gapRequest=ENGINE.buildGapRequest(u,d,{scenario:S.case,health:modelHealthNow(),createdAt:new Date().toISOString()})}
   const gr=S.gapRequest,list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
-  await toolCall(bot,'rank_financing',1,{firm_id:S.firm,episodes:list.map(e=>e.k)},()=>{addLog({tool:'rank_financing',tier:1,args:{firm_id:S.firm,episodes:list.map(e=>e.k)},status:'ok',summary:res.map(({e,t3})=>`gap ${e.k}: ${t3.ranked[0]?t3.ranked[0].product_id:'none'}`).join('; ')});return {}},{ms:520});
+  await toolCall(bot,'match_financing',1,{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},()=>{addLog({tool:'match_financing',tier:1,args:{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},status:'ok',summary:res.map(({e,t3})=>`gap ${e.k}: ${t3.ranked[0]?t3.ranked[0].product_id:'none'}`).join('; ')});return {}},{ms:520});
   const use=new Map();
   res.forEach(({e,t3})=>t3.ranked.slice(0,3).forEach(x=>{if(x.invoice_id&&x.invoice_id!=='–'){if(!use.has(x.invoice_id))use.set(x.invoice_id,new Set());use.get(x.invoice_id).add(e.k)}}));
   const dups=[...use].filter(([,g])=>g.size>1);
@@ -1181,7 +1274,7 @@ async function respondRank(bot,{focus}={}){
    <div class="table-wrap"><table class="dtable rank-sum"><thead><tr><th>Gap</th><th>Peak</th><th>Need date</th><th>Best option</th><th>Cost</th><th>Covered</th></tr></thead><tbody>${rows}</tbody></table></div>
    ${dups.length?`<div class="liq-note"><span>⚠</span><div><b>The same invoice is proposed for more than one gap.</b> ${dups.map(([inv,g])=>`${inv} → gaps ${[...g].join(', ')}`).join('; ')}. An invoice can be financed only once: use it for one gap and take the next option for the others.</div></div>`:''}
    <div class="gap-tops">${res.map(({e,t3})=>`<details class="gap-top" data-gap-top="${e.k}"><summary>Gap ${e.k} · top 3 options · short ${mm(e.peak)}</summary><ol>${t3.ranked.slice(0,3).map(x=>`<li><b>${x.product_id}</b> (${esc(CAT.find(z=>z.id===x.product_id).provider)})${x.invoice_id!=='–'?' · '+x.invoice_id:''}: receives ${mm(x.cash)}, cost ${nf(x.cost/1e6,2)}M (${nf(x.cpg*100,2)}% of the shortfall), ${x.gap_rem>0?'still short '+mm(x.gap_rem):'fully covered'}.</li>`).join('')}</ol>${t3.rejected.length?`<p class="rej">Rejected: ${t3.rejected.map(x=>x.product_id).join(', ')}</p>`:''}</details>`).join('')}</div>
-   <p class="liq-fn">${DISC}</p>
+   <p class="liq-fn">${DISC}</p>${toolLine(['match_financing'])}
    <div class="liq-act"><button class="btn sec sm" type="button" data-a="open">Open ranking</button></div>`;
   bot.appendChild(card);scroll();
   $('[data-a=open]',card).onclick=()=>setTab('gap');
@@ -1193,14 +1286,14 @@ async function gateMsg(bot){
 }
 async function respondConc(bot){
   const c=C(),{tot,top}=openAR(c);
-  await toolCall(bot,'get_receivables',0,{firm_id:S.firm,status:'open'},()=>{addLog({tool:'get_receivables',tier:0,args:{firm_id:S.firm,status:'open'},status:'ok',summary:`${top.length} customers owe, totalling ${money(tot)}`});return {}},{ms:380});
+  await toolCall(bot,'diagnose_working_capital',0,{firm_id:S.firm,focus:'receivables',run_id:uc01().run_id},()=>{addLog({tool:'diagnose_working_capital',tier:0,args:{firm_id:S.firm,focus:'receivables'},status:'ok',summary:`${top.length} customers owe, totalling ${money(tot)}`});return {}},{ms:380});
   if(!top.length){await say(bot,'There are currently no open credit invoices.');suggestRow(bot,nextSuggest());return}
   await say(bot,`<p>Open receivables of <b>${S.firm}</b> is <b>${money(tot)}</b>, concentrated mainly in <b>${esc(top[0].k)}</b> (${nf(top[0].v/tot*100,1)}%).</p>`);
   const card=document.createElement('div');card.className='liq';
   card.innerHTML=`<div class="liq-h"><div><h4>Receivables by customer</h4><p>Invoices open as of the cut-off ${fd(c.as_of)}</p></div></div><div class="conc">${top.slice(0,5).map(x=>`<div class="it"><b>${esc(x.k)}</b><span class="num">${money(x.v)} · ${nf(x.v/tot*100,1)}%</span><div class="bar"><span style="width:${Math.max(3,x.v/top[0].v*100)}%"></span></div></div>`).join('')}</div>
   ${(()=>{const d=uc01(),cc=d&&d.concentration;if(!cc||!d.cause_items.includes('AR'))return '';const lim=nf(CFG.bn.concentrationShare*100,0);
     return `<div class="liq-note"><span>⚠</span><div>${cc.flag==='concentrated'?`<b>${esc(cc.top.name)}</b> holds ${nf(cc.top.share*100,1)}% of the receivables above the normal level (≥ ${lim}%): <b>concentrated</b>.`:`No customer holds ${lim}% or more of the receivables above the normal level: <b>dispersed</b>.`} Try the <b>early collection</b> lever in the What-if task.</div></div>`})()}
-  <div class="liq-act"><button class="btn primary sm" type="button">▦ View detailed dashboard</button></div>`;
+  ${toolLine(['diagnose_working_capital'])}<div class="liq-act"><button class="btn primary sm" type="button">▦ View detailed dashboard</button></div>`;
   bot.appendChild(card);scroll();$('button',card).onclick=()=>setTab('dash');
   advance(1,bot);suggestRow(bot,nextSuggest());
 }
@@ -1209,14 +1302,14 @@ async function respondConc(bot){
 function welcome(task){
   task=task||S.task;const th=THREADS[task],T=TASKS[task];th.innerHTML='';th.dataset.init='1';
   const h=document.createElement('div');h.className='hero';
-  h.innerHTML=`<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div>${accountFirm()?`<h1>Hi ${esc(userFirst())}. ${esc(T.hello(FIRMS[S.firm].short))}</h1>`:`<h1>Hi ${esc(userFirst())}. Let’s set up ${esc(S.user?.company||'your company')}.</h1><p class="hero-setup">Upload your company files to start the analysis.</p><button class="btn primary" type="button" data-setup-data>⇪ Upload company data</button>`}`;
+  h.innerHTML=`<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div>${accountFirm()?`<h1>${t('hero.hi',{n:esc(userFirst())})} ${esc(T.hello(FIRMS[S.firm].short))}</h1>`:`<h1>Hi ${esc(userFirst())}. Let’s set up ${esc(S.user?.company||'your company')}.</h1><p class="hero-setup">Upload your company files to start the analysis.</p><button class="btn primary" type="button" data-setup-data>⇪ Upload company data</button>`}`;
   th.appendChild(h);syncChatEmpty();
 }
 // Suggestion chips above the composer: the flow step chips plus gap-specific chips, at most 4. Hidden only while busy.
 function chipList(){
   const base=currentChips(),dyn=[];
-  if(S.stage>=1&&EPS.length&&!EP.none)dyn.push({id:'gx'+EP.k,ask:`Explain gap ${EP.k}`});
-  if(S.stage>=2&&EPS.length>1)dyn.push({id:'rall',ask:'Rank financing for all gaps'});
+  if(S.stage>=1&&EPS.length&&!EP.none)dyn.push({id:'gx'+EP.k,ask:t('chip.gx',{k:EP.k})});
+  if(S.stage>=2&&EPS.length>1)dyn.push({id:'rall',ask:t('chip.rall')});
   const ordered=[...base.filter(s=>!S.done.has(s.id)),...base.filter(s=>S.done.has(s.id))];
   return [...ordered.slice(0,Math.max(0,4-dyn.length)),...dyn].slice(0,4);
 }
@@ -1835,7 +1928,7 @@ function saveImport(ev){
 
 
 const CATVN={invoice_receipt:'Customer collections',planned_inflow:'Planned inflows',supplier_payment:'Supplier payments',planned_outflow:'Planned outflows',payroll:'Payroll and allowances',rent:'Rent',utilities:'Utilities',new_materials:'New raw-material purchases',tax:'Tax',debt_service:'Loan repayments',capex:'Equipment investment'};
-const lblCat=k=>CATVN[k]||k;
+const lblCat=k=>{const s=t('cat.'+k);return s!=='cat.'+k?s:(CATVN[k]||k)};
 function weeklyModel(c){
   const A=dn(c.as_of),W=[];
   const H=Math.ceil(c.days.length/7),c0=c.cash0??openingCash(c);
@@ -2033,6 +2126,8 @@ function goFinancingFlow(){
    run; nothing is recalculated when the screen is drawn. ===== */
 S.dash={custOrder:'exposure',sort:{},expert:false};
 try{S.dash.expert=localStorage.getItem('lilact.expert.v1')==='1'}catch(e){}
+// SRS-DECISION: sample data is stamped with the time it is loaded into the session (fresh); uploads use their upload time, so an upload
+// older than 72 hours is expired (provisional, no request to UC03).
 function freshness(snap){
   const at=snap&&snap.source&&snap.source.at?Date.parse(snap.source.at):NaN;if(isNaN(at))return {level:'unknown'};
   const h=(Date.now()-at)/36e5;return {level:h<=CFG.erp.freshMaxHours?'fresh':h<=CFG.erp.staleHours?'stale':'expired',hours:h,at:snap.source.at};
@@ -2269,12 +2364,13 @@ document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest
 
 
 const PK='smefc.prefs.v1';
-const PREF={theme:'light',density:'comfy',motion:true,side:'open'};
+const PREF={theme:'light',density:'comfy',motion:true,side:'open',lang:'vi'};
 (function(){try{Object.assign(PREF,JSON.parse(localStorage.getItem(PK)||'{}'))}catch(e){}})();
+LANG=PREF.lang==='en'?'en':'vi';
 const mqDark=matchMedia('(prefers-color-scheme: dark)');
 const isDark=()=>PREF.theme==='dark'||(PREF.theme==='system'&&mqDark.matches);
 function applyPrefs(){
-  const h=document.documentElement;h.dataset.theme=isDark()?'dark':'light';h.dataset.density=PREF.density;h.dataset.motion=PREF.motion?'on':'off';
+  const h=document.documentElement;h.dataset.theme=isDark()?'dark':'light';h.dataset.density=PREF.density;h.dataset.motion=PREF.motion?'on':'off';LANG=PREF.lang==='en'?'en':'vi';h.lang=LANG;
   let m=document.querySelector('meta[name=theme-color]');if(!m){m=document.createElement('meta');m.name='theme-color';document.head.appendChild(m)}m.content=isDark()?'#0F0C1E':'#F7F6FB';
 }
 function savePrefs(){try{localStorage.setItem(PK,JSON.stringify(PREF))}catch(e){}applyPrefs()}
@@ -2431,13 +2527,13 @@ $('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};
 $('#btnHelp').onclick=()=>{closeUserMenu();openModal(`<div class="help-modal"><button class="settings-close" aria-label="Close">×</button><h2>How Lilact works</h2><p>Ask in English. Copilot diagnoses working capital, forecasts cash, finds funding and tests what-if options. Every action is a draft that waits for your approval.</p><h3>Try a question</h3>${['Where is my working capital stuck?','Which customer holds most of my receivables?','Why am I short of cash? Show me the cause.'].map(q=>`<button class="btn sec help-prompt">${esc(q)}</button>`).join('')}<h3>Keyboard shortcuts</h3><p>Ctrl+B sidebar · / chat · Enter send · Shift+Enter new line · Esc close</p><h3>Frequently asked questions</h3><details><summary>Where is data stored?</summary><p>In this browser.</p></details><details><summary>Which files affect calculations?</summary><p>Recognised table files (invoices, inventory, 13-week plan, financial statements) are read automatically once the required files are uploaded; Word files are reference only.</p></details><details><summary>Why are figures estimates?</summary><p>The demo uses synthetic data and indicative products.</p></details></div>`,m=>{m.querySelector('.settings-close').onclick=closeModal;m.querySelectorAll('.help-prompt').forEach(b=>b.onclick=()=>{$('#chatInput').value=b.textContent;closeModal();$('#chatInput').focus()})})};
 function closeUserMenu(){$('#userMenu').hidden=true;$('#userBtn').setAttribute('aria-expanded','false')}
 function openSettings(section='General',query=''){
- const u=S.user||{},demo=isDemoUser(u),names=['General','Account','Privacy','Billing','Usage','Log out'],fields={General:['Appearance','Light','Dark','System','Display density','Motion effects','Reset settings'],Account:['Full name','Company','Email','Tax code','Change password','Delete account'],Privacy:['Clear chat history','Delete all uploaded files','Export my data'],Billing:['Current plan','Billing is not available'],Usage:['conversations','messages','files','data updates','drafts']};let q=query.toLowerCase(),sel=q&&names.slice(0,5).find(n=>n.toLowerCase().includes(q)||(fields[n]||[]).some(x=>x.toLowerCase().includes(q)))||section;if(!names.includes(sel)||sel==='Log out')sel='General';
- let content='';if(sel==='General')content=`<h2>General</h2><section class="settings-block ${query&&'appearance dark system light'.includes(query.toLowerCase())?'search-hit':''}" data-label="Appearance"><h3>Appearance</h3><div class="settings-choice">${['Light','Dark','System'].map(x=>`<button data-theme="${x.toLowerCase()}" aria-pressed="${PREF.theme===x.toLowerCase()}">${x}</button>`).join('')}</div></section><section class="settings-block"><h3>Display density</h3><div class="settings-choice">${[['comfy','Comfortable'],['compact','Compact']].map(([v,x])=>`<button data-density="${v}" aria-pressed="${PREF.density===v}">${x}</button>`).join('')}</div></section><section class="settings-block"><label class="settings-switch"><span><b>Motion effects</b><small>Reduce transitions and chart animation.</small></span><input id="settingsMotion" type="checkbox" ${PREF.motion?'checked':''}></label></section><button class="btn sec" id="resetSettings">Reset settings</button>`;
+ const u=S.user||{},demo=isDemoUser(u),names=['General','Account','Privacy','Billing','Usage','Log out'],fields={General:['Appearance','Light','Dark','System','Display density','Motion effects','Language','Tiếng Việt','English','Reset settings'],Account:['Full name','Company','Email','Tax code','Change password','Delete account'],Privacy:['Clear chat history','Delete all uploaded files','Export my data'],Billing:['Current plan','Billing is not available'],Usage:['conversations','messages','files','data updates','drafts']};let q=query.toLowerCase(),sel=q&&names.slice(0,5).find(n=>n.toLowerCase().includes(q)||(fields[n]||[]).some(x=>x.toLowerCase().includes(q)))||section;if(!names.includes(sel)||sel==='Log out')sel='General';
+ let content='';if(sel==='General')content=`<h2>General</h2><section class="settings-block ${query&&'appearance dark system light'.includes(query.toLowerCase())?'search-hit':''}" data-label="Appearance"><h3>Appearance</h3><div class="settings-choice">${['Light','Dark','System'].map(x=>`<button data-theme="${x.toLowerCase()}" aria-pressed="${PREF.theme===x.toLowerCase()}">${x}</button>`).join('')}</div></section><section class="settings-block"><h3>Display density</h3><div class="settings-choice">${[['comfy','Comfortable'],['compact','Compact']].map(([v,x])=>`<button data-density="${v}" aria-pressed="${PREF.density===v}">${x}</button>`).join('')}</div></section><section class="settings-block" data-label="Language"><h3>${t('set.lang')}</h3><p>${t('set.lang.sub')}</p><div class="settings-choice">${[['vi','Tiếng Việt'],['en','English']].map(([v,x])=>`<button data-lang="${v}" aria-pressed="${LANG===v}">${x}</button>`).join('')}</div></section><section class="settings-block"><label class="settings-switch"><span><b>Motion effects</b><small>Reduce transitions and chart animation.</small></span><input id="settingsMotion" type="checkbox" ${PREF.motion?'checked':''}></label></section><button class="btn sec" id="resetSettings">Reset settings</button>`;
  if(sel==='Account')content=`<h2>Account</h2><div class="settings-avatar"><span class="avatar">${esc(initials(u.name))}</span>${demo?'Demo account':'Account details'}</div><form id="profileForm"><label class="settings-field">Full name<input name="name" value="${esc(u.name||'')}" ${demo?'disabled':''}></label><label class="settings-field">Company<input name="company" value="${esc(u.company||'')}" ${demo?'disabled':''}></label><label class="settings-field">Email<input value="${esc(u.email||'')}" readonly></label><label class="settings-field">Tax code<input value="${esc(u.taxCode||'Not provided')}" readonly></label>${demo?'':'<button class="btn primary">Save profile</button>'}</form><section class="settings-block"><h3>Business model</h3><label class="settings-field">Business model<select id="bizModel"><option value="undeclared">Not declared (default FOB thresholds)</option><option value="CMT">CMT – garment subcontracting</option><option value="FOB">FOB – own materials</option></select></label><p>Selects the garment-industry thresholds (tv1.threshold.v2) used by the working-capital diagnosis.</p></section>${demo?'':'<section class="settings-block"><h3>Change password</h3><form id="changePw"><label class="settings-field">Current password<input name="old" type="password"></label><label class="settings-field">New password<input name="new" type="password"></label><label class="settings-field">Confirm password<input name="confirm" type="password"></label><p id="pwError" class="settings-error"></p><button class="btn sec">Change password</button></form></section><button class="btn danger" id="deleteAccount">Delete account</button>'}`;
  if(sel==='Privacy')content=`<h2>Privacy</h2><p>Your data is stored in this browser. Copilot provides advice only; actions require your review and approval.</p><section class="settings-block"><button class="btn sec" id="clearChats">Clear chat history</button></section><section class="settings-block"><button class="btn sec" id="clearFiles">Delete all uploaded files</button><p>Data already used in your analysis is kept.</p></section><button class="btn sec" id="exportData">Export my data</button>`;
  if(sel==='Billing')content='<h2>Billing</h2><section class="settings-block billing-card"><b>Current plan: Demo (free)</b><p>Billing is not available in this demo.</p></section>';
  if(sel==='Usage')content='<h2>Usage</h2><p>Counted in this browser only</p><div id="usageStats" class="usage-stats"><p>Loading local usage...</p></div>';
- openModal(`<div class="settings-shell"><aside class="settings-nav"><label class="settings-search"><input id="settingsSearch" placeholder="Search settings" value="${esc(query)}"></label><nav>${names.slice(0,5).map(n=>`<button data-section="${n}" class="${n===sel?'on':''}">${n}</button>`).join('')}<div class="settings-nav-rule"></div><button class="settings-logout" data-section="Log out">Log out</button></nav></aside><section class="settings-content"><button class="settings-close" aria-label="Close settings">×</button><button class="settings-back">← Back</button><div class="settings-no-results" hidden>No settings match</div><div class="settings-body">${content}</div></section></div>`,m=>{const shell=m.querySelector('.settings-shell'),reopen=(s=sel,v='')=>openSettings(s,v);m.querySelector('.settings-close').onclick=closeModal;m.querySelector('.settings-back').onclick=()=>shell.classList.remove('content-open');if(innerWidth<=600)shell.classList.add('content-open');m.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>b.dataset.section==='Log out'?confirmAction('Log out?','Return to sign in?',()=>{closeModal();leaveApp()}):reopen(b.dataset.section));m.querySelector('#settingsSearch').oninput=e=>{const v=e.target.value.toLowerCase(),n=names.slice(0,5).find(x=>x.toLowerCase().includes(v)||(fields[x]||[]).some(y=>y.toLowerCase().includes(v)));if(!v){m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;return}if(!n){m.querySelector('.settings-no-results').hidden=false;m.querySelector('.settings-body').hidden=true}else{m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;if(n!==sel){const pos=e.target.selectionStart;reopen(n,v);requestAnimationFrame(()=>{const input=document.querySelector('#settingsSearch');if(input){input.focus();input.setSelectionRange(pos,pos)}})}}};m.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{PREF.theme=b.dataset.theme;savePrefs();reopen('General')});m.querySelectorAll('[data-density]').forEach(b=>b.onclick=()=>{PREF.density=b.dataset.density;savePrefs();reopen('General')});const bm=m.querySelector('#bizModel');if(bm){const f=accountFirm()||S.firm,pm=POLICY.get(f).business_model;bm.value=pm||(DATA.snaps[f]&&DATA.snaps[f].firm.business_model)||'undeclared';bm.onchange=()=>{POLICY.set(f,{business_model:bm.value},'Business model declared in Settings');refreshTab();toast('Business model saved')}}const motion=m.querySelector('#settingsMotion');if(motion)motion.onchange=()=>{PREF.motion=motion.checked;savePrefs()};const reset=m.querySelector('#resetSettings');if(reset)reset.onclick=()=>{Object.assign(PREF,{theme:'light',density:'comfy',motion:true});savePrefs();reopen('General')};const pf=m.querySelector('#profileForm');if(pf)pf.onsubmit=e=>{e.preventDefault();const all=users(),i=all.findIndex(x=>x.id===u.id);all[i].name=pf.elements.name.value.trim()||u.name;all[i].company=pf.elements.company.value.trim()||u.company;saveUsers(all);S.user=all[i];renameAccountCompany(all[i]);$('#uName').textContent=u.name;$('#umName').textContent=u.name;$('#umCompany').textContent=u.company;toast('Profile updated');reopen('Account')};const pw=m.querySelector('#changePw');if(pw)pw.onsubmit=async e=>{e.preventDefault();const all=users(),x=all.find(v=>v.id===u.id),err=m.querySelector('#pwError');if(await hashPw(pw.elements.old.value,x.salt)!==x.hash){err.textContent='Current password is incorrect';return}if(pwRuleErrors(pw.elements.new.value).length){err.textContent='Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character';return}if(pw.elements.new.value!==pw.elements.confirm.value){err.textContent='Passwords do not match';return}x.salt=salt();x.hash=await hashPw(pw.elements.new.value,x.salt);saveUsers(all);err.textContent='Password changed'};const cl=m.querySelector('#clearChats');if(cl)cl.onclick=()=>confirmAction('Clear chat history?','All saved conversations will be removed from this browser.',()=>{try{localStorage.removeItem(CHAT_KEY())}catch(e){}chats=[];activeChat=null;chatNew();closeModal()});const cf=m.querySelector('#clearFiles');if(cf)cf.onclick=async()=>{const fs=await FILES.list();confirmAction('Delete uploaded files?','Data already used in your analysis is kept.',async()=>{await FILES.remove(fs.map(x=>x.id));addLog({tool:'delete_files',tier:1,args:{count:fs.length},status:'ok',summary:'Deleted uploaded files'});toast('Uploaded files deleted');reopen('Privacy')})};const ex=m.querySelector('#exportData');if(ex)ex.onclick=async()=>{const f=await FILES.list(),safe={account:{id:u.id,name:u.name,company:u.company,email:u.email,taxCode:u.taxCode||null},files:f.map(({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})=>({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})),chats};dlFile('lilact-my-data.json',JSON.stringify(safe,null,2),'application/json')};const del=m.querySelector('#deleteAccount');if(del)del.onclick=()=>confirmAction('Delete account?','Confirm again to delete this account and its browser data.',()=>confirmAction('Confirm account deletion','This permanently removes your local account data.',async()=>{const email=u.email.toLowerCase();saveUsers(users().filter(x=>x.id!==u.id));store.del(DK+email);store.del('smefc.pins.v1.'+email);try{localStorage.removeItem(CHAT_KEY())}catch(e){}const fs=await FILES.list();await FILES.remove(fs.map(x=>x.id));closeModal();leaveApp()}))})
+ openModal(`<div class="settings-shell"><aside class="settings-nav"><label class="settings-search"><input id="settingsSearch" placeholder="Search settings" value="${esc(query)}"></label><nav>${names.slice(0,5).map(n=>`<button data-section="${n}" class="${n===sel?'on':''}">${n}</button>`).join('')}<div class="settings-nav-rule"></div><button class="settings-logout" data-section="Log out">Log out</button></nav></aside><section class="settings-content"><button class="settings-close" aria-label="Close settings">×</button><button class="settings-back">← Back</button><div class="settings-no-results" hidden>No settings match</div><div class="settings-body">${content}</div></section></div>`,m=>{const shell=m.querySelector('.settings-shell'),reopen=(s=sel,v='')=>openSettings(s,v);m.querySelector('.settings-close').onclick=closeModal;m.querySelector('.settings-back').onclick=()=>shell.classList.remove('content-open');if(innerWidth<=600)shell.classList.add('content-open');m.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>b.dataset.section==='Log out'?confirmAction('Log out?','Return to sign in?',()=>{closeModal();leaveApp()}):reopen(b.dataset.section));m.querySelector('#settingsSearch').oninput=e=>{const v=e.target.value.toLowerCase(),n=names.slice(0,5).find(x=>x.toLowerCase().includes(v)||(fields[x]||[]).some(y=>y.toLowerCase().includes(v)));if(!v){m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;return}if(!n){m.querySelector('.settings-no-results').hidden=false;m.querySelector('.settings-body').hidden=true}else{m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;if(n!==sel){const pos=e.target.selectionStart;reopen(n,v);requestAnimationFrame(()=>{const input=document.querySelector('#settingsSearch');if(input){input.focus();input.setSelectionRange(pos,pos)}})}}};m.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{PREF.theme=b.dataset.theme;savePrefs();reopen('General')});m.querySelectorAll('[data-density]').forEach(b=>b.onclick=()=>{PREF.density=b.dataset.density;savePrefs();reopen('General')});m.querySelectorAll('[data-lang]').forEach(b=>b.onclick=()=>{PREF.lang=b.dataset.lang;savePrefs();refreshTab();renderDemoChips();reopen('General')});const bm=m.querySelector('#bizModel');if(bm){const f=accountFirm()||S.firm,pm=POLICY.get(f).business_model;bm.value=pm||(DATA.snaps[f]&&DATA.snaps[f].firm.business_model)||'undeclared';bm.onchange=()=>{POLICY.set(f,{business_model:bm.value},'Business model declared in Settings');refreshTab();toast('Business model saved')}}const motion=m.querySelector('#settingsMotion');if(motion)motion.onchange=()=>{PREF.motion=motion.checked;savePrefs()};const reset=m.querySelector('#resetSettings');if(reset)reset.onclick=()=>{Object.assign(PREF,{theme:'light',density:'comfy',motion:true});savePrefs();reopen('General')};const pf=m.querySelector('#profileForm');if(pf)pf.onsubmit=e=>{e.preventDefault();const all=users(),i=all.findIndex(x=>x.id===u.id);all[i].name=pf.elements.name.value.trim()||u.name;all[i].company=pf.elements.company.value.trim()||u.company;saveUsers(all);S.user=all[i];renameAccountCompany(all[i]);$('#uName').textContent=u.name;$('#umName').textContent=u.name;$('#umCompany').textContent=u.company;toast('Profile updated');reopen('Account')};const pw=m.querySelector('#changePw');if(pw)pw.onsubmit=async e=>{e.preventDefault();const all=users(),x=all.find(v=>v.id===u.id),err=m.querySelector('#pwError');if(await hashPw(pw.elements.old.value,x.salt)!==x.hash){err.textContent='Current password is incorrect';return}if(pwRuleErrors(pw.elements.new.value).length){err.textContent='Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character';return}if(pw.elements.new.value!==pw.elements.confirm.value){err.textContent='Passwords do not match';return}x.salt=salt();x.hash=await hashPw(pw.elements.new.value,x.salt);saveUsers(all);err.textContent='Password changed'};const cl=m.querySelector('#clearChats');if(cl)cl.onclick=()=>confirmAction('Clear chat history?','All saved conversations will be removed from this browser.',()=>{try{localStorage.removeItem(CHAT_KEY())}catch(e){}chats=[];activeChat=null;chatNew();closeModal()});const cf=m.querySelector('#clearFiles');if(cf)cf.onclick=async()=>{const fs=await FILES.list();confirmAction('Delete uploaded files?','Data already used in your analysis is kept.',async()=>{await FILES.remove(fs.map(x=>x.id));addLog({tool:'delete_files',tier:1,args:{count:fs.length},status:'ok',summary:'Deleted uploaded files'});toast('Uploaded files deleted');reopen('Privacy')})};const ex=m.querySelector('#exportData');if(ex)ex.onclick=async()=>{const f=await FILES.list(),safe={account:{id:u.id,name:u.name,company:u.company,email:u.email,taxCode:u.taxCode||null},files:f.map(({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})=>({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})),chats};dlFile('lilact-my-data.json',JSON.stringify(safe,null,2),'application/json')};const del=m.querySelector('#deleteAccount');if(del)del.onclick=()=>confirmAction('Delete account?','Confirm again to delete this account and its browser data.',()=>confirmAction('Confirm account deletion','This permanently removes your local account data.',async()=>{const email=u.email.toLowerCase();saveUsers(users().filter(x=>x.id!==u.id));store.del(DK+email);store.del('smefc.pins.v1.'+email);try{localStorage.removeItem(CHAT_KEY())}catch(e){}const fs=await FILES.list();await FILES.remove(fs.map(x=>x.id));closeModal();leaveApp()}))})
  if(sel==='Usage')void (async()=>{const files=await FILES.list(),d=dstore.load(),snaps=Object.values(d.firms||{}).reduce((n,f)=>n+(f.snaps||[]).length,0),bytes=files.reduce((n,f)=>n+(f.size||0),0),sent=chats.reduce((n,c)=>n+(c.html.match(/class="msg user"/g)||[]).length,0),pending=S.drafts.filter(x=>x.status==='pending_approval').length,approved=S.drafts.filter(x=>x.status==='executed (simulated)').length,rejected=S.drafts.filter(x=>x.status==='rejected').length;const b=document.querySelector('#usageStats');if(b)b.innerHTML='<div><b>'+chats.length+'</b><span>Conversations</span></div><div><b>'+sent+'</b><span>Messages sent</span></div><div><b>'+files.length+' · '+sizeLabel(bytes)+'</b><span>Uploaded files</span></div><div><b>'+snaps+'</b><span>Data updates</span></div><div><b>'+pending+' / '+approved+' / '+rejected+'</b><span>Pending / approved / rejected drafts</span></div>'})()
 }
 $('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};

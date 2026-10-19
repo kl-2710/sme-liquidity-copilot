@@ -18,11 +18,14 @@ function nf(n, d = 1) {
 /** Integer with thousands separators: 1200000000 → "1.200.000.000". */
 const nInt = n => nf(n, 0);
 
-/** Short millions: 1250000000 → "1.250,0M". */
-const mm = n => nf(n / 1e6, 1) + 'M';
+// Units follow the display language (LANG from js/i18n.js): M / bn in English, tr (triệu) / tỷ in Vietnamese.
+const isVi = () => typeof LANG !== 'undefined' && LANG === 'vi';
+
+/** Short millions: 1250000000 → "1.250,0M" (vi: "1.250,0 tr"). */
+const mm = n => nf(n / 1e6, 1) + (isVi() ? ' tr' : 'M');
 
 /** Short money: from 1 billion upwards "1,25bn", otherwise "850,0M". */
-const money = n => Math.abs(n) >= 1e9 ? nf(n / 1e9, 2) + 'bn' : nf(n / 1e6, 1) + 'M';
+const money = n => Math.abs(n) >= 1e9 ? nf(n / 1e9, 2) + (isVi() ? ' tỷ' : 'bn') : nf(n / 1e6, 1) + (isVi() ? ' tr' : 'M');
 
 /** Full VND value: 1200000000 → "1.200.000.000 VND". */
 const vnd = n => nInt(n) + ' VND';
@@ -34,7 +37,7 @@ const enM = n => 'VND ' + nf(n / 1e6, 1) + ' million';
 const pct = (x, d = 1) => nf(x * 100, d) + '%';
 
 /** Days: days(112.94) → "112,9 days". */
-const days = (x, d = 1) => nf(x, d) + ' days';
+const days = (x, d = 1) => nf(x, d) + (isVi() ? ' ngày' : ' days');
 
 /** ISO date → dd/mm/yyyy: "2026-09-30" → "30/09/2026". */
 const fd = iso => { const [y, m, d] = String(iso).split('-'); return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`; };

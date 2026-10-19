@@ -145,7 +145,8 @@ def build(workbook: Path, plans_csv: Path) -> dict:
             "inventory": [[tr(r["product_line"]), str(r["inventory_type"]), int(r["qty"]), int(r["unit_cost_vnd"]),
                            int(r["days_in_stock"]), "customer" if str(r["inventory_type"]) == "HGC" else "own",
                            "unknown", "unknown"] for r in inventory if r["firm_id"] == f],
-            # [id, date, direction, category, amount, certainty, source id]
+            # [id, date, direction, category, amount, certainty, source id]; SRS-DECISION: the CSV has no certainty column, so plans are
+            # 'estimated' (all sample plans are outflows, which stress_7 never moves).
             "planned": [[p["event_id"], p["date"], p["direction"], p["category"], int(float(p["amount_vnd"])),
                          "estimated", p["source_id"]] for p in plans if p["firm_id"] == f],
             "config": {"amount_basis": "net", "vat_rate": None},
