@@ -133,7 +133,7 @@ const SAMPLE_CSV = {
 }
 
 // Engine acceptance cases (SRS v1.3 Appendix D/E), evaluated in the page against the shared engine (js/engine.js).
-// TMK builds a minimal engine input: the FOB reference company of T21–T38 (revenue 30 bn, COGS 24 bn, 90-day period).
+// TMK builds a minimal engine input: the FOB reference company of T21–T38 (revenue 30 B, COGS 24 B, 90-day period).
 const TMK = `window.TMK=(o={})=>({firm:{id:'T',name:'Test Co',business_model:'FOB',rtarget:500e6,essential_suppliers:[],...(o.firm||{})},
   snapshot_id:'SNP-T-1',as_of:'2026-09-30',source:{type:'upload',id:'upload:test.csv',at:new Date().toISOString()},
   fin:o.fin||[{period_start:'2026-07-03',period_end:'2026-09-30',revenue:30e9,cogs:24e9,opening_cash:1e9,current_assets:20e9}],
@@ -150,7 +150,7 @@ const loadLegacy = (p) => p.evaluate((L) => { Object.entries(L.raw).forEach(([id
 await loadLegacy(enginePage);
 await step("A · sample snapshot: N from the period, Appendix D revenue, converted COGS (T47)", async () => {
   const snap = (id) => ev((id) => { const s = DATA.snaps[id]; return { N: s.N, start: s.period_start, rev: s.fin.revenue, cogs: Math.round(s.fin.cogs), src: s.fin.cogs_src, inv: Math.round(DATA.cases[id + "|base"].invv) }; }, id);
-  // Workbook v9 (D_F01): period 01/01–20/06/2026, N = 171, revenue 30 bn and COGS 24 bn from the financial statements.
+  // Workbook v9 (D_F01): period 01/01–20/06/2026, N = 171, revenue 30 B and COGS 24 B from the financial statements.
   assert.deepEqual(await snap("F01"), { N: 171, start: "2026-01-01", rev: 30e9, cogs: 24e9, src: "financials", inv: 1573770492 });
   assert.deepEqual(await snap("X01"), { N: 183, start: "2026-04-01", rev: 18108528000, cogs: 14385833333, src: "converted", inv: 3450000000 });
   assert.equal(await ev(() => DATA.snaps.X02.fin.revenue), 24031968000);
@@ -204,7 +204,7 @@ window.SUMMARY=(r)=>({w:r.wc_class,bn:r.bn_pattern,main:r.main_bottleneck,rules:
   share:r.materiality_share==null?null:Math.round(r.materiality_share*10000)/100,shape:Object.fromEntries(r.item_states.map(i=>[i.item,i.shape])),c:Object.fromEntries(r.item_states.map(i=>[i.item,i.c]))});` });
 const B = (o) => ev((x) => SUMMARY(TCASE(x)), o);
 await step("B · T01–T06 public-company cases", async () => {
-  // DM7: DSO 112.9, revenue 741.1 bn a year, current assets 406.3 bn (FOB) → W2, money_at_risk 114.1 bn.
+  // DM7: DSO 112.9, revenue 741.1 B a year, current assets 406.3 B (FOB) → W2, money_at_risk 114.1 B.
   let r = await B({ N: 365, rev: 741.1e9, cogs: 600e9, dso: 112.9, ca: 406.3e9 });
   assert.equal(r.w, "W2"); assert.ok(r.rules.includes("R-AR-2") && r.rules.includes("R-MAT")); assert.equal(Math.round(r.mar / 100) / 10, 114.1); assert.equal(r.main, "AR");
   r = await B({ N: 365, rev: 980.3e9, cogs: 800e9, dso: 63.3, ca: 624.4e9 });                  // HNI
@@ -916,7 +916,7 @@ for (const theme of ["light", "dark"]) {
     assert.match(await page.locator("#pane-gap .uc2-bar").innerText(), /Run status: provisional/);
     assert.match(await page.locator("#pane-gap .c0b").innerText(), /Cash0 is provisional/);
     await page.selectOption("#scSel", "conservative"); await page.waitForTimeout(500);
-    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /-3,06bn\s+18 Sep 2026 · Conservative/);
+    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /-3,06B\s+18 Sep 2026 · Conservative/);
     assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /TH01 – Cash shortfall/);    // TH stays on Base
     await page.selectOption("#scSel", "base"); await page.waitForTimeout(300);
     await page.selectOption("#wkSel", "4"); await page.waitForTimeout(500);
@@ -1013,10 +1013,10 @@ for (const theme of ["light", "dark"]) {
     await page.evaluate(() => { advance(3); openDetail("gap"); setWide(true); }); await page.waitForTimeout(900);
     const txt = await page.locator("#pane-gap").innerText();
     assert.doesNotMatch(txt, TECH); assert.doesNotMatch(txt, /PeakZero|Need\(0\)|to stay ≥ 0/);
-    assert.match(txt, /Minimum cash 250,0M · Safe cash level 500,0M · Surplus level 1,00bn/);
+    assert.match(txt, /Minimum cash 250,0M · Safe cash level 500,0M · Surplus level 1,00B/);
     assert.equal(await page.locator("#pane-gap .uc2-bar .est").count(), 1);
     assert.ok((await page.locator("#pane-gap .uc2-bar .est").getAttribute("title")).length > 10, "the Estimate badge explains why (Cash0 not confirmed)");
-    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /Cash needed at the start\s+4,76bn\s+Largest shortfall\s+3,56bn/);
+    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /Cash needed at the start\s+4,76B\s+Largest shortfall\s+3,56B/);
     assert.match(await page.locator("#pane-gap .fbcard").innerText(), /Forecast confidence\s+There are not enough past forecasts/);
     assert.equal(await page.locator("#pane-gap .lv-legend").first().evaluate((e) => e.tagName), "P");
   });
@@ -1085,17 +1085,17 @@ for (const theme of ["light", "dark"]) {
     await ask("K1 is the cause of my cash shortage");
     const t = await last().innerText();
     assert.match(t, /I cannot confirm that Large Exporter K1 alone created the shortfall/); assert.match(t, /one contributing factor/);
-    assert.match(t, /3,82bn of receivables \(55,5%\), of which 765,7M is overdue/);
+    assert.match(t, /3,82B of receivables \(55,5%\), of which 765,7M is overdue/);
   });
   await step("H · scenario, Cash0-needed and tightest-week questions; Q70 the same run is reused (same run_id)", async () => {
     await ask("Why am I short of cash? Show me the contributing factors.");
     const id1 = await last().locator(".toolchip pre").innerText();
     await ask("What happens in the conservative scenario?");
-    assert.match(await last().innerText(), /Conservative: lowest balance -3,06bn on 18 Sep 2026, Cash0 needed 4,76bn, alert level Red\. TH and the matrix cell stay on Base \(TH01 – Cash shortfall\)/);
+    assert.match(await last().innerText(), /Conservative: lowest balance -3,06B on 18 Sep 2026, Cash0 needed 4,76B, alert level Red\. TH and the matrix cell stay on Base \(TH01 – Cash shortfall\)/);
     await ask("How much Cash0 do I need?");
-    assert.match(await last().innerText(), /Cash0 needed to stay at or above Rtarget 500,0M: 4,76bn; to stay at or above zero: 4,26bn/);
+    assert.match(await last().innerText(), /Cash0 needed to stay at or above Rtarget 500,0M: 4,76B; to stay at or above zero: 4,26B/);
     await ask("Which week is the tightest?");
-    assert.match(await last().innerText(), /The tightest week is week 13 \(13 Sep 2026–19 Sep 2026\): lowest balance -3,06bn on 18 Sep 2026, alert level Red/);
+    assert.match(await last().innerText(), /The tightest week is week 13 \(13 Sep 2026–19 Sep 2026\): lowest balance -3,06B on 18 Sep 2026, alert level Red/);
     await ask("Why am I short of cash? Show me the contributing factors.");
     const id2 = await last().locator(".toolchip pre").innerText();
     const run = (s) => JSON.parse(s).args.run_id;
@@ -1103,12 +1103,21 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.evaluate(() => FEEDBACK.get("F01").logs.length), 1);        // Q68: one forecast log per snapshot and configuration
     assert.equal(await page.evaluate(() => FEEDBACK.health("F01")), "insufficient_sample"); // Q59
   });
-  await step("English only: no language setting, <html lang=en>, English units and dates", async () => {
+  await step("English only: no language setting, <html lang=en>, English units and dates; money of 1 billion or more shows the suffix B", async () => {
     assert.equal(await page.evaluate(() => document.documentElement.lang), "en");
     await page.evaluate(() => { openSettings("General"); }); await page.waitForTimeout(300);
     assert.equal(await page.locator("[data-lang]").count(), 0, "no language selector");
     await page.keyboard.press("Escape");
-    assert.deepEqual(await page.evaluate(() => [money(11.85e9), money(619.3e6), nInt(1200000000), fd("2026-09-30"), fd("2026-10-01")]), ["11,85bn", "619,3M", "1.200.000.000", "30 Sep 2026", "1 Oct 2026"]);
+    assert.deepEqual(await page.evaluate(() => [money(11.85e9), money(619.3e6), nInt(1200000000), fd("2026-09-30"), fd("2026-10-01")]), ["11,85B", "619,3M", "1.200.000.000", "30 Sep 2026", "1 Oct 2026"]);
+    // Money of 1 billion VND or more uses the suffix B (two decimals), below that M; never "bn".
+    assert.deepEqual(await page.evaluate(() => [money(1e9), money(999.9e6), money(-3063626768), money(12459016394), mm(1e9)]), ["1,00B", "999,9M", "-3,06B", "12,46B", "1.000,0M"]);
+    const chat = await page.locator(".messages.on").innerText();
+    assert.match(chat, /Cash0 needed to stay at or above Rtarget 500,0M: 4,76B/);
+    assert.doesNotMatch(chat, /\d(,\d+)?\s?bn\b/, "no money in bn left in the chat");
+    await page.evaluate(() => { openDetail("dash"); }); await page.waitForTimeout(500);
+    assert.match(await page.locator("#pane-dash").innerText(), /6,89B/);
+    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /\d(,\d+)?\s?bn\b/);
+    await page.click("#panelClose");
     assert.doesNotMatch(await page.locator(".messages.on").innerText(), /[\u00e0-\u00fd\u0103\u0111\u01a1\u01b0\u1ea1-\u1ef9]/i, "no Vietnamese letters in the chat");
   });
   await step("H · no JavaScript errors in the chat checks", async () => assert.deepEqual(errors, []));

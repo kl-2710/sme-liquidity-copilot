@@ -1,6 +1,6 @@
 /* Shared number, money and date formatting (SRS v1.3, section 3.1).
    - Vietnamese number convention: period as thousands separator, comma as decimal separator: 1.234.567,89
-   - Money shown in millions (M) or billions (bn): 11,85bn, 619,3M; full VND values as 1.200.000.000.
+   - Money shown in millions (M) or billions (B): 11,85B, 619,3M; full VND values as 1.200.000.000.
    - Dates as "30 Sep 2026".
    Every screen (tables, KPI cards, chart tooltips, drafts) uses these helpers. */
 
@@ -21,8 +21,8 @@ const nInt = n => nf(n, 0);
 /** Short millions: 1250000000 → "1.250,0M". */
 const mm = n => nf(n / 1e6, 1) + 'M';
 
-/** Short money: from 1 billion upwards "1,25bn", otherwise "850,0M". */
-const money = n => Math.abs(n) >= 1e9 ? nf(n / 1e9, 2) + 'bn' : nf(n / 1e6, 1) + 'M';
+/** Short money: from 1 billion upwards "1,25B", otherwise "850,0M". */
+const money = n => Math.abs(n) >= 1e9 ? nf(n / 1e9, 2) + 'B' : nf(n / 1e6, 1) + 'M';
 
 /** Full VND value: 1200000000 → "1.200.000.000 VND". */
 const vnd = n => nInt(n) + ' VND';

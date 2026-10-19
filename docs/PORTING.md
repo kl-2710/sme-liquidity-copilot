@@ -23,7 +23,7 @@
 - **Language:** English UI text. The only Vietnamese left is the hidden list of upload aliases (`UPLOAD_ALIASES` in `js/config.js`), so files with Vietnamese column headers still import.
 
 ## Navigation, formatting and SRS v1.3 states
-- Numbers use the Vietnamese convention `1.234.567,89`, money is shown in `M`/`bn`, dates in `dd/mm/yyyy`; the shared helpers are in `js/formatters.js` (loaded before `js/app.js`).
+- Numbers use the Vietnamese convention `1.234.567,89`, money is shown in `M` (million VND) / `B` (billion VND, e.g. `11,85B`), dates in `dd/mm/yyyy`; the shared helpers are in `js/formatters.js` (loaded before `js/app.js`).
 - Navigation uses an explicit `S.view` (`chat` / `data`) through `showView()`, so New chat, Approval queue and chat history switch screens directly.
 - The dashboard opens with a liquidity-state banner (SRS v1.3: W axis, TH01/TH02/TH03, M1–M9). It always uses the Base case; Rmin = 50% and Rupper = 200% of Rtarget, the FOB thresholds and a 30-day invoice term are demo assumptions, so the result is labelled provisional.
 
