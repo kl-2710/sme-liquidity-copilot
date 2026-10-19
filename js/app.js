@@ -967,8 +967,19 @@ async function toolCall(bot,name,tier,args,work,{ms=650}={}){
   const out=work();const bad=out&&out.bad;
   $('.st',el).innerHTML=bad?'<span class="bad">⛔ blocked</span>':'<span class="ok">✓ ok</span>';scroll();return out;
 }
-function suggestRow(bot,items){
-  if(!items||!items.length)return;const d=document.createElement('div');d.className='suggest';
+// Suggested questions. Before the first message of a chat they sit by the composer (#demoChips). From the first message on there is
+// one row only, under the latest answer: that answer's own items, then the flow chips and the next steps, without duplicates;
+// older answers lose their row. suggestRow keeps an answer's own items on the element so the row can be rebuilt later.
+function suggestRow(bot,items){bot._sug=items||[];placeSuggest(bot)}
+const lastBot=()=>{const a=msgs?$$('.msg.bot',msgs).filter(b=>!b.querySelector('.typing')):[];return a[a.length-1]||null};
+function placeSuggest(bot=lastBot()){
+  if(!msgs)return;$$('.suggest',msgs).forEach(x=>x.remove());if(!bot)return;
+  const seen=new Set(),own=[],asks=[],add=(arr,it)=>{const label=typeof it==='string'?it:it&&it.t,k=norm(label||'');if(!k||seen.has(k))return;seen.add(k);arr.push(it)};
+  const asked=$$('.msg.user',msgs).pop();if(asked)seen.add(norm(asked.textContent)); // never suggest the question just asked
+  (bot._sug||[]).forEach(it=>add(own,it));
+  if(chatHasMessages()){chipList().filter(c=>!S.done.has(c.id)).forEach(c=>add(asks,c.ask));nextSuggest().forEach(x=>add(asks,x))}
+  const items=[...own,...asks.slice(0,Math.max(0,4-own.length))];if(!items.length)return;
+  const d=document.createElement('div');d.className='suggest';d.setAttribute('aria-label','Suggested questions');
   items.forEach(it=>{const b=document.createElement('button');b.type='button';b.textContent=typeof it==='string'?it:it.t;b.onclick=()=>typeof it==='string'?sendChat(it):it.f();d.appendChild(b)});bot.appendChild(d);scroll();
 }
 
@@ -1421,7 +1432,7 @@ function welcome(task){
   h.innerHTML=`<div class="hm" aria-hidden="true"><img src="assets/brand/lilact-symbol-light.svg" alt="" class="lilact-logo--light"><img src="assets/brand/lilact-symbol-dark.svg" alt="" class="lilact-logo--dark"></div>${accountFirm()?`<h1>${t('hero.hi',{n:esc(userFirst())})} ${esc(T.hello(FIRMS[S.firm].short))}</h1>`:`<h1>Hi ${esc(userFirst())}. Let’s set up ${esc(S.user?.company||'your company')}.</h1><p class="hero-setup">Upload your company files to start the analysis.</p><button class="btn primary" type="button" data-setup-data>⇪ Upload company data</button>`}`;
   th.appendChild(h);syncChatEmpty();
 }
-// Suggestion chips above the composer: the flow step chips plus gap-specific chips, at most 4. Hidden only while busy.
+// Suggestion chips of the flow step plus gap-specific chips, at most 4: by the composer on an empty chat, then under the latest answer.
 function chipList(){
   const base=currentChips(),dyn=[];
   if(S.stage>=1&&EPS.length&&!EP.none)dyn.push({id:'gx'+EP.k,ask:t('chip.gx',{k:EP.k})});
@@ -1430,7 +1441,9 @@ function chipList(){
   return [...ordered.slice(0,Math.max(0,4-dyn.length)),...dyn].slice(0,4);
 }
 function renderDemoChips(){
-  const box=$('#demoChips'),list=chipList();box.hidden=busy||!list.length;
+  const box=$('#demoChips');
+  if(chatHasMessages()){box.hidden=true;box.innerHTML='';if(!busy)placeSuggest();return} // after the first message: under the latest answer only
+  const list=chipList();box.hidden=busy||!list.length;
   box.innerHTML=list.map((s,i)=>`<button type="button" class="${S.done.has(s.id)?'done':''}" data-i="${i}" title="${esc(s.ask)}"><span class="n">${S.done.has(s.id)?'✓':i+1}</span>${esc(s.ask.length>46?s.ask.slice(0,45)+'…':s.ask)}</button>`).join('');
   $$('button',box).forEach(b=>b.onclick=()=>sendChat(list[+b.dataset.i].ask));
 }
@@ -2733,7 +2746,7 @@ function chatHasMessages(){return !!msgs?.querySelector('.msg.user')}
 function chatSave(){if(!S.user||!activeChat||!msgs)return;const c=chats.find(x=>x.id===activeChat);if(!c)return;Object.assign(c,{firmId:accountFirm(),case:S.case,updatedAt:Date.now(),stage:S.stage,cause:S.cause,done:[...S.done],html:threadHTML()});chatsWrite();chatRender()}
 function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});msgs=THREADS.tv1;resetFlow();welcome('tv1');activeChat='c'+Date.now().toString(36);chats.unshift({id:activeChat,title:'New chat',firmId:accountFirm(),case:S.case,createdAt:Date.now(),updatedAt:Date.now(),stage:S.stage,cause:null,done:[],html:threadHTML()});chatsWrite();$('#taskTitle').textContent='New chat';chatRender();renderDemoChips()}
 function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button><button class="chat-more" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>{showView('chat');chatRestore(b.closest('.chat-row').dataset.id);closeSide()});box.querySelectorAll('.chat-more').forEach(b=>b.onclick=e=>{e.stopPropagation();openChatMenu(b,chats.find(x=>x.id===b.closest('.chat-row').dataset.id))})}
-function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;if(c.firmId&&FIRMS[c.firmId])switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.rcact button,.liq-act button,.suggest button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});applyStage();$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
+function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;if(c.firmId&&FIRMS[c.firmId])switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.suggest',msgs).forEach(x=>x.remove());$$('.rcact button,.liq-act button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
 function chatLoad(){chats=chatsRead();chatRender();if(chats.length)chatRestore(chats[0].id);else chatNew()}
 // New chat goes straight back to the conversation from any screen (Company data, Approval queue…).
 function startNewChat(){showView('chat');closePanel();chatNew();closeSide();const ci=$('#chatInput');if(!ci.disabled)ci.focus({preventScroll:true})}

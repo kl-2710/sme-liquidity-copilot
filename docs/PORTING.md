@@ -112,3 +112,9 @@ The workbook is the reference; where the earlier engine differed, the engine fol
 - `itemDetailsHTML(d, item)` replaces `detailTablesHTML` / `detailTablesSimpleHTML` and reuses their rows, priorities and sort keys (`scust` / `slot` / `ssup`); no figure is recomputed. Both modes use the same six columns: Name | Amount | Share | Overdue | Longest Overdue (Days) | Priority. Expert mode puts the former extra columns (labels, debt status, tier, average lateness; lot type, status, collateral; dependency, essential, extension) under the name and keeps the exposure / intervention order of the customers.
 - Lots have no due date: their Overdue and Longest Overdue cells show "—" and the days in stock appear under the lot name.
 - The "Who holds the money" section (widget `tables`) is removed; later sections are renumbered. A saved pin of the old widget is dropped on load (`RETIRED_WIDGETS`). Rows still open the evidence panel, and the "View detailed dashboard" button of the receivables answer opens the Receivables details.
+
+## Suggested questions
+- On an empty chat the suggested questions stay by the composer (`#demoChips`), as before. From the first message on, `#demoChips` is never shown again in that chat.
+- From then on there is a single suggestion row, under the latest answer only (`placeSuggest`). It merges the answer's own items (`suggestRow`, kept on the element as `_sug`), the flow chips (`chipList`) and the next steps (`nextSuggest`), drops duplicates and the question just asked, and holds at most four questions. When a new answer arrives, the row of the previous answer is removed.
+- New chat goes back to the empty state with the chips by the composer. A chat reopened from history gets a fresh row under its last answer; the stored rows are dropped.
+- Fixed with it: reopening a chat from history threw `applyStage is not defined` (the function was removed with the tab bar).

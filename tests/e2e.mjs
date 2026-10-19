@@ -579,6 +579,8 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#uSub").innerText(), "Alpha Garment Subcontractor");
     assert.equal(await page.locator(".firmbox").isVisible(), false);
     await page.waitForTimeout(400);
+    assert.equal(await page.locator("#demoChips").isVisible(), true, "an empty chat shows the suggested questions by the composer");
+    assert.equal(await page.locator(".messages.on .suggest").count(), 0);
     await shot(page, `${theme}-flow`);
   });
   await step(`[${theme}] one sidebar toggle moves between sidebar and chat header`, async () => {
@@ -617,15 +619,18 @@ for (const theme of ["light", "dark"]) {
     assert.match(t, /diagnose_working_capital/); assert.match(t, /41[.,]1/);
     assert.equal(await last().locator(".ans5 > p").count(), 5); assert.match(t, /1\. Overall conclusion\..*5\. What to check and the limits\./s); assert.match(t, /Tools used: diagnose_working_capital/);
   });
-  await step(`[${theme}] Task 2 explains every gap; chips stay visible after the 2nd message`, async () => {
+  await step(`[${theme}] Task 2 explains every gap; suggestions sit only under the latest answer`, async () => {
     await ask("Why am I short of cash? Show me the contributing factors.");
     const acc = last().locator(".gap-acc");
     assert.equal(await acc.count(), 4, "one contributing-factors card per gap");
     assert.equal(await last().locator(".ans4 > p").count(), 4); assert.match(await last().innerText(), /Tools used: forecast_cash/); assert.match(await last().innerText(), /forecast_cash/);
     assert.deepEqual(await acc.evaluateAll((els) => els.filter((e) => e.open).map((e) => e.dataset.gap)), ["4"], "largest gap open");
-    assert.equal(await page.locator("#demoChips").isVisible(), true);
-    const chips = await page.locator("#demoChips button").count();
-    assert.ok(chips > 0 && chips <= 4, `chips: ${chips}`);
+    assert.equal(await page.locator("#demoChips").isVisible(), false, "no chips by the composer after the first message");
+    assert.equal(await page.locator(".messages.on .suggest").count(), 1, "one suggestion row in the whole chat");
+    const chips = await last().locator(".suggest button").allInnerTexts();
+    assert.ok(chips.length > 0 && chips.length <= 4, `chips: ${chips}`);
+    assert.equal(new Set(chips.map((c) => c.toLowerCase())).size, chips.length, "no duplicate suggestions");
+    assert.ok(!chips.includes("Why am I short of cash? Show me the contributing factors."), "the question just asked is not suggested again");
   });
   await step(`[${theme}] Open on the UC02 answer shows only Shortfall, on the gap clicked`, async () => {
     const btn = last().locator("[data-gap-open]").last();
@@ -647,7 +652,8 @@ for (const theme of ["light", "dark"]) {
     assert.match(await card.innerText(), /scenario B2/);
     assert.match(await last().innerText(), /match_financing/);
     assert.doesNotMatch(await page.locator(".messages.on").innerText(), /forecast_liquidity|rank_financing|explain_liquidity_case|get_receivables/);
-    assert.equal(await page.locator("#demoChips").isVisible(), true);
+    assert.equal(await page.locator("#demoChips").isVisible(), false);
+    assert.equal(await page.locator(".messages.on .suggest").count(), 1); assert.equal(await last().locator(".suggest").count(), 1);
   });
   await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
     await ask("Explain gap 3");
@@ -756,6 +762,15 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator(".messages.on .flow-divider").count(), 0);
     assert.equal(await page.evaluate(() => S.firm), "F01");
     assert.equal(await page.locator("#uSub").innerText(), "Alpha Garment Subcontractor");
+    assert.equal(await page.locator("#demoChips").isVisible(), true, "New chat brings the chips back by the composer");
+    assert.equal(await page.locator(".messages.on .suggest").count(), 0);
+  });
+  await step(`[${theme}] a chat reopened from history has its suggestions under the last answer`, async () => {
+    await page.locator(".chat-row .chat-open").nth(1).click(); await page.waitForTimeout(600);
+    assert.equal(await page.locator("#demoChips").isVisible(), false);
+    assert.equal(await page.locator(".messages.on .suggest").count(), 1);
+    assert.equal(await page.evaluate(() => { const b = [...document.querySelectorAll(".messages.on .msg.bot")].pop(); return !!b.querySelector(".suggest") && !b.querySelector(".suggest button:disabled"); }), true);
+    await page.click("#newChat"); await page.waitForTimeout(500);
   });
   if (theme === "light") await step("file registry supports import, search, filters, sorting and safe deletion", async () => {
     await page.click('[data-view="data"]');
