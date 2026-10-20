@@ -1137,3 +1137,39 @@ html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
 .u34 .table-wrap{overflow-x:auto;max-width:100%}
 .u34-tiles{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
 .u34 table{min-width:0}.u34 .dtable td,.u34 .dtable th{word-break:normal}
+
+/* ===== Roles and the Approval queue (SRS v2.10 2.10.9.11) ===== */
+.role-pill{display:inline-block;margin-top:2px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.2px;background:var(--lc-color-bg-selected);color:var(--lc-color-text-link)}
+.role-pill[data-role="accountant"]{background:var(--lc-color-status-info-bg);color:var(--lc-color-status-info)}
+.nbadge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--lc-color-action-primary);color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.nbadge[hidden]{display:none}
+#btnDemoAcc{margin-top:8px}#btnDemo small{font-weight:500;opacity:.75}
+.ap-head h3{margin:0 0 2px;font-size:16px}.ap-rule{margin:0 0 6px;font-weight:600;color:var(--lc-color-text-primary)}
+.ap-role{margin:0 0 8px;font-size:12.5px;color:var(--lc-color-text-secondary)}
+.ap-notice{margin:0 0 12px}.ap-notice2{margin:10px 0 0;font-size:12px;color:var(--lc-color-text-secondary)}
+.ap-notes{border:1px solid var(--lc-color-border-default);border-radius:12px;padding:8px 12px;margin:0 0 12px;background:var(--lc-color-bg-surface)}
+.ap-notes p{margin:2px 0;font-size:12.5px}.ap-notes small{color:var(--lc-color-text-secondary)}
+.ap-props{padding:12px 14px;margin:0 0 12px}.ap-props h4{margin:0 0 6px;font-size:13.5px}.ap-props ul{margin:0;padding-left:18px;font-size:12.5px}
+.ap-props li{margin:4px 0}.ap-acts{display:inline-flex;gap:6px;margin-left:8px;flex-wrap:wrap}
+.ap-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.ap-tabs button{font:inherit;font-size:12.5px;padding:6px 12px;border-radius:999px;border:1px solid var(--lc-color-border-default);background:var(--lc-color-bg-surface);color:var(--lc-color-text-secondary);cursor:pointer}
+.ap-tabs button b{margin-left:4px;color:var(--lc-color-text-primary)}
+.ap-tabs button.on{background:var(--lc-color-bg-selected);border-color:var(--lc-color-action-primary);color:var(--lc-color-text-primary);font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.ap-list tbody tr{cursor:pointer}.ap-list tbody tr.on{background:var(--lc-color-bg-selected)}
+.ap-list td small{display:block;color:var(--lc-color-text-secondary);font-size:11.5px}
+.ap-st{font-weight:700;font-size:12px}.ap-st::before{content:"● "}
+.ap-st.st-pending{color:var(--lc-color-alert-orange)}.ap-st.st-executed{color:var(--lc-color-status-success)}.ap-st.st-rejected{color:var(--lc-color-text-secondary)}.ap-st.st-blocked{color:var(--lc-color-status-error)}
+.ap-empty{padding:28px 12px;text-align:center}
+.ap-detail{margin-top:14px;padding:14px 16px}
+.ap-dh{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.ap-dh h4{margin:0;font-size:15px}.ap-dh p{margin:4px 0 0;font-size:12.5px;color:var(--lc-color-text-secondary)}
+.ap-text{margin:12px 0;padding:12px 14px;border:1px solid var(--lc-color-border-default);border-radius:12px;background:var(--lc-color-bg-subtle,var(--lc-color-bg-surface));font-size:13.5px;line-height:1.6}
+.ap-text p{margin:0 0 8px}.ap-note{font-style:italic}.ap-mand{font-size:12.5px;margin-top:10px!important}
+mark.lock{background:var(--lc-color-bg-selected);color:inherit;border-radius:4px;padding:0 3px;box-shadow:inset 0 -1px 0 var(--lc-color-action-primary)}
+.ap-detail h5{margin:12px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--lc-color-text-secondary)}
+.ap-att,.ap-sum{font-size:12.5px}.ap-att tr.tot td{font-weight:700}
+.ap-detail .table-wrap,.ap-detail table{max-width:100%}.ap-detail table{display:block;overflow-x:auto}
+.ap-more{margin:10px 0}.ap-more summary{cursor:pointer;font-size:12.5px;font-weight:600}
+.ap-checks,.ap-hist{margin:8px 0;padding-left:20px;font-size:12.5px}.ap-checks li{list-style:none;margin-left:-18px}.ap-checks li.bad{color:var(--lc-color-status-error)}
+.ap-checks small{color:var(--lc-color-text-secondary)}
+.ap-detail .ap-acts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 0}
+.ap-card .liq-act{margin-top:8px}

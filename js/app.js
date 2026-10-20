@@ -68,13 +68,26 @@ function setDefaultGap(c){const eps=episodes(c);if(eps.length){const ended=eps.f
 /* Company policy store: owner declarations and approved settings, one versioned record per account and company.
    Every change bumps the version, so results computed with an older version are no longer reused (they are stale). */
 const POLICY={
-  key:f=>`lilact.policy.v1.${(S.user&&S.user.id)||'anon'}.${f}`,
+  // One configuration per enterprise, shared by its Business Owner and Accountant (key = enterprise scope of the session).
+  key:f=>`lilact.policy.v2.${((typeof API!=='undefined'&&API.session())||{}).scope||'anon'}.${f}`,
   get(f=S.firm){try{return JSON.parse(localStorage.getItem(this.key(f))||'null')||{version:0}}catch(e){return {version:0}}},
-  set(f,patch,reason){const p=this.get(f),v=(p.version||0)+1,at=new Date().toISOString();
+  // Only a confirmation by the Business Owner changes the configuration; the API checks the role of the session at the time of writing.
+  set(f,patch,reason){const ok=API.call('policy.confirm',{});if(!ok.ok){toast(ok.message);return this.get(f)}const p=this.get(f),v=(p.version||0)+1,at=new Date().toISOString();
     const n={...p,...patch,version:v,updatedAt:at,history:[...(p.history||[]),{version:v,at,patch,reason:reason||null}].slice(-20)};
     try{localStorage.setItem(this.key(f),JSON.stringify(n))}catch(e){toast('Could not save the setting: browser storage is full or blocked');return p}
     return n},
-  versionId(f=S.firm){return `CFG-${f}-v${this.get(f).version||0}`}
+  versionId(f=S.firm){return `CFG-${f}-v${this.get(f).version||0}`},
+  // UC01.4 / UC02.3: the Business Owner confirms directly; an Accountant's change is stored as a proposal for the owner (Table 3-3).
+  pkey:()=>`lilact.policyprops.v1.${(API.session()||{}).scope||'anon'}`,
+  proposals(){try{return JSON.parse(localStorage.getItem(this.pkey())||'[]')}catch(e){return []}},
+  submit(f,patch,reason,what){
+    const s=API.session();if(!s)return {applied:false};
+    if(s.role==='owner'){const r=API.confirmPolicy(what,()=>this.set(f,patch,reason));return {applied:r.ok,msg:r.message}}
+    const all=this.proposals(),r=API.propose(what,()=>{all.push({id:'CP-'+(all.length+1),firm:f,what,patch,reason,by:s.user.name,role:s.role,at:new Date().toISOString(),status:'pending'});localStorage.setItem(this.pkey(),JSON.stringify(all))});
+    return {applied:false,proposed:r.ok,msg:r.ok?'Proposal sent to the Business Owner for confirmation (Approval queue).':r.message}},
+  decide(id,confirm,comment){const all=this.proposals(),p=all.find(x=>x.id===id);if(!p||p.status!=='pending')return {ok:false,message:'Proposal not found or already decided.'};
+    const r=API.confirmPolicy(p.what+(confirm?'':':return'),()=>{if(confirm)this.set(p.firm,p.patch,p.reason+' (proposed by '+p.by+')');p.status=confirm?'confirmed':'returned';p.decided_at=new Date().toISOString();p.comment=comment||null;localStorage.setItem(this.pkey(),JSON.stringify(all))});
+    return r}
 };
 // Results are kept per (snapshot, formula version, configuration version): asking again reuses the stored run (BR-02.28, Q70).
 const RUNS=new Map();
@@ -548,7 +561,8 @@ function openCash0Form(){
       const differs=!ref||[rmin,rt,rup].some((x,i)=>Math.abs(x-[ref.rmin,ref.rtarget,ref.rupper][i])>1);
       if((differs&&reason.length<10)||reason.length>500){err.textContent=t('pol.reason.err');return}
       const md=(m.querySelector('input[name=c0m]:checked')||{}).value||'direct',ess=[...m.querySelectorAll('.c0s input:checked')].map(x=>x.value);
-      POLICY.set(f,{cash0:tot==null?null:{total:tot,restricted:res,confirmed:true},reserve:{method:md,rmin,rtarget:rt,rupper:rup,reason},amount_basis:q('#c0Basis').value,vat_rate:vat==null?null:vat/100,essential_suppliers:ess},reason);
+      const sub=POLICY.submit(f,{cash0:tot==null?null:{total:tot,restricted:res,confirmed:true},reserve:{method:md,rmin,rtarget:rt,rupper:rup,reason},amount_basis:q('#c0Basis').value,vat_rate:vat==null?null:vat/100,essential_suppliers:ess},reason,'cash0_and_levels');
+      if(!sub.applied){if(sub.proposed){closeModal();toast(sub.msg);updatePending()}else err.textContent=sub.msg||'';return}
       closeModal();policyCases(f);S.gapRequest=null;S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();
       toast(tx('c0.saved',{v:POLICY.versionId(f)}));refreshTab();renderDemoChips()};
   });
@@ -599,7 +613,10 @@ function placeSuggest(bot=lastBot()){
 }
 
 // UC03 / UC04 chat guards (UC03.2 A1, UC04.3 A2, UC04.6, UC03.4 A1).
-const RE_EXEC=/\b(send|submit|sign|execute|approve|transfer|disburse|wire)\b|apply for (the|a) (loan|financing)|\bdraft\b/i;
+const RE_EXEC=/\b(send|submit|sign|execute|transfer|disburse|wire)\b|apply for (the|a) (loan|financing)/i;
+// UC04.6 A6: the chat may prepare a draft through create_action_draft but never approves, rejects or sends one.
+const RE_APPROVE=/\b(approve|reject|confirm)\b[^.?!]*\b(draft|action|request|reminder|application)\b|\bapprove (it|this|that)\b/i;
+const RE_DRAFT=/\b(create|prepare|make|write|draft)\b[^.?!]*\b(draft|reminder|request|application|letter)\b|\bnext step\b/i;
 const RE_E30=/interest[^.?!]*(sav|save|cheaper|lower)|sav(e|ing|ings)[^.?!]*interest/i;
 const RE_REORDER=/(put|move|rank|place|prioriti[sz]e|switch|swap|change|reorder)[^.?!]*(loan|borrow|bank|financ|order|priorit|group)[^.?!]*(first|before|ahead|top|instead|order)|reorder|re-order|change the (priority|order)/i;
 const RE_OVERRIDE=/(use|include|allow)[^.?!]*(anyway|even though|despite|regardless)|override[^.?!]*(check|exclusion|rule)/i;
@@ -611,6 +628,8 @@ function routeBase(raw){
   const known=new Set([...CAT.map(c=>c.id),...(((DATA.uc03||{})[S.firm]||{}).products||[]).map(p=>p.id)]);
   const prods=(noInv.match(/\b[A-Z]{2,4}-\d{1,3}\b/g)||[]).filter(x=>!known.has(x));
   if(prods.length||/bank\s*z\b|outside (the )?catalogue|not in (the )?catalogue/i.test(t))return {type:'block',kind:'product',ref:prods[0]||'Bank Z'};
+  if(RE_APPROVE.test(t))return {type:'approve'};
+  if(RE_DRAFT.test(t)&&!/\b(send|sign|transfer|disburse|wire)\b/i.test(t))return {type:'draft',hint:low};
   if(RE_EXEC.test(t))return {type:'exec'};
   if(RE_E30.test(t))return {type:'e30'};
   if(RE_REORDER.test(t))return {type:'reorder'};
@@ -661,6 +680,8 @@ async function respond(r,text){
     else suggestRow(bot,nextSuggest());
     return;
   }
+  if(r.type==='approve'){await respondApproveRefusal(bot);return}
+  if(r.type==='draft'){await respondDraft(bot,r.hint);return}
   if(r.type==='policy'){await respondPolicy(bot,r);return}
   if(r.type==='causal'){await respondCausal(bot,text);return}
   if(r.type==='scope'){await respondScope(bot,r);return}
@@ -687,8 +708,29 @@ async function respond(r,text){
   suggestRow(bot,nextSuggest());
 }
 async function runWhatIfInChat(bot,rows,label){
-  await toolCall(bot,'simulate_scenario',0,{firm_id:S.firm,levers:rows.filter(x=>x.on).map(x=>x.lever)},()=>({}),{ms:420});
-  await U34.chatWhatIf(bot,rows,label);advance(4,bot);renderDemoChips();suggestRow(bot,nextSuggest());
+  const chk=API.tool('simulate_scenario',{changes:rows});if(!chk.ok){await say(bot,`<p>${esc(chk.message)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
+  await toolCall(bot,'simulate_scenario',0,{levers:rows.filter(x=>x.on).map(x=>x.lever)},()=>({}),{ms:420});
+  await U34.chatWhatIf(bot,rows,label);advance(4,bot);renderDemoChips();
+  // After a test, the follow-up step can be prepared as a draft for the Approval queue (FR-G-07); only supported action types are offered.
+  const run=(U34.sims().runs||[])[0];suggestRow(bot,[...(run?draftChips(run):[]),...nextSuggest()]);
+}
+async function respondApproveRefusal(bot){
+  const s=API.session();addLog({tool:'chat_guard',args:{request:'approve'},status:'blocked',summary:'approval through the chat refused'});
+  await say(bot,`<p>I can’t approve, reject or send a draft from the chat. ${s&&s.role==='owner'?'As the Business Owner you decide in the Approval queue, after confirming your identity.':'Only the Business Owner can decide, in the Approval queue.'} An approval records a simulated action only; nothing is sent outside the application.</p>`,'warn');
+  suggestRow(bot,[{t:'Open the Approval queue',f:()=>openDetail('appr')}]);
+}
+// create_action_draft (Table 3-7): the chat chooses the action type and target from the latest test; the API builds and checks the draft.
+async function respondDraft(bot,hint=''){
+  const chk=API.tool('create_action_draft',{});if(!chk.ok){await say(bot,`<p>${esc(chk.message)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
+  const run=(U34.sims().runs||[]).find(r=>r.status==='ok');
+  if(!run){await say(bot,'<p>A draft is prepared only from a saved what-if test. Let’s test a lever first.</p>');suggestRow(bot,nextSuggest());return}
+  let acts=API.actionsFor(run);
+  const want=/remind|earl|customer|collect/.test(hint)?'payment_reminder':/extens|supplier|defer|later/.test(hint)?'term_extension_request':/applica|financ|factor|discount/.test(hint)?'financing_application':null;
+  if(want)acts=acts.filter(a=>a.type===want);
+  if(!acts.length){await say(bot,`<p>${/stock|inventory|sell/.test(hint)?'Selling stock has no draft type in this version.':'The latest test has no lever that supports this kind of draft.'} Supported drafts: an earlier-settlement reminder to a customer (early collection), an extension request to a supplier (supplier extension) and a financing application (early collection transferred from a catalogue product in Solutions).</p>`);suggestRow(bot,nextSuggest());return}
+  if(acts.length>1&&!want){await say(bot,'<p>Which follow-up should I prepare as a draft? Each one goes to the Approval queue; nothing is sent.</p>');suggestRow(bot,draftChips(run));return}
+  await toolCall(bot,'create_action_draft',0,{test_id:run.sim_run_id,action_type:acts[0].type,target_id:acts[0].target.id},()=>({}),{ms:380});
+  createDraftFromTest(run,acts[0],{bot});
 }
 async function respondSolutions(bot){
   const ans=U34.solutionsAnswer(),m=ans.match;
@@ -768,11 +810,11 @@ function showView(view,{tab}={}){
   if(tab)openDetail(tab);else syncViewNav();
 }
 function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?S.view==='data':S.view==='chat'&&S.panel&&b.dataset.view===S.detail))}
-function renderTab(){({dash:renderDash,gap:renderGap,sol:U34.renderSolutions,whatif:U34.renderWhatIf})[S.detail]()}
+function renderTab(){({dash:renderDash,gap:renderGap,sol:U34.renderSolutions,whatif:U34.renderWhatIf,appr:renderAppr})[S.detail]()}
 function refreshTab(){if(S.panel)renderTab()}
 // One detail view at a time (Dashboard / Shortfall / Solutions / What-if). It opens from the "Open…" button of a chat answer or,
 // for Solutions and What-if, directly from the sidebar (they prepare their own UC01/UC02 results); the panel has no tabs.
-const DETAIL_TITLES={dash:'Dashboard',gap:'Shortfall',sol:'Solutions',whatif:'What-if'};
+const DETAIL_TITLES={dash:'Dashboard',gap:'Shortfall',sol:'Solutions',whatif:'What-if',appr:'Approvals'};
 function openDetail(view,opts={}){
   if(view==='data'){openDataScreen('files');return}
   if(!$('#dataScreen').hidden)closeDataScreen(); // the detail panel lives inside the chat workspace, so show it first
@@ -1005,9 +1047,12 @@ async function doLogin(email,pw,remember){
 }
 $('#formLogin').addEventListener('submit',e=>{e.preventDefault();doLogin($('#liEmail').value,$('#liPw').value,$('#liRemember').checked)});
 $('#btnDemo').onclick=()=>{$('#liEmail').value=DEMO.email;$('#liPw').value=DEMO.pw;doLogin(DEMO.email,DEMO.pw,true)};
-const DEMO={email:'demo@smecopilot.vn',pw:'Demo@2026',name:'Minh Anh',company:'Alpha Garment Subcontractor',firmId:'F01'};
-// One account = one company. Each demo account is tied to one sample company.
-const DEMOS=[DEMO];
+$('#btnDemoAcc').onclick=()=>{$('#liEmail').value=DEMO_ACC.email;$('#liPw').value=DEMO_ACC.pw;doLogin(DEMO_ACC.email,DEMO_ACC.pw,true)};
+// One account = one company. The two demo accounts share the sample company F01: its Business Owner and its Accountant
+// (SRS 2.1, Table 3-3). The role is stored on the account; nothing in the interface can change it.
+const DEMO={email:'demo@smecopilot.vn',pw:'Demo@2026',name:'Minh Anh',company:'Alpha Garment Subcontractor',firmId:'F01',role:'owner',id:'u-demo'};
+const DEMO_ACC={email:'accountant.demo@smecopilot.vn',pw:'Demo@2026',name:'Thu Ha',company:'Alpha Garment Subcontractor',firmId:'F01',role:'accountant',id:'u-demo-acc'};
+const DEMOS=[DEMO,DEMO_ACC];
 const RETIRED_DEMOS=['beta.demo@smecopilot.vn','gamma.demo@smecopilot.vn']; // demo accounts of the removed sample companies F02/F03
 
 $('#formReg').addEventListener('submit',async e=>{
@@ -1026,7 +1071,7 @@ $('#formReg').addEventListener('submit',async e=>{
   const taxDigits=taxCode.replace(/\D/g,'');if(users().some(u=>String(u.taxCode||'').replace(/\D/g,'')===taxDigits)){setErr('rgTaxE','This tax code is already registered');$('#rgTax').focus();return}
   const btn=$('#rgSubmit');btn.disabled=true;btn.textContent='Creating…';
   try{
-    const sl=salt(),u={id:'u'+Date.now().toString(36),name,company,taxCode:taxDigits,email,salt:sl,hash:await hashPw(pw,sl),created:new Date().toISOString()};
+    const sl=salt(),u={id:'u'+Date.now().toString(36),name,company,taxCode:taxDigits,email,role:'owner',salt:sl,hash:await hashPw(pw,sl),created:new Date().toISOString()};
     const all=users();all.push(u);saveUsers(all);persistSession(u,true);f.reset();$('#pwMeter').dataset.s=0;enterApp(u,{fresh:true});
   }finally{btn.disabled=false;btn.textContent='Create an account'}
 });
@@ -1060,12 +1105,16 @@ let booted=false;
 function enterApp(u,{fresh,restore}={}){
   S.user=u;syncUserFirms();
   $('#authRoot').hidden=true;$('#app').hidden=false;document.title='Lilact · SME Liquidity Copilot';
-  $('#uAvatar').textContent=initials(u.name);$('#uName').textContent=u.name;$('#uSub').textContent=u.company||u.email;
+  $('#uAvatar').textContent=initials(u.name);$('#uName').textContent=u.name;$('#uSub').textContent=u.company||u.email;applyRole(u);
   $('#umName').textContent=u.name||'Business owner';$('#umEmail').textContent=u.email||'';$('#umCompany').textContent=u.company||'';$('#umTax').textContent=u.taxCode?`Tax code ${u.taxCode}`:'';
   if(!booted){booted=true;bootApp()}else{resetSession();switchContext('F01','base')}
   setTask('tv1',{force:true});
 if(!restore)toast(fresh?`Welcome ${userFirst()}! Your account has been created.`:`Hello ${userFirst()}, you are signed in.`);
 }
+// The role shown comes from the account record (API.session), never from a control on the screen.
+function applyRole(u=S.user){const r=(API.session()||{}).role||'owner',lbl=API.ROLES[r];
+  const b=$('#uRole');if(b){b.textContent=lbl;b.dataset.role=r}$('#app').dataset.role=r;
+  $('#umRole')&&($('#umRole').textContent=`Role: ${lbl}`);if(typeof updatePending==='function')updatePending()}
 function resetSession(){
   S.log=[];S.done=new Set();S.seq=0;closePanel();
   addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of '+fd(DATA.raw.F01.snapshot.as_of)});
@@ -2019,7 +2068,9 @@ function openPolicy(){
     m.querySelector('.settings-close').onclick=m.querySelector('#polCancel').onclick=closeModal;
     m.querySelector('#polSave').onclick=()=>{const r=m.querySelector('#polReason').value.trim();
       if(r.length<10||r.length>500){m.querySelector('#polErr').textContent=t('pol.reason.err');return}
-      POLICY.set(f,{business_model:ms.value,materiality:+mt.value},r);closeModal();toast(t('pol.saved',{v:POLICY.versionId(f)}));refreshTab()};
+      const sub=POLICY.submit(f,{business_model:ms.value,materiality:+mt.value},r,'threshold_policy');
+      if(!sub.applied){if(sub.proposed){closeModal();toast(sub.msg);updatePending()}else m.querySelector('#polErr').textContent=sub.msg||'';return}
+      closeModal();toast(t('pol.saved',{v:POLICY.versionId(f)}));refreshTab()};
   });
 }
 function uc01SelChange(asOf,start){
@@ -2264,7 +2315,7 @@ function openSettings(section='General',query=''){
  if(sel==='Privacy')content=`<h2>Privacy</h2><p>Your data is stored in this browser. Copilot provides analysis and simulation only; decisions and actions happen outside the app.</p><section class="settings-block"><button class="btn sec" id="clearChats">Clear chat history</button></section><section class="settings-block"><button class="btn sec" id="clearFiles">Delete all uploaded files</button><p>Data already used in your analysis is kept.</p></section><button class="btn sec" id="exportData">Export my data</button>`;
  if(sel==='Billing')content='<h2>Billing</h2><section class="settings-block billing-card"><b>Current plan: Demo (free)</b><p>Billing is not available in this demo.</p></section>';
  if(sel==='Usage')content='<h2>Usage</h2><p>Counted in this browser only</p><div id="usageStats" class="usage-stats"><p>Loading local usage...</p></div>';
- openModal(`<div class="settings-shell"><aside class="settings-nav"><label class="settings-search"><input id="settingsSearch" placeholder="Search settings" value="${esc(query)}"></label><nav>${names.slice(0,5).map(n=>`<button data-section="${n}" class="${n===sel?'on':''}">${n}</button>`).join('')}<div class="settings-nav-rule"></div><button class="settings-logout" data-section="Log out">Log out</button></nav></aside><section class="settings-content"><button class="settings-close" aria-label="Close settings">×</button><button class="settings-back">← Back</button><div class="settings-no-results" hidden>No settings match</div><div class="settings-body">${content}</div></section></div>`,m=>{const shell=m.querySelector('.settings-shell'),reopen=(s=sel,v='')=>openSettings(s,v);m.querySelector('.settings-close').onclick=closeModal;m.querySelector('.settings-back').onclick=()=>shell.classList.remove('content-open');if(innerWidth<=600)shell.classList.add('content-open');m.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>b.dataset.section==='Log out'?confirmAction('Log out?','Return to sign in?',()=>{closeModal();leaveApp()}):reopen(b.dataset.section));m.querySelector('#settingsSearch').oninput=e=>{const v=e.target.value.toLowerCase(),n=names.slice(0,5).find(x=>x.toLowerCase().includes(v)||(fields[x]||[]).some(y=>y.toLowerCase().includes(v)));if(!v){m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;return}if(!n){m.querySelector('.settings-no-results').hidden=false;m.querySelector('.settings-body').hidden=true}else{m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;if(n!==sel){const pos=e.target.selectionStart;reopen(n,v);requestAnimationFrame(()=>{const input=document.querySelector('#settingsSearch');if(input){input.focus();input.setSelectionRange(pos,pos)}})}}};m.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{PREF.theme=b.dataset.theme;savePrefs();reopen('General')});m.querySelectorAll('[data-density]').forEach(b=>b.onclick=()=>{PREF.density=b.dataset.density;savePrefs();reopen('General')});const bm=m.querySelector('#bizModel');if(bm){const f=accountFirm()||S.firm,pm=POLICY.get(f).business_model;bm.value=pm||(DATA.snaps[f]&&DATA.snaps[f].firm.business_model)||'undeclared';bm.onchange=()=>{POLICY.set(f,{business_model:bm.value},'Business model declared in Settings');refreshTab();toast('Business model saved')}}const motion=m.querySelector('#settingsMotion');if(motion)motion.onchange=()=>{PREF.motion=motion.checked;savePrefs()};const reset=m.querySelector('#resetSettings');if(reset)reset.onclick=()=>{Object.assign(PREF,{theme:'light',density:'comfy',motion:true});savePrefs();reopen('General')};const pf=m.querySelector('#profileForm');if(pf)pf.onsubmit=e=>{e.preventDefault();const all=users(),i=all.findIndex(x=>x.id===u.id);all[i].name=pf.elements.name.value.trim()||u.name;all[i].company=pf.elements.company.value.trim()||u.company;saveUsers(all);S.user=all[i];renameAccountCompany(all[i]);$('#uName').textContent=u.name;$('#umName').textContent=u.name;$('#umCompany').textContent=u.company;toast('Profile updated');reopen('Account')};const pw=m.querySelector('#changePw');if(pw)pw.onsubmit=async e=>{e.preventDefault();const all=users(),x=all.find(v=>v.id===u.id),err=m.querySelector('#pwError');if(await hashPw(pw.elements.old.value,x.salt)!==x.hash){err.textContent='Current password is incorrect';return}if(pwRuleErrors(pw.elements.new.value).length){err.textContent='Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character';return}if(pw.elements.new.value!==pw.elements.confirm.value){err.textContent='Passwords do not match';return}x.salt=salt();x.hash=await hashPw(pw.elements.new.value,x.salt);saveUsers(all);err.textContent='Password changed'};const cl=m.querySelector('#clearChats');if(cl)cl.onclick=()=>confirmAction('Clear chat history?','All saved conversations will be removed from this browser.',()=>{try{localStorage.removeItem(CHAT_KEY())}catch(e){}chats=[];activeChat=null;chatNew();closeModal()});const cf=m.querySelector('#clearFiles');if(cf)cf.onclick=async()=>{const fs=await FILES.list();confirmAction('Delete uploaded files?','Data already used in your analysis is kept.',async()=>{await FILES.remove(fs.map(x=>x.id));addLog({tool:'delete_files',tier:1,args:{count:fs.length},status:'ok',summary:'Deleted uploaded files'});toast('Uploaded files deleted');reopen('Privacy')})};const ex=m.querySelector('#exportData');if(ex)ex.onclick=async()=>{const f=await FILES.list(),safe={account:{id:u.id,name:u.name,company:u.company,email:u.email,taxCode:u.taxCode||null},files:f.map(({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})=>({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})),chats};dlFile('lilact-my-data.json',JSON.stringify(safe,null,2),'application/json')};const del=m.querySelector('#deleteAccount');if(del)del.onclick=()=>confirmAction('Delete account?','Confirm again to delete this account and its browser data.',()=>confirmAction('Confirm account deletion','This permanently removes your local account data.',async()=>{const email=u.email.toLowerCase();saveUsers(users().filter(x=>x.id!==u.id));store.del(DK+email);store.del('smefc.pins.v1.'+email);try{localStorage.removeItem(CHAT_KEY())}catch(e){}const fs=await FILES.list();await FILES.remove(fs.map(x=>x.id));closeModal();leaveApp()}))})
+ openModal(`<div class="settings-shell"><aside class="settings-nav"><label class="settings-search"><input id="settingsSearch" placeholder="Search settings" value="${esc(query)}"></label><nav>${names.slice(0,5).map(n=>`<button data-section="${n}" class="${n===sel?'on':''}">${n}</button>`).join('')}<div class="settings-nav-rule"></div><button class="settings-logout" data-section="Log out">Log out</button></nav></aside><section class="settings-content"><button class="settings-close" aria-label="Close settings">×</button><button class="settings-back">← Back</button><div class="settings-no-results" hidden>No settings match</div><div class="settings-body">${content}</div></section></div>`,m=>{const shell=m.querySelector('.settings-shell'),reopen=(s=sel,v='')=>openSettings(s,v);m.querySelector('.settings-close').onclick=closeModal;m.querySelector('.settings-back').onclick=()=>shell.classList.remove('content-open');if(innerWidth<=600)shell.classList.add('content-open');m.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>b.dataset.section==='Log out'?confirmAction('Log out?','Return to sign in?',()=>{closeModal();leaveApp()}):reopen(b.dataset.section));m.querySelector('#settingsSearch').oninput=e=>{const v=e.target.value.toLowerCase(),n=names.slice(0,5).find(x=>x.toLowerCase().includes(v)||(fields[x]||[]).some(y=>y.toLowerCase().includes(v)));if(!v){m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;return}if(!n){m.querySelector('.settings-no-results').hidden=false;m.querySelector('.settings-body').hidden=true}else{m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;if(n!==sel){const pos=e.target.selectionStart;reopen(n,v);requestAnimationFrame(()=>{const input=document.querySelector('#settingsSearch');if(input){input.focus();input.setSelectionRange(pos,pos)}})}}};m.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{PREF.theme=b.dataset.theme;savePrefs();reopen('General')});m.querySelectorAll('[data-density]').forEach(b=>b.onclick=()=>{PREF.density=b.dataset.density;savePrefs();reopen('General')});const bm=m.querySelector('#bizModel');if(bm){const f=accountFirm()||S.firm,pm=POLICY.get(f).business_model;bm.value=pm||(DATA.snaps[f]&&DATA.snaps[f].firm.business_model)||'undeclared';bm.onchange=()=>{const sub=POLICY.submit(f,{business_model:bm.value},'Business model declared in Settings','business_model');if(sub.applied){refreshTab();toast('Business model saved')}else{toast(sub.msg||'Not saved');bm.value=POLICY.get(f).business_model||'undeclared';updatePending()}}}const motion=m.querySelector('#settingsMotion');if(motion)motion.onchange=()=>{PREF.motion=motion.checked;savePrefs()};const reset=m.querySelector('#resetSettings');if(reset)reset.onclick=()=>{Object.assign(PREF,{theme:'light',density:'comfy',motion:true});savePrefs();reopen('General')};const pf=m.querySelector('#profileForm');if(pf)pf.onsubmit=e=>{e.preventDefault();const all=users(),i=all.findIndex(x=>x.id===u.id);all[i].name=pf.elements.name.value.trim()||u.name;all[i].company=pf.elements.company.value.trim()||u.company;saveUsers(all);S.user=all[i];renameAccountCompany(all[i]);$('#uName').textContent=u.name;$('#umName').textContent=u.name;$('#umCompany').textContent=u.company;toast('Profile updated');reopen('Account')};const pw=m.querySelector('#changePw');if(pw)pw.onsubmit=async e=>{e.preventDefault();const all=users(),x=all.find(v=>v.id===u.id),err=m.querySelector('#pwError');if(await hashPw(pw.elements.old.value,x.salt)!==x.hash){err.textContent='Current password is incorrect';return}if(pwRuleErrors(pw.elements.new.value).length){err.textContent='Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character';return}if(pw.elements.new.value!==pw.elements.confirm.value){err.textContent='Passwords do not match';return}x.salt=salt();x.hash=await hashPw(pw.elements.new.value,x.salt);saveUsers(all);err.textContent='Password changed'};const cl=m.querySelector('#clearChats');if(cl)cl.onclick=()=>confirmAction('Clear chat history?','All saved conversations will be removed from this browser.',()=>{try{localStorage.removeItem(CHAT_KEY())}catch(e){}chats=[];activeChat=null;chatNew();closeModal()});const cf=m.querySelector('#clearFiles');if(cf)cf.onclick=async()=>{const fs=await FILES.list();confirmAction('Delete uploaded files?','Data already used in your analysis is kept.',async()=>{await FILES.remove(fs.map(x=>x.id));addLog({tool:'delete_files',tier:1,args:{count:fs.length},status:'ok',summary:'Deleted uploaded files'});toast('Uploaded files deleted');reopen('Privacy')})};const ex=m.querySelector('#exportData');if(ex)ex.onclick=async()=>{const f=await FILES.list(),safe={account:{id:u.id,name:u.name,company:u.company,email:u.email,taxCode:u.taxCode||null},files:f.map(({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})=>({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})),chats};dlFile('lilact-my-data.json',JSON.stringify(safe,null,2),'application/json')};const del=m.querySelector('#deleteAccount');if(del)del.onclick=()=>confirmAction('Delete account?','Confirm again to delete this account and its browser data.',()=>confirmAction('Confirm account deletion','This permanently removes your local account data.',async()=>{const email=u.email.toLowerCase();saveUsers(users().filter(x=>x.id!==u.id));store.del(DK+email);store.del('smefc.pins.v1.'+email);try{localStorage.removeItem(CHAT_KEY())}catch(e){}const fs=await FILES.list();await FILES.remove(fs.map(x=>x.id));closeModal();leaveApp()}))})
  if(sel==='Usage')void (async()=>{const files=await FILES.list(),d=dstore.load(),snaps=Object.values(d.firms||{}).reduce((n,f)=>n+(f.snaps||[]).length,0),bytes=files.reduce((n,f)=>n+(f.size||0),0),sent=chats.reduce((n,c)=>n+(c.html.match(/class="msg user"/g)||[]).length,0),whatifs=Object.values(U34.sims?{F01:U34.sims()}:{}).reduce((n,x)=>n+x.runs.length,0);const b=document.querySelector('#usageStats');if(b)b.innerHTML='<div><b>'+chats.length+'</b><span>Conversations</span></div><div><b>'+sent+'</b><span>Messages sent</span></div><div><b>'+files.length+' · '+sizeLabel(bytes)+'</b><span>Uploaded files</span></div><div><b>'+snaps+'</b><span>Data updates</span></div><div><b>'+whatifs+'</b><span>What-if runs this session</span></div>'})()
 }
 $('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};
@@ -2299,7 +2350,7 @@ function applyAccountCompany(){
   const u=S.user;if(!u)return;
   const firm=accountFirm(u),noData=!firm;
   $('#app').classList.toggle('no-company-data',noData);
-  $('#uSub').textContent=u.company||u.email;$('#umCompany').textContent=u.company||'';
+  $('#uSub').textContent=u.company||u.email;$('#umCompany').textContent=u.company||'';applyRole(u);
   const ci=$('#chatInput');ci.disabled=noData;ci.placeholder=noData?'Upload your company data to start…':'Ask about your cash, receivables, shortfalls or financing…';
   if(firm&&S.firm!==firm)switchContext(firm,defCase(firm),{silent:true});
 }
@@ -2313,8 +2364,8 @@ async function ensureDemoAccounts(){
   let all=users(),changed=false;
   if(all.some(x=>RETIRED_DEMOS.includes(x.email))){all=all.filter(x=>!RETIRED_DEMOS.includes(x.email));changed=true}
   for(const d of DEMOS){const u=all.find(x=>x.email===d.email);
-    if(!u){const sl=salt();all.push({id:d.firmId==='F01'?'u-demo':'u-demo-'+d.firmId.toLowerCase(),name:d.name,company:d.company,firmId:d.firmId,email:d.email,salt:sl,hash:await hashPw(d.pw,sl),created:new Date().toISOString()});changed=true}
-    else if(u.firmId!==d.firmId||u.company!==d.company){u.firmId=d.firmId;u.company=d.company;changed=true}}
+    if(!u){const sl=salt();all.push({id:d.id,name:d.name,company:d.company,firmId:d.firmId,role:d.role,email:d.email,salt:sl,hash:await hashPw(d.pw,sl),created:new Date().toISOString()});changed=true}
+    else if(u.firmId!==d.firmId||u.company!==d.company||u.role!==d.role){u.firmId=d.firmId;u.company=d.company;u.role=d.role;changed=true}}
   if(changed)saveUsers(all);
 }
 

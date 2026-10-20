@@ -2,7 +2,7 @@
    of the app (uc01(), uc02()); app.js helpers ($, esc, money, openModal, toast, botNote…) are used at call time. Two roles only
    (owner, accountant); the app analyses and simulates, decisions and actions happen outside it (UC04.6). */
 const U34=(()=>{
-  const OUTSIDE='Analysis and simulation only; decide and act outside the app.';
+  const OUTSIDE='Analysis and simulation only. A follow-up can be prepared as a draft for the Approval queue; an approval is recorded as a simulated action and nothing is sent outside the app.';
   const GROUP={O4:'Receivables (AR)',O3:'Inventory release (INV)',O1:'Payables extension (AP)',O2:'Short-term borrowing',I0:'Short-term investment',R0:'Hold as reserve',O0:'Internal funds'};
   const CELL={M1:'Safe + short of cash',M2:'Safe + surplus',M3:'At risk + short of cash',M4:'At risk + surplus',M5:'Severe + short of cash',M6:'Severe + surplus'};
   const W_TXT={W0:'W0 safe',W1:'W1 at risk',W2:'W2 severe bottleneck',unknown:'W not released'};
@@ -16,7 +16,8 @@ const U34=(()=>{
   const CONCL_CLS={full:'green',partial:'amber',none:'gray',worse:'red'};
   const SC_NAME={base:'Base',conservative:'Conservative',positive:'Positive'};
   const store={get(k,d){try{return JSON.parse(localStorage.getItem(k)||'null')??d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-  const keyOf=kind=>`lilact.${kind}.v1.${(S.user&&S.user.id)||'anon'}.${S.firm}`;
+  // Records of the enterprise (proposals, selections), shared by its Business Owner and Accountant and by nobody else.
+  const keyOf=kind=>`lilact.${kind}.v2.${((typeof API!=='undefined'&&API.session())||{}).scope||'anon'}`;
   const flagHTML=(v,L,H)=>{const f=UC0304.dayFlag(v,L,H);return f?`<span class="u34-flag ${f.cls}">${f.label}</span>`:''};
   const cellLabel=c=>c?`${c} · ${CELL[c]}`:'No cell';
   const reasonTxt=c=>REASON[c]||c;
@@ -24,7 +25,8 @@ const U34=(()=>{
   /* ---------- state ---------- */
   // Selection state of UC03 (user exclusions and their versions) and the catalogue proposals (UC03.5), per account and company.
   const SOL={get(){return store.get(keyOf('uc03'),{excluded:{},versions:[],proposals:[],seen:[]})},set(v){store.set(keyOf('uc03'),v)}};
-  const ROLE={get(){return store.get(keyOf('role'),'owner')},set(r){store.set(keyOf('role'),r)}};
+  // The role comes from the signed-in account (API.session); the screen cannot switch it (SRS 3.2.1).
+  const ROLE={get(){return (API.session()||{}).role||'owner'},label(){const s=API.session();return s?`${s.user.name} (${API.ROLES[s.role]})`:'—'}};
   const SIMS={};                       // per firm: {runs:[], cur, rows, prefill, cmp:Set, errors, seq}
   const sims=()=>SIMS[S.firm]||(SIMS[S.firm]={runs:[],cur:null,rows:null,prefill:null,cmp:new Set(),errors:[],seq:0,lastParent:null});
   const CACHE=new Map();
@@ -167,7 +169,8 @@ const U34=(()=>{
       $('#mOk',mm_).onclick=()=>{const r=$('#exReason',mm_).value.trim();if(r.length<3){$('#exReasonE',mm_).textContent='Give a specific reason';return}closeModal();setExcluded(s.id,r,m)}});
   }
   function setExcluded(id,reason,m){
-    const st=SOL.get(),by=ROLE.get()==='owner'?'Owner':'Accountant',at=new Date().toISOString();
+    const ok=API.call('source.exclude',{});if(!ok.ok){toast(ok.message);return}
+    const st=SOL.get(),by=ROLE.label(),at=new Date().toISOString();
     if(reason)st.excluded[id]={reason,by,at};else delete st.excluded[id];
     SOL.set(st);const m2=matchNow();st.versions.push({action:reason?'Not used':'Used again',source_id:id,reason,by,at,match_run_id:m2.meta.match_run_id,from:m.meta.match_run_id});
     SOL.set(st);renderSolutions();toast(reason?`New version saved without ${id}`:`${id} is considered again`);
@@ -180,7 +183,7 @@ const U34=(()=>{
     const rerun=st.seen.filter(x=>x.catalogue_version!==cat.meta.version);
     const rows=cat.products.map(p=>`<tr><td><b>${p.id}</b> ${esc(p.name)} <small class="u34-ill">illustrative</small></td><td>${p.option}</td><td class="num">${pct(p.rate,1)}</td><td class="num">${pct(p.fee_pct,2)}</td><td class="num">${p.dtf}</td><td class="num">${p.hold}</td></tr>`).join('');
     openModal(`<h3>Policy and catalogue</h3>
-      <div class="seg" id="roleSeg" role="group" aria-label="Acting as">${['owner','accountant'].map(r=>`<button type="button" data-role="${r}" class="${role===r?'on':''}">${r==='owner'?'Owner':'Accountant'}</button>`).join('')}</div>
+      <p class="hint" id="roleNote">Signed in as <b>${esc(ROLE.label())}</b>. ${role==='owner'?'You confirm or return proposals.':'You can propose changes with their source; the Business Owner confirms them.'}</p>
       <p class="hint">Priority policy ${UC0304.VERSIONS.priority} and ${UC0304.VERSIONS.matrix} (owner-confirmed). Changing the group order of a cell needs an explicit policy proposal; it is never done by adjusting rank scores.</p>
       <p>Catalogue <b>${esc(cat.meta.version)}</b> · ${cat.meta.status} · valid ${fd(cat.meta.valid_from)} – <b id="catUntil">${fd(cat.meta.valid_until)}</b> · source ${esc(cat.meta.source)} · confirmed by ${esc(cat.meta.confirmed_by)}</p>
       ${cs.expired?`<div class="callout red" id="catWarn"><span>⚠</span><div>Expired: old fees are not used as current offers.</div></div>`:cs.warn?`<div class="callout amber" id="catWarn"><span>⚠</span><div>Expires in ${cs.days_left} days.</div></div>`:''}
@@ -194,7 +197,6 @@ const U34=(()=>{
       <h4>Packages to rerun</h4><ul class="u34-list" id="ppRerun">${rerun.map(x=>`<li>${esc(x.match_run_id)} (${esc(x.cell||'—')}) used ${esc(x.catalogue_version)}</li>`).join('')||'<li>None: every package uses the current catalogue</li>'}</ul>
       <div class="acts"><button class="btn sec" id="mClose" type="button">Close</button></div>`,md=>{
       const fsel=$('#ppField',md),psel=$('#ppProd',md),fill=()=>{fsel.innerHTML=psel.value==='*'?'<option value="valid_until">Valid until</option>':Object.entries(FIELDS).map(([k,[t]])=>`<option value="${k}">${t}</option>`).join('')};fill();psel.onchange=fill;
-      $$('[data-role]',md).forEach(b=>b.onclick=()=>{ROLE.set(b.dataset.role);closeModal();openPolicy()});
       $('#mClose',md).onclick=closeModal;
       $('#ppAdd',md).onclick=()=>{const f=fsel.value,raw=$('#ppVal',md).value.trim(),src=$('#ppSrc',md).value.trim(),err=$('#ppErr',md);let value;
         if(f==='valid_until'){if(!/^\d{4}-\d{2}-\d{2}$/.test(raw)){err.textContent='Enter the date as YYYY-MM-DD';return}value=raw}
@@ -202,10 +204,15 @@ const U34=(()=>{
           if(FIELDS[f][1]===1&&!Number.isInteger(n)){err.textContent='Days must be a whole number';return}if(FIELDS[f][1]===100&&n>=100){err.textContent='Percent must be below 100';return}value=FIELDS[f][1]===100?n/100:n}
         if(src.length<3){err.textContent='Give the source of the change';return}
         if(st.proposals.some(p=>p.status==='pending'&&p.product_id===psel.value&&p.field===f)){err.textContent='A pending proposal for this field already exists';return}
-        st.proposals.push({id:'PP-'+(st.proposals.length+1),product_id:psel.value,field:f,value,display:raw,source:src,effective:$('#ppFrom',md).value||null,by:ROLE.get()==='owner'?'Owner':'Accountant',status:'pending',at:new Date().toISOString()});
-        SOL.set(st);closeModal();openPolicy();toast(ROLE.get()==='owner'?'Proposal saved: confirm it to apply':'Proposal saved: the owner confirms it')};
-      $$('[data-conf]',md).forEach(b=>b.onclick=()=>{if(ROLE.get()!=='owner'){toast('Only the owner confirms');return}const p=st.proposals.find(x=>x.id===b.dataset.conf);p.status='confirmed';p.confirmed_by='Owner';p.confirmed_at=new Date().toISOString();SOL.set(st);closeModal();openPolicy();if(S.detail==='sol')renderSolutions();toast('New catalogue version saved')});
-      $$('[data-ret]',md).forEach(b=>b.onclick=()=>{const p=st.proposals.find(x=>x.id===b.dataset.ret);p.status='returned';p.returned_by='Owner';SOL.set(st);closeModal();openPolicy()});
+        const r=API.propose(`${psel.value}.${f}`,()=>{st.proposals.push({id:'PP-'+(st.proposals.length+1),product_id:psel.value,field:f,value,display:raw,source:src,effective:$('#ppFrom',md).value||null,by:ROLE.label(),status:'pending',at:new Date().toISOString()});SOL.set(st)});
+        if(!r.ok){err.textContent=r.message;return}
+        closeModal();openPolicy();toast(ROLE.get()==='owner'?'Proposal saved: confirm it to apply':'Proposal saved: the Business Owner confirms it')};
+      // Confirmation is checked by the API at the time of writing, not by the visibility of the button.
+      $$('[data-conf]',md).forEach(b=>b.onclick=()=>{const p=st.proposals.find(x=>x.id===b.dataset.conf);
+        const r=API.confirmPolicy(`${p.product_id}.${p.field}`,()=>{p.status='confirmed';p.confirmed_by=ROLE.label();p.confirmed_at=new Date().toISOString();SOL.set(st)});
+        if(!r.ok){toast(r.message);return}closeModal();openPolicy();if(S.detail==='sol')renderSolutions();toast('New catalogue version saved')});
+      $$('[data-ret]',md).forEach(b=>b.onclick=()=>{const p=st.proposals.find(x=>x.id===b.dataset.ret);
+        const r=API.confirmPolicy(`${p.product_id}.${p.field}:return`,()=>{p.status='returned';p.returned_by=ROLE.label();SOL.set(st)});if(!r.ok){toast(r.message);return}closeModal();openPolicy()});
     });
   }
   function exportSolutions(m){
@@ -414,7 +421,7 @@ const U34=(()=>{
   const REFUSE={
     reorder:'The order of the source groups is the owner-confirmed policy for this cell; the chat does not change it. To change it, the owner records an explicit policy proposal under Policy and catalogue; the current policy stays in force until then.',
     e30:'Interest savings from a lower CCC are not computed: that needs a debt model (balances, rates, prepayment terms and fees) that this version does not simulate. The what-if shows cash, gaps, costs and obligations only.',
-    exec:`The app does not send, sign, approve or execute anything. ${OUTSIDE} You can export the results.`,
+    exec:'The app does not send, sign or execute anything. A follow-up can be prepared as a draft in the Approval queue; the Business Owner decides there, and an approval is recorded as a simulated action only. Nothing is sent outside the application.',
     override:'Hard checks (ownership, pledge, strategic or essential counterparty, dispute, catalogue validity) cannot be overridden. Add the missing evidence or correct the data through the data screens instead.'};
   // Chat what-if: the three levers only; a new assumption always creates a new run linked to the previous one (UC04.3 A1).
   function parseWhatIf(text){
