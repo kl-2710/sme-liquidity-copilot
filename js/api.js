@@ -144,10 +144,10 @@ const API=(()=>{
     if(!run||run.status!=='ok')return [];
     const out=[],ch=run.changes||[],opt=new Set(run.option_ids||[]);
     ch.forEach((c,i)=>{
-      if(c.lever==='ar'&&c.mode!=='absolute_date'&&c.days<0){
-        out.push({type:'payment_reminder',change:i,target:{kind:'customer',id:c.customer,label:c.customer}});
-        (DATA.cat||[]).filter(p=>opt.has(p.id)&&PRODUCT_KIND[p.type]).forEach(p=>out.push({type:'financing_application',change:i,target:{kind:'product',id:p.id,label:`${p.id} · ${PRODUCT_KIND[p.type][0]}`}}));
-      }
+      // A reminder states one number of days earlier, so it needs a shift_days test; an application needs the catalogue product the
+      // early collection was transferred from (any date rule: the funds date of each invoice is a tested fact).
+      if(c.lever==='ar'&&c.mode!=='absolute_date'&&c.days<0)out.push({type:'payment_reminder',change:i,target:{kind:'customer',id:c.customer,label:c.customer}});
+      if(c.lever==='ar'&&(c.mode==='absolute_date'||c.days<0))(DATA.cat||[]).filter(p=>opt.has(p.id)&&PRODUCT_KIND[p.type]&&(!c.from||c.from===p.id)).forEach(p=>out.push({type:'financing_application',change:i,target:{kind:'product',id:p.id,label:`${p.id} · ${PRODUCT_KIND[p.type][0]}`}}));
       if(c.lever==='ap'&&c.days>0)out.push({type:'term_extension_request',change:i,target:{kind:'supplier',id:c.supplier,label:c.supplier}});
     });
     return out;

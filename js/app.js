@@ -389,7 +389,7 @@ function openGapRequest(after){
   openModal(`<div class="evid"><button class="settings-close" aria-label="Close">×</button><h3>${tx('gr.title')}</h3><p class="sub">${tx('gr.sub')}</p>${gapRequestHTML(gr)}
     <div class="acts"><button class="btn sec" id="grCancel">${t('pol.cancel')}</button><button class="btn primary" id="grSend">${t('gr.send')}</button></div></div>`,m=>{
     m.querySelector('.settings-close').onclick=m.querySelector('#grCancel').onclick=closeModal;
-    m.querySelector('#grSend').onclick=()=>{S.gapRequest=gr;closeModal();addLog({tool:'match_financing',tier:1,args:{gap_request:gr.request_id},status:'ok',summary:`gap_request ${gr.request_id} sent: need ${gr.need_date}, peak ${Math.round(gr.peak_gap)}`});
+    m.querySelector('#grSend').onclick=()=>{S.gapRequest=gr;closeModal();addLog({tool:'match_liquidity_options',tier:1,args:{gap_request:gr.request_id},status:'ok',summary:`gap_request ${gr.request_id} sent: need ${gr.need_date}, peak ${Math.round(gr.peak_gap)}`});
       toast(t('gr.sent',{id:gr.request_id}));if(after)after(gr)};
   });
 }
@@ -587,24 +587,27 @@ function typeHTML(el,html){
 function newBot(){const e=document.createElement('div');e.className='msg bot';msgs.appendChild(e);return e}
 async function botNote(html,{suggest}={}){const b=newBot();await say(b,html);suggestRow(b,suggest);return b}
 async function say(bot,html,cls=''){const b=document.createElement('div');b.className='bubble '+cls;bot.appendChild(b);await typeHTML(b,html);return b}
+// UX-09: the tool used is named in words in the default view; the canonical tool name (Table 3-7) appears in Expert mode.
+const TOOL_WORDS={diagnose_working_capital:'Checking working capital',forecast_cash:'Forecasting cash',match_liquidity_options:'Finding funding options',simulate_scenario:'Testing the change on your cash flow',create_action_draft:'Preparing a draft'};
 async function toolCall(bot,name,tier,args,work,{ms=650}={}){
   const el=document.createElement('div');el.className='toolchip';
-  el.innerHTML=`<button type="button" aria-expanded="false"><span>⚙</span><code>${name}</code><span class="st"><i class="spin"></i>running…</span></button><pre>${esc(JSON.stringify({tool:name,args},null,2))}</pre>`;
+  el.innerHTML=`<button type="button" aria-expanded="false"><span>⚙</span>${XP()?`<code>${name}</code>`:`<span class="tw">${TOOL_WORDS[name]||'Working on it'}</span>`}<span class="st"><i class="spin"></i>running…</span></button><pre>${esc(JSON.stringify({tool:name,args},null,2))}</pre>`;
   bot.appendChild(el);scroll();
   $('button',el).onclick=()=>{el.classList.toggle('open');$('button',el).setAttribute('aria-expanded',el.classList.contains('open'))};
   await sleep(reduceMotion?0:ms+Math.random()*250);
   const out=work();const bad=out&&out.bad;
   $('.st',el).innerHTML=bad?'<span class="bad">⛔ blocked</span>':'<span class="ok">✓ ok</span>';scroll();return out;
 }
-// Suggested questions. Before the first message of a chat they sit by the composer (#demoChips). From the first message on there is
-// one row only, under the latest answer: that answer's own items, then the flow chips and the next steps, without duplicates;
-// older answers lose their row. suggestRow keeps an answer's own items on the element so the row can be rebuilt later.
+// Suggested questions. Before the first message of a chat they sit by the composer (#demoChips). From the first message on, every
+// answer carries its own row: that answer's own items, then the flow chips and the next steps of the moment, without duplicates and
+// without the question it answered. Clicking one asks it in the same conversation. suggestRow keeps an answer's own items on the element.
 function suggestRow(bot,items){bot._sug=items||[];placeSuggest(bot)}
 const lastBot=()=>{const a=msgs?$$('.msg.bot',msgs).filter(b=>!b.querySelector('.typing')):[];return a[a.length-1]||null};
 function placeSuggest(bot=lastBot()){
-  if(!msgs)return;$$('.suggest',msgs).forEach(x=>x.remove());if(!bot)return;
+  if(!msgs||!bot)return;$$(':scope > .suggest',bot).forEach(x=>x.remove());
   const seen=new Set(),own=[],asks=[],add=(arr,it)=>{const label=typeof it==='string'?it:it&&it.t,k=norm(label||'');if(!k||seen.has(k))return;seen.add(k);arr.push(it)};
-  const asked=$$('.msg.user',msgs).pop();if(asked)seen.add(norm(asked.textContent)); // never suggest the question just asked
+  let asked=bot.previousElementSibling;while(asked&&!asked.classList.contains('user'))asked=asked.previousElementSibling;
+  if(asked)seen.add(norm(asked.textContent)); // never suggest the question this answer replied to
   (bot._sug||[]).forEach(it=>add(own,it));
   if(chatHasMessages()){chipList().filter(c=>!S.done.has(c.id)).forEach(c=>add(asks,c.ask));nextSuggest().forEach(x=>add(asks,x))}
   const items=[...own,...asks.slice(0,Math.max(0,4-own.length))];if(!items.length)return;
@@ -616,7 +619,7 @@ function placeSuggest(bot=lastBot()){
 const RE_EXEC=/\b(send|submit|sign|execute|transfer|disburse|wire)\b|apply for (the|a) (loan|financing)/i;
 // UC04.6 A6: the chat may prepare a draft through create_action_draft but never approves, rejects or sends one.
 const RE_APPROVE=/\b(approve|reject|confirm)\b[^.?!]*\b(draft|action|request|reminder|application)\b|\bapprove (it|this|that)\b/i;
-const RE_DRAFT=/\b(create|prepare|make|write|draft)\b[^.?!]*\b(draft|reminder|request|application|letter)\b|\bnext step\b/i;
+const RE_DRAFT=/\b(create|prepare|make|write|draft)\b[^.?!]*\b(draft|reminder|request|application|letter)\b/i;
 const RE_E30=/interest[^.?!]*(sav|save|cheaper|lower)|sav(e|ing|ings)[^.?!]*interest/i;
 const RE_REORDER=/(put|move|rank|place|prioriti[sz]e|switch|swap|change|reorder)[^.?!]*(loan|borrow|bank|financ|order|priorit|group)[^.?!]*(first|before|ahead|top|instead|order)|reorder|re-order|change the (priority|order)/i;
 const RE_OVERRIDE=/(use|include|allow)[^.?!]*(anyway|even though|despite|regardless)|override[^.?!]*(check|exclusion|rule)/i;
@@ -636,8 +639,9 @@ function routeBase(raw){
   if(RE_OVERRIDE.test(t))return {type:'override'};
   const g=guardRoute(t);if(g)return g;
   if(/\bcompare\b/.test(low)&&/run|what.?if|scenario|option/.test(low))return {type:'cmp'};
+  if(/what happens to my cash( flow)? if i (use|change|follow|apply) (this|the) (plan|option)|test (this|the) plan/.test(low))return {type:'plantest'};
   const rows=U34.parseWhatIf(t);if(rows)return {type:'wi',rows};
-  if(/solution|financ|fund|borrow|loan|option|rank|catalogue|reject|exclud|source|package|priorit|why .*(first|before)/.test(low))return {type:'sol'};
+  if(/solution|financ|fund|borrow|loan|option|rank|catalogue|reject|exclud|source|package|priorit|why .*(first|before)|what (should|can|do) (i|we) do|how (do|can|should) (i|we) (fix|cover|close|solve)|cover the (gap|shortfall)/.test(low))return {type:'sol'};
   if(/concentrat|which customer|receivable|who owes/.test(low))return {type:'conc'};
   if(/liquidity|overview|diagnos|situation|health/.test(low))return {type:'liq'};
   if(/stuck|bottleneck|tied up|locked up/.test(low))return {type:'liq',focus:'stuck'};
@@ -667,7 +671,7 @@ async function respond(r,text){
   const bot=newBot(),c=C();
   if(r.type==='block'){
     const msgs2={firm:[`This session can only view data for <b>${S.firm}</b>. The request to access <b>${r.other}</b> was blocked.`,null,{firm_id:r.other}],
-      product:[`<b>${esc(r.ref)}</b> is not in the illustrative catalogue, so no figures are given.`,'match_financing',{product_id:r.ref}]}[r.kind];
+      product:[`<b>${esc(r.ref)}</b> is not in the illustrative catalogue, so no figures are given.`,'match_liquidity_options',{product_id:r.ref}]}[r.kind];
     if(msgs2[1])await toolCall(bot,msgs2[1],0,msgs2[2],()=>({bad:true}),{ms:380});
     addLog({tool:msgs2[1]||'chat_guard',args:msgs2[2],status:'blocked',summary:msgs2[0].replace(/<[^>]+>/g,''),reason:r.kind});
     await say(bot,msgs2[0],'warn');suggestRow(bot,nextSuggest());return;
@@ -691,13 +695,17 @@ async function respond(r,text){
   }
   // UC03 and UC04 prepare their own UC01/UC02 results (E31): no stage gate for Solutions or What-if.
   {const need=r.type==='gap'||['cash0q','weekq','scenq'].includes(r.type)?1:0;
-   if(S.stage<need){await gateMsg(bot);return}}
+   // FR-G-02: the system prepares UC01 itself; a forecast question is answered without asking the user to run the diagnosis first.
+   if(S.stage<need)advance(need)}
   if(r.type==='cash0q'){await respondCash0Q(bot);return}
   if(r.type==='weekq'){await respondWeekQ(bot);return}
   if(r.type==='scenq'){await respondScenarioQ(bot,text);return}
   if(r.type==='sol'){await respondSolutions(bot);return}
   if(r.type==='sc'){S.done.add(r.sc.id);U34.loadPreset(r.sc);await runWhatIfInChat(bot,U34.sims().rows,r.sc.name);return}
   if(r.type==='wi'){await runWhatIfInChat(bot,r.rows,null);return}
+  if(r.type==='plantest'){const chk=API.tool('simulate_scenario',{});if(!chk.ok){await say(bot,`<p>${esc(chk.message)}</p>`,'warn');return}
+    await toolCall(bot,'simulate_scenario',0,{source:'solutions plan'},()=>({}),{ms:420});const res=await U34.chatPlanTest(bot);if(res)advance(4,bot);renderDemoChips();
+    const run=(U34.sims().runs||[])[0];suggestRow(bot,[...(res&&run?draftChips(run):[]),...nextSuggest()]);return}
   if(r.type==='cmp'){const st=U34.sims(),runs=st.runs.slice(0,2);await say(bot,runs.length<2?'<p>Run at least two what-if tests first, then compare them in What-if.</p>':U34.compareHTML(runs));suggestRow(bot,[{t:'Open What-if →',f:()=>openDetail('whatif')}]);return}
   if(r.type==='wihelp'){await say(bot,`<p>What-if tests three levers on Base, Conservative and Positive: early or late collection from a customer, a supplier extension (with assumed consent) and the sale of an owned lot. Example: <i>“${esc((SCEN()[0]||{ask:'What if K1 pays half of its invoices 7 days early?'}).ask)}”</i></p>`);suggestRow(bot,[{t:'Open What-if →',f:()=>openDetail('whatif')}]);return}
   if(r.type==='gap'){await respondCause(bot,{focus:r.gap});return}
@@ -734,11 +742,11 @@ async function respondDraft(bot,hint=''){
 }
 async function respondSolutions(bot){
   const ans=U34.solutionsAnswer(),m=ans.match;
-  await toolCall(bot,'match_financing',0,{firm_id:S.firm,run_id:m?m.meta.match_run_id:null,matrix_case:m?m.meta.matrix_case:null},()=>{addLog({tool:'match_financing',args:{firm_id:S.firm},status:'ok',summary:m?`${m.meta.matrix_case||'no cell'}: ${m.package?m.package.status:m.route}`:'not ready'});return {}},{ms:420});
+  await toolCall(bot,'match_liquidity_options',0,{firm_id:S.firm,run_id:m?m.meta.match_run_id:null,matrix_case:m?m.meta.matrix_case:null},()=>{addLog({tool:'match_liquidity_options',args:{firm_id:S.firm},status:'ok',summary:m?`${m.meta.matrix_case||'no cell'}: ${m.package?m.package.status:m.route}`:'not ready'});return {}},{ms:420});
   await say(bot,ans.html);
   const card=document.createElement('div');card.className='rcact';card.innerHTML='<button class="btn primary sm" type="button" data-a="sol">Open Solutions →</button>';
   bot.appendChild(card);scroll();$('[data-a=sol]',card).onclick=()=>openDetail('sol');
-  advance(3,bot);suggestRow(bot,nextSuggest());
+  advance(3,bot);suggestRow(bot,[...(m&&m.route==='shortfall'&&m.internal.length?['What happens to my cash flow if I use this plan?']:[]),'Why were some sources excluded?',...nextSuggest()]);
 }
 
 
@@ -779,13 +787,18 @@ function currentChips(){
   return [{id:'f0',ask:t('chip.f0')},{id:'f0b',ask:t('chip.f0b')}];
 }
 const unlockedTask=k=>k===1||(S.stage|0)>=(k===4?3:k);
+// UX-11: a fixed four-step progress bar marks the current step and the next one. It only shows progress; the steps are reached by
+// asking in the chat, not by switching pages.
+const FLOW_STEPS=['Diagnosis','Forecast','Solution','What-if test'];
+function renderFlowBar(){const b=$('#flowBar');if(!b)return;const st=S.stage|0;
+  b.innerHTML=`<ol>${FLOW_STEPS.map((n,i)=>{const k=i+1,cls=k<=st?'done':k===st+1?'next':'';return `<li class="${cls}"${k===st?' aria-current="step"':''}><span class="fb-n">${k<=st?'✓':k}</span>${n}${k===st+1?'<small> · next</small>':''}</li>`}).join('')}</ol>`}
 function advance(n,bot){
-  const previous=S.stage;S.stage=Math.max(S.stage,n);S.task='tv'+n;
+  const previous=S.stage;S.stage=Math.max(S.stage,n);S.task='tv'+n;renderFlowBar();
 
   $('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';
   refreshTab(); // the open detail view keeps its view; only the Open button of another answer changes it
 }
-function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.gapRequest=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';if(S.panel&&(S.detail==='gap'||S.detail==='sol'||S.detail==='whatif'))closePanel()}
+function resetFlow(){setTimeout(renderFlowBar);S.stage=0;S.cause=null;S.causes={};S.gapRequest=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';if(S.panel&&(S.detail==='gap'||S.detail==='sol'||S.detail==='whatif'))closePanel()}
 function userFirst(){const n=(S.user&&S.user.name||'you').trim().split(/\s+/);return n[n.length-1]}
 
 
@@ -2294,7 +2307,7 @@ function chatHasMessages(){return !!msgs?.querySelector('.msg.user')}
 function chatSave(){if(!S.user||!activeChat||!msgs)return;const c=chats.find(x=>x.id===activeChat);if(!c)return;Object.assign(c,{firmId:accountFirm(),case:S.case,updatedAt:Date.now(),stage:S.stage,cause:S.cause,done:[...S.done],html:threadHTML()});chatsWrite();chatRender()}
 function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});msgs=THREADS.tv1;resetFlow();welcome('tv1');activeChat='c'+Date.now().toString(36);chats.unshift({id:activeChat,title:'New chat',firmId:accountFirm(),case:S.case,createdAt:Date.now(),updatedAt:Date.now(),stage:S.stage,cause:null,done:[],html:threadHTML()});chatsWrite();$('#taskTitle').textContent='New chat';chatRender();renderDemoChips()}
 function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button><button class="chat-more" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>{showView('chat');chatRestore(b.closest('.chat-row').dataset.id);closeSide()});box.querySelectorAll('.chat-more').forEach(b=>b.onclick=e=>{e.stopPropagation();openChatMenu(b,chats.find(x=>x.id===b.closest('.chat-row').dataset.id))})}
-function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;if(c.firmId&&FIRMS[c.firmId])switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.suggest',msgs).forEach(x=>x.remove());$$('.rcact button,.liq-act button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
+function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;if(c.firmId&&FIRMS[c.firmId])switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;renderFlowBar();S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.suggest',msgs).forEach(x=>x.remove());$$('.rcact button,.liq-act button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
 function chatLoad(){chats=chatsRead();chatRender();if(chats.length)chatRestore(chats[0].id);else chatNew()}
 // New chat goes straight back to the conversation from any screen (Company data, a detail view…).
 function startNewChat(){showView('chat');closePanel();chatNew();closeSide();const ci=$('#chatInput');if(!ci.disabled)ci.focus({preventScroll:true})}

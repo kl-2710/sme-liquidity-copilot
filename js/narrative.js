@@ -5,7 +5,8 @@ const NARR=(()=>{
   // Phrases the answer must never contain (certainty, causal claims, forecasts presented as facts).
   const BANNED=[/\bcertainly\b/i,/\bguarantee/i,/\bjust need/i,/\bonly need/i,/caused? the (cash )?short(age|fall)/i,
     /closing balance will be/i,/main cause/i,/no (cash|money) problem/i];
-  const tools=list=>`<p class="tools-used">${t('tools.used')}: ${list.join(', ')}</p>`;
+  // UX-09: tools are named in words by default; the canonical names (Table 3-7) appear in Expert mode.
+  const tools=list=>`<p class="tools-used">${t('tools.used')}: ${list.map(n=>typeof XP==='function'&&!XP()&&typeof TOOL_WORDS!=='undefined'&&TOOL_WORDS[n]?TOOL_WORDS[n].toLowerCase():n).join(', ')}</p>`;
   // Fact registry: id → {value, display}. Displays are exactly the strings written in the answer.
   function registry(){const f={};return {f,add:(id,value,display)=>{f[id]={value,display:String(display)};return String(display)}}}
   /* ---------- UC01 · five parts (Table 2-35) ---------- */

@@ -7,6 +7,13 @@ const U34=(()=>{
   const CELL={M1:'Safe + short of cash',M2:'Safe + surplus',M3:'At risk + short of cash',M4:'At risk + surplus',M5:'Severe + short of cash',M6:'Severe + surplus'};
   const W_TXT={W0:'W0 safe',W1:'W1 at risk',W2:'W2 severe bottleneck',unknown:'W not released'};
   const TH_TXT={TH01:'TH01 short of cash',TH02:'TH02 surplus',in_band:'Within the watch band',unknown:'Cash state not released'};
+  // Plain wording of the default view (UX-09): codes such as W1, TH01, M3, O4 or L/Z appear only in Expert mode.
+  const W_PLAIN={W0:'Working capital: safe',W1:'Working capital: at risk',W2:'Working capital: severe bottleneck',unknown:'Working capital: not assessed'};
+  const TH_PLAIN={TH01:'Cash: shortfall ahead',TH02:'Cash: surplus',in_band:'Cash: within the safe band',unknown:'Cash: not assessed'};
+  const G_PLAIN={O4:'Collect receivables earlier',O3:'Sell stock',O1:'Pay suppliers later',O2:'Short-term borrowing',I0:'Short-term investment',R0:'Hold as reserve',O0:'Internal funds'};
+  const CERT={1:'High',2:'Medium',3:'Low'};
+  const xp=()=>typeof XP==='function'&&XP();
+  const SOLF={f:'all',g:'all'};
   const REASON={TOO_SLOW:'Too slow: cash arrives after the need date',STRATEGIC_OR_CRITICAL:'Strategic customer or essential supplier',PLEDGED:'Already pledged',
     NO_PRODUCT_DATA:'No product data',PROGRAM_HEADROOM_EXHAUSTED:'No unused limit',NO_NET_CASH:'Nothing to use in the shortfall window',CATALOGUE_EXPIRED:'Catalogue expired',
     NO_ELIGIBLE_LOT:'No owned lot free of pledge and order constraints',CREATES_LATER_SHORTFALL:'Would create a shortfall on a later date',BELOW_MIN_DRAW:'Too small for the gap',
@@ -54,6 +61,10 @@ const U34=(()=>{
 
   /* ---------- Solutions view (UC03.1 – UC03.6) ---------- */
   function headHTML(m,I){
+    if(!xp()){const pol=m.groups?m.groups.map(g=>`<span class="u34-grp">${G_PLAIN[g]}</span>`).join('<span class="u34-arrow">→</span>'):'';
+      return `<div class="card u34-head"><div class="u34-chips"><span class="status ${I.W==='W2'?'red':I.W==='W1'?'amber':I.W==='W0'?'green':'gray'}">${W_PLAIN[I.W]}</span><span class="status ${I.TH==='TH01'?'red':I.TH==='TH02'?'blue':'gray'}">${TH_PLAIN[I.TH]}</span><span class="status blue">Base scenario</span></div>
+        ${pol?`<p class="u34-pol"><b>Order for your situation:</b> ${pol}. This order is your confirmed policy; it is not changed by scores or chat requests.</p>`:''}
+        ${m.catalogue&&(m.catalogue.expired||m.catalogue.warn)?`<div class="callout ${m.catalogue.expired?'red':'amber'}"><span>⚠</span><div>${m.catalogue.expired?`The financing table expired on ${fd(m.catalogue.valid_until)}: borrowing products are not offered until it is updated.`:`The financing table expires on ${fd(m.catalogue.valid_until)} (${m.catalogue.days_left} days).`}</div></div>`:''}</div>`}
     const pol=m.groups?m.groups.map(g=>`<span class="u34-grp">${g} ${GROUP[g]}</span>`).join('<span class="u34-arrow">→</span>'):'';
     return `<div class="card u34-head"><div class="u34-chips"><span class="status ${I.W==='W2'?'red':I.W==='W1'?'amber':I.W==='W0'?'green':'gray'}">${W_TXT[I.W]}</span>
       <span class="status ${I.TH==='TH01'?'red':I.TH==='TH02'?'blue':'gray'}">${TH_TXT[I.TH]}</span><span class="status blue" id="solCell">${cellLabel(I.cell)}</span></div>
@@ -115,6 +126,60 @@ const U34=(()=>{
       ${m.not_simulated.length?`<p class="hint" id="solNotSim">Not simulated: ${m.not_simulated.map(s=>`${s.id} (${s.group})`).join(', ')}. Borrowing and investment are outside What-if.</p>`:''}
       <button class="btn primary" id="solTryBtn" type="button" ${list.length?'':'disabled'}>Try in What-if →</button></section>`;
   }
+  /* ---------- UC03.1 plan for a shortfall cell: conclusion, KPIs, package chart, options table, notes, actions ---------- */
+  function planHTML(m,I){
+    const n=m.need,P=m.package,need=n.target_peak,remZ=P.remaining.target_peak,remL=P.remaining.floor_peak,draws=P.draws||[];
+    const net=draws.reduce((a,d)=>a+d.net,0),remDays=new Map((P.remaining.daily||[]).map(x=>[x.d,x.floor]));
+    // A period short is covered when no day of it stays below the safe minimum after the plan.
+    const epCovered=n.episodes.filter(e=>(n.daily||[]).filter(x=>x.d>=e.start&&x.d<=e.end).every(x=>!(remDays.get(x.d)>0))).length;
+    const lastShort=(n.daily||[]).filter(x=>x.floor>0).map(x=>x.d).pop(),span=n.first_floor_day&&lastShort?Math.round((ENGINE.dnum(lastShort)-ENGINE.dnum(n.first_floor_day)))+1:0;
+    const slow=m.sources.filter(s=>s.in_policy&&s.too_slow&&s.status!=='fails'),fails=m.excluded.fails.filter(s=>s.in_policy&&!s.too_slow);
+    const groupsTxt=m.groups.map(g=>G_PLAIN[g].toLowerCase()).join(', then ');
+    // UX-10: one sentence of conclusion first; when no timely package exists, say which source is late and by how many days.
+    const concl=P.status==='none'
+      ?`Cash falls below your minimum cash level from ${fd(n.first_floor_day)}. No eligible source can bring cash in time${slow.length?`: the fastest, ${esc(slow[0].name)}, arrives on ${fd(slow[0].fund_date)}, ${Math.max(0,ENGINE.dnum(slow[0].fund_date)-ENGINE.dnum(n.first_floor_day))} day(s) after cash is needed`:''}.`
+      :`Cash falls below your minimum cash level from ${fd(n.first_floor_day)}. Following ${groupsTxt}, the plan brings ${money(net)} and ${remL>1?`still leaves ${money(remL)} below the minimum on ${P.remaining.floor_days} day(s)`:remZ>1?`keeps cash above the minimum; ${money(remZ)} is still under the safe cash level`:'brings cash back to the safe cash level'}.`;
+    const review=P.status!=='to_target'||draws.some(d=>(d.units||[]).some(u=>u.confirmed===false))||m.excluded.lacks_evidence.length;
+    const kpi=(cls,ic,t,v,f)=>`<div class="card kpi u3k ${cls}"><div class="u3k-ic" aria-hidden="true">${ic}</div><div><div class="t">${t}</div><div class="v num">${v}</div><div class="f">${f}</div></div></div>`;
+    const kpis=`<div class="u3-kpis" id="solKpis">${kpi('need','△','Cash needed',money(need),`to bring cash back to the safe level · ${money(n.floor_peak)} below the minimum`)}
+      ${kpi('time','◷','Time',`${span} day${span===1?'':'s'}`,`from ${fd(n.first_floor_day)} · ${n.episodes.length} period${n.episodes.length===1?'':'s'} short`)}
+      ${kpi(P.status==='none'?'bad':epCovered===n.episodes.length?'good':'part','◎','The plan brings',money(net),P.status==='none'?'no source arrives in time':`covers ${epCovered} of ${n.episodes.length} period${n.episodes.length===1?'':'s'} short${remL>1?` · ${money(remL)} still below the minimum`:''}`)}
+      ${kpi(review?'warn':'good',review?'!':'✓',review?'Check by hand':'Ready to test',review?'Confirm first':'—',review?'partner terms and conditions are not confirmed yet':'all conditions have evidence')}</div>`;
+    // Contribution of each source in the package (net cash, VND million), with the need and what remains.
+    const scale=Math.max(need,net,1),bar=(lbl,v,cls,sub)=>`<div class="u3b ${cls}"><span class="u3b-l">${lbl}</span><span class="u3b-t"><i style="width:${Math.max(.5,Math.min(100,v/scale*100)).toFixed(1)}%"></i></span><b class="num">${money(v)}</b>${sub?`<small>${sub}</small>`:''}</div>`;
+    const chart=`<section class="card u3-chart" id="solChart"><div class="card-head"><div><h3>What each source brings</h3><p>Net cash on the day it arrives · simulated figures</p></div></div>
+      ${draws.length?draws.map(d=>bar(`${esc(d.name)}${xp()?` <code>${d.source_id}</code>`:''}`,d.net,d.group==='O1'?'defer':'in',d.group==='O1'?`payment moved later, due again ${fds(d.obligations&&d.obligations[0]?d.obligations[0].date:d.fund_date)}`:`arrives ${fds(d.fund_date)}`)).join('')+bar('<b>Plan total</b>',net,'tot',''):'<p class="hint">No source can bring cash in time, so the plan is empty.</p>'}
+      ${bar('Cash needed',need,'need','largest gap to the safe cash level')}${remZ>1?bar('Still not covered',remZ,'rem',remL>1?`${money(remL)} of it below the minimum`:'above the minimum, under the target'):''}</section>`;
+    // Options table with filters and selection for a What-if test (UC03.6: internal sources only).
+    // Rows follow the policy order of the cell (group first), then the rank inside the group on the first period short.
+    const rk=s=>{const r=s.ranks?Object.values(s.ranks):[];return r.length?Math.min(...r):99};
+    const ordered=m.sources.slice().sort((a,b)=>(a.policy_rank??9)-(b.policy_rank??9)||(a.status==='fails')-(b.status==='fails')||rk(a)-rk(b));
+    const rows=ordered.filter(s=>SOLF.g==='all'||s.group===SOLF.g).filter(s=>SOLF.f==='all'?s.in_policy:SOLF.f==='pkg'?s.in_package:SOLF.f==='ok'?s.in_policy&&!s.too_slow&&s.status!=='fails'&&s.status!=='user_excluded':!s.in_policy||s.too_slow||s.status==='fails'||s.status==='user_excluded');
+    const internal=new Set(m.internal.map(s=>s.id));
+    const tr=(s,i)=>`<tr data-src="${s.id}" class="${s.in_package?'in':''}"><td>${internal.has(s.id)?`<input type="checkbox" data-try="${s.id}" aria-label="Test ${esc(s.name)}" ${s.in_package||(!draws.length&&s.in_policy&&!s.too_slow)?'checked':''}>`:'<span class="hint" title="Borrowing and investment are not simulated in What-if">—</span>'}</td>
+      <td class="num">${i+1}</td><td><b>${esc(s.name)}</b>${xp()?` <code>${s.id}</code>`:''} <small class="u34-ill">illustrative</small></td><td>${G_PLAIN[s.group]||s.group}${xp()?` <code>${s.group}</code>`:''}</td>
+      <td class="num">${money(s.capacity)}</td><td class="num">${mm(s.cost_full||0)}</td><td class="num">${s.capacity>0?pct((s.cost_full||0)/s.capacity,2):'—'}</td>
+      <td>${fds(s.fund_date)} <small>${s.dtf} d</small></td><td>${CERT[s.certainty]||'—'}</td><td>${srcStatus(s)}</td>
+      <td class="u34-act"><button class="btn sec sm" data-det="${s.id}" type="button">Details</button>${s.status==='fails'||!s.in_policy?'':s.status==='user_excluded'?`<button class="btn sec sm" data-undo="${s.id}" type="button">Use again</button>`:`<button class="btn sec sm" data-ex="${s.id}" type="button">Don’t use</button>`}</td></tr>`;
+    const groups=[...new Set(m.sources.map(s=>s.group))];
+    const table=`<section class="card u3-opts" id="solOptions"><div class="card-head"><div><h3>Options in priority order</h3><p>Inside each group: arrives in time → conditions confirmed → speed → cost → impact on relationships</p></div>
+      <div class="u3-filters"><div class="seg2" role="group" aria-label="Filter options">${[['all','In your order'],['pkg','In the plan'],['ok','Eligible'],['out','Late or excluded']].map(([k,l])=>`<button type="button" data-solf="${k}" class="${SOLF.f===k?'on':''}" aria-pressed="${SOLF.f===k}">${l}</button>`).join('')}</div>
+      <label class="sr" for="solGroup">Source type</label><select class="sel sm" id="solGroup"><option value="all">All source types</option>${groups.map(g=>`<option value="${g}" ${SOLF.g===g?'selected':''}>${G_PLAIN[g]||g}</option>`).join('')}</select></div></div>
+      <div class="table-wrap"><table class="dtable u3-table"><thead><tr><th><span class="sr">Test</span></th><th class="num">#</th><th>Option</th><th>Type</th><th class="num">Can bring</th><th class="num">Cost</th><th class="num">Cost / amount</th><th>Cash arrives</th><th>Certainty</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows.map(tr).join('')||'<tr><td colspan="11" class="empty">No option matches this filter.</td></tr>'}</tbody></table></div>
+      ${m.not_simulated.length?`<p class="hint" id="solNotSim">Borrowing and investment (${m.not_simulated.map(s=>esc(s.name)).join(', ')}) are not simulated in What-if; a test covers only the internal part.</p>`:''}</section>`;
+    const notes=[];
+    if(remL>1)notes.push(`${money(remL)} stays below the safe minimum on ${P.remaining.floor_days} day(s). No excluded source and no source outside your order is used to fill it.`);
+    slow.forEach(s=>notes.push(`${esc(s.name)} arrives on ${fd(s.fund_date)}, ${Math.max(0,ENGINE.dnum(s.fund_date)-ENGINE.dnum(n.first_floor_day))} day(s) after cash is first needed, so it does not count for that period.`));
+    fails.slice(0,3).forEach(s=>notes.push(`${esc(s.name)} is excluded: ${s.reasons.map(reasonTxt).join('; ')}.`));
+    if(draws.some(d=>d.group==='O1'))notes.push('Paying suppliers later is not new cash: the payment and its fee fall due again later and are checked against later shortfalls.');
+    if(I.cell==='M3'&&m.excluded.outside_policy.some(s=>s.group==='O2'))notes.push('Borrowing is not in the order for your situation, so it is not added; the remaining gap is shown instead.');
+    notes.push('Customers, suppliers and lenders have not agreed to anything yet: every source is an assumption until they confirm. This is not a credit decision.');
+    const actions=`<div class="u3-actions"><button class="btn sec" id="solWhy" type="button">Why some options are excluded</button><button class="btn sec" id="solPolicy" type="button">Policy and financing table</button><button class="btn sec" id="solExport" type="button">⤓ Export</button>
+      <button class="btn primary" id="solTryBtn" type="button" ${m.internal.length?'':'disabled'}>Test the selected options in What-if →</button></div>`;
+    const more=`<details class="u3-more" id="solMore"${xp()?' open':''}><summary>Calculation details: daily events, periods short, excluded sources and versions</summary>${needHTML(n,I.L,I.Z,I.H)}${packageHTML(m)}${excludedHTML(m)}${versionsHTML()}</details>`;
+    return `<p class="u3-concl" id="solConcl">${concl}</p>${kpis}${chart}${table}<div class="card u3-notes" id="solNotes"><h4>Things to know</h4><ul>${notes.map(x=>`<li>${x}</li>`).join('')}</ul></div>${actions}${more}`;
+  }
   function versionsHTML(){
     const v=SOL.get().versions;if(!v.length)return '';
     return `<section class="dsec u34-sec" id="solVersions"><header class="dsh"><h3>Selection versions</h3><p>Each choice is a new version; the original package is kept.</p></header><ol class="u34-list" start="0"><li>Original package (no user choice)</li>${v.map(x=>`<li>${esc(x.action)} <b>${esc(x.source_id)}</b>${x.reason?`: “${esc(x.reason)}”`:''} · ${esc(x.by)} · ${fd(x.at)} · ${esc(x.match_run_id)}</li>`).join('')}</ol></section>`;
@@ -132,8 +197,9 @@ const U34=(()=>{
     else if(m.route==='reserve'){const h=m.hold;body=`<section class="dsec u34-sec" id="solReserve"><header class="dsh"><h3>Hold as reserve · ${m.meta.matrix_case}</h3><p>Positive cash does not remove the working-capital bottleneck; no loan or investment is proposed.</p></header>
       <p>L ${money(h.L)} · Z ${money(h.Z)} · H ${money(h.H)} · ${h.above_days} day(s) above H, largest excess ${money(h.max_above)}.</p>
       <div class="table-wrap"><table class="dtable"><thead><tr><th>Upcoming obligation</th><th>Day</th><th class="num">Amount</th></tr></thead><tbody>${h.obligations.map(o=>`<tr><td>${esc(o.kind)} · ${esc(o.partner)}</td><td>${fds(o.date)}</td><td class="num">${money(o.amount)}</td></tr>`).join('')}</tbody></table></div></section>`}
-    else body=needHTML(m.need,I.L,I.Z,I.H)+packageHTML(m)+sourcesHTML(m)+excludedHTML(m)+tryHTML(m)+versionsHTML();
-    p.innerHTML=`<div class="u34">${headHTML(m,I)}${body}${footHTML()}</div>`;
+    else body=planHTML(m,I);
+    const sf=m.route==='shortfall';
+    p.innerHTML=`<div class="u34"><div class="u3-title"><p class="u3-crumb">Solutions / Current plan</p><h2>${sf?'Plan to cover the cash shortfall':'Solution for your cash position'}</h2></div>${headHTML(m,I)}${body}${sf?`<div class="u34-foot"><p class="callout"><span>ⓘ</span><span id="solOutsideNote">${OUTSIDE}</span></p></div>`:footHTML()}</div>`;
     bindSolutions(p,m);
   }
   function bindSolutions(p,m){
@@ -144,7 +210,11 @@ const U34=(()=>{
       if(e.target.closest('#solTryBtn')){const ids=$$('[data-try]',p).filter(x=>x.checked).map(x=>x.dataset.try);if(!ids.length){toast('Pick at least one internal source');return}tryInternal(m,ids);return}
       if(e.target.closest('#solPolicy')){openPolicy();return}
       if(e.target.closest('#solExport')){exportSolutions(m);return}
+      const f=e.target.closest('[data-solf]');if(f){SOLF.f=f.dataset.solf;renderSolutions();return}
+      if(e.target.closest('#solWhy')){openModal(`<h3>Why some options are excluded</h3>${excludedHTML(m)}<div class="acts"><button class="btn sec" id="mClose" type="button">Close</button></div>`,md=>{$('#mClose',md).onclick=closeModal});return}
+      const row=e.target.closest('tr[data-src]');if(row&&!e.target.closest('input,button')){openSourceDetail(m.sources.find(s=>s.id===row.dataset.src),m);return}
     };
+    const gs=$('#solGroup',p);gs&&(gs.onchange=()=>{SOLF.g=gs.value;renderSolutions()});
   }
   // UC03.3: basis, net amount, fees, obligations and evidence of one source.
   function openSourceDetail(s,m){
@@ -395,6 +465,7 @@ const U34=(()=>{
   function solutionsAnswer(){
     const I=input(),m=matchNow();if(!I||!m)return {html:'<p>Company data is not ready yet.</p>'};
     const R=registry(),A=R.add,ent=[I.firm_name,...(m.sources||[]).map(s=>s.name)];let html;
+    if(!xp())return plainSolutionsAnswer(I,m,R,ent);
     const lead=`<p>${A('w',I.W,I.W)} and ${A('th',I.TH,I.TH)} on Base give cell <b>${A('cell',I.cell||'none',I.cell||'none')}</b> (${m.meta.matrix_version}, ${m.meta.priority_policy_version}).</p>`;
     if(m.route==='shortfall'){const n=m.need,P=m.package,first=A('need_d',n.first_floor_day,fd(n.first_floor_day)),fl=A('floor',n.floor_peak,mm(n.floor_peak)),tg=A('target',n.target_peak,mm(n.target_peak));
       const remZ=A('rem_z',P.remaining.target_peak,mm(P.remaining.target_peak)),remL=A('rem_l',P.remaining.floor_peak,mm(P.remaining.floor_peak));
@@ -411,11 +482,37 @@ const U34=(()=>{
     return {html:checked({f:R.f,entities:ent,fallback:`Cell ${I.cell||'none'}: see the Solutions view.`},html),facts:R.f,match:m};
   }
   const TOL1=1;
+  // UX-09 / UX-10: default answer in plain words; one sentence of conclusion first, one next action last.
+  function plainSolutionsAnswer(I,m,R,ent){
+    const A=R.add;let html;
+    if(m.route==='shortfall'){const n=m.need,P=m.package,net=(P.draws||[]).reduce((a,d)=>a+d.net,0),order=m.groups.map(g=>G_PLAIN[g].toLowerCase()).join(', then ');
+      const slow=m.sources.filter(s=>s.in_policy&&s.too_slow&&s.status!=='fails'),strat=m.excluded.fails.filter(s=>s.reasons.includes('STRATEGIC_OR_CRITICAL'));
+      html=`<p><b>${P.status==='none'?'No option can bring cash in time':P.remaining.floor_peak>1?'The plan helps, but part of the shortfall remains':'The plan keeps cash above your minimum cash level'}.</b> Cash falls below your minimum cash level from ${A('need_d',n.first_floor_day,fd(n.first_floor_day))}; at the worst point it is ${A('floor',n.floor_peak,money(n.floor_peak))} below the minimum and ${A('target',n.target_peak,money(n.target_peak))} below the target (safe) cash level.</p>
+        <p>For your situation the order is: ${order}.${P.status==='none'?'':` The plan brings ${A('pkg',net,money(net))}${(P.draws||[]).length?` from ${P.draws.map(d=>esc(A('nm_'+d.source_id,d.name,d.name))).join(' and ')}`:''}.`}${P.remaining.floor_peak>1?` ${A('rem_l',P.remaining.floor_peak,money(P.remaining.floor_peak))} stays below the minimum on ${A('rem_days',P.remaining.floor_days,P.remaining.floor_days+' day(s)')}.`:''}</p>
+        ${slow.length?`<p>Too late for the first days: ${slow.map(s=>`${esc(A('nm_'+s.id,s.name,s.name))} (cash on ${A('slow_'+s.id,s.fund_date,fd(s.fund_date))})`).join('; ')}.</p>`:''}
+        ${strat.length?`<p>Not used because the customer is strategic or the supplier essential: ${strat.map(s=>esc(A('nm_'+s.id,s.name,s.name))).join('; ')}.</p>`:''}
+        ${I.cell==='M3'&&m.excluded.outside_policy.some(s=>s.group==='O2')?'<p>Borrowing is not in the order for your situation, so it is not added; the remaining gap is shown instead.</p>':''}
+        <p>Next: test the plan on your cash flow to see the before-and-after.</p>`}
+    else if(m.route==='invest')html=`<p><b>${m.safe_cash.value<=TOL1?'No amount needs to be moved yet.':'Part of the surplus could be placed short-term.'}</b> The amount that can safely be placed is ${A('safe',m.safe_cash.value,money(m.safe_cash.value))}.</p>`;
+    else if(m.route==='reserve')html='<p><b>Keep the surplus as a reserve.</b> While working capital is under pressure, no loan or investment is proposed.</p>';
+    else if(m.route==='in_band')html='<p><b>No action needed.</b> Cash stays within your safe band on every day of the forecast.</p>';
+    else html='<p><b>A recommendation needs both the diagnosis and the forecast.</b> One of them is not available yet; complete the missing data first.</p>';
+    html+=`<p class="hint">${OUTSIDE}</p>`;
+    return {html:checked({f:R.f,entities:ent,fallback:'See the Solutions view for the plan.'},html),facts:R.f,match:m};
+  }
+  function scenTable(run,A){const rows=[['base','Base'],['conservative','Conservative'],['positive','Positive']].map(([k,n])=>{const r=run.results[k];
+      return `<tr><td>${n}</td><td class="num">${A(k+'_m0',r.before.min,money(r.before.min))}</td><td class="num">${A(k+'_m1',r.after.min,money(r.after.min))}</td><td class="num">${A(k+'_d0',r.before.floor_days,r.before.floor_days)} → ${A(k+'_d1',r.after.floor_days,r.after.floor_days)}</td><td>${CONCL[r.conclusion]}</td></tr>`}).join('');
+    return `<div class="table-wrap"><table class="dtable u4-mini"><thead><tr><th>Scenario</th><th class="num">Lowest before</th><th class="num">Lowest after</th><th class="num">Days below the minimum</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div><p class="hint">Simulated on a copy of your cash schedule; your data and published results are unchanged.</p>`}
   function whatIfAnswer(run){
     const R=registry(),A=R.add,b=run.results.base,I=input(),ent=[I.firm_name,...run.changes.map(c=>c.customer||c.supplier||c.lot_id)];
+    if(!xp()){const html=`<p><b>${CONCL[run.conclusion]} on the base forecast.</b> ${esc(run.label||'This change')}: the lowest cash moves from ${A('min0',b.before.min,money(b.before.min))} to ${A('min1',b.after.min,money(b.after.min))} on ${A('mind',b.after.min_date,fd(b.after.min_date))}; days below your minimum cash level go from ${A('d0',b.before.floor_days,b.before.floor_days)} to ${A('d1',b.after.floor_days,b.after.floor_days)}.</p>
+      <p>Cost in cash: ${A('cost',b.costs.cash,money(b.costs.cash))}${b.costs.book_shortfall>0?`; stock sold below its book value by ${A('book',b.costs.book_shortfall,money(b.costs.book_shortfall))} (not a cash payment)`:''}.${b.tail_obligations>0?` ${A('tail',b.tail_obligations,money(b.tail_obligations))} is still due after the forecast period.`:''}${b.worse_days?` On ${A('worse',b.worse_days,b.worse_days)} day(s) cash is lower than before (for example when a moved payment falls due).`:''}</p>
+      ${scenTable(run,A)}${run.not_simulated&&run.not_simulated.length?`<p>Not simulated: ${run.not_simulated.map(x=>esc(x.name||x.id||x)).join(', ')} (borrowing or investment).</p>`:''}
+      <p>${esc(run.conditions.join('; '))}. Next: prepare the follow-up as a draft for approval, or test another option.</p>`;
+      return checked({f:R.f,entities:ent,fallback:`${CONCL[run.conclusion]}. Open What-if for the figures.`},html)}
     const html=`<p>${A('label',run.label,esc(run.label||run.sim_run_id))} (${A('id',run.sim_run_id,run.sim_run_id)}): on Base the lowest cash moves from ${A('min0',b.before.min,mm(b.before.min))} to ${A('min1',b.after.min,mm(b.after.min))} on ${A('mind',b.after.min_date,fd(b.after.min_date))}; days below L ${A('g0',b.before.floor_days,b.before.floor_days)} → ${A('g1',b.after.floor_days,b.after.floor_days)}; gap to Z ${A('t0',b.before.target_peak,mm(b.before.target_peak))} → ${A('t1',b.after.target_peak,mm(b.after.target_peak))}.</p>
       <p>Cash cost ${A('cost',b.costs.cash,mm(b.costs.cash))}; book shortfall ${A('book',b.costs.book_shortfall,mm(b.costs.book_shortfall))} (not cash). WorseDays ${A('worse',b.worse_days,b.worse_days)}.${b.tail_obligations>0?` ${A('tail',b.tail_obligations,mm(b.tail_obligations))} stays due after the horizon.`:''} Conclusion on Base: <b>${CONCL[run.conclusion]}</b>.</p>
-      <p>Sensitivity: Conservative ${CONCL[run.results.conservative.conclusion]}, Positive ${CONCL[run.results.positive.conclusion]}. ${esc(run.conditions.join('; '))}.</p>`;
+      <p>Sensitivity: Conservative ${CONCL[run.results.conservative.conclusion]}, Positive ${CONCL[run.results.positive.conclusion]}. ${esc(run.conditions.join('; '))}.</p>${scenTable(run,A)}`;
     return checked({f:R.f,entities:ent,fallback:`Run ${run.sim_run_id}: ${CONCL[run.conclusion]}. Open What-if for the figures.`},html);
   }
   const REFUSE={
@@ -448,6 +545,19 @@ const U34=(()=>{
     const card=document.createElement('div');card.className='rcact';card.innerHTML='<button class="btn sec sm" type="button">Open What-if →</button>';card.querySelector('button').onclick=()=>openDetail('whatif');bot.appendChild(card);
     if(S.detail==='whatif'&&S.panel)renderWhatIf();
   }
-  return {renderSolutions,renderWhatIf,solutionsAnswer,whatIfAnswer,parseWhatIf,chatWhatIf,loadPreset,run,input,matchNow,sims,REFUSE,OUTSIDE,CONCL,tryInternal,compareHTML,
+  // UC03.6 through the chat: the internal options of the current plan are pre-filled into a test; borrowing is listed as not simulated.
+  async function chatPlanTest(bot){
+    const m=matchNow();if(!m||m.route!=='shortfall'||!m.internal.length){await say(bot,'<p>There is no internal option in the current plan to test. Ask what to do about the shortfall first.</p>');return null}
+    const ids=m.internal.filter(s=>s.in_package).map(s=>s.id),use=ids.length?ids:m.internal.filter(s=>s.in_policy&&!s.too_slow).map(s=>s.id);
+    if(!use.length){await say(bot,'<p>None of the internal options can bring cash in time, so there is nothing to test yet.</p>');return null}
+    const pf=UC0304.prefill(m,use),st=sims();st.rows=pf.changes.map(c=>({...c,on:true}));st.prefill=pf;st.errors=[];
+    const res=run({label:'Plan from Solutions'});
+    if(!res||res.status==='rejected'){await say(bot,`<p>The plan cannot be tested yet: ${res?res.errors.map(e=>esc(e.msg)).join('; '):'no lever'}.</p>`,'warn');return null}
+    await say(bot,whatIfAnswer(res));
+    if(pf.rejected&&pf.rejected.length)await say(bot,`<p>Only the internal part was tested; ${pf.rejected.map(x=>esc(x.name||x.id||x)).join(', ')} (borrowing or investment) is not simulated.</p>`);
+    const card=document.createElement('div');card.className='rcact';card.innerHTML='<button class="btn sec sm" type="button">Open What-if →</button>';card.querySelector('button').onclick=()=>openDetail('whatif');bot.appendChild(card);
+    if(S.detail==='whatif'&&S.panel)renderWhatIf();return res;
+  }
+  return {chatPlanTest,renderSolutions,renderWhatIf,solutionsAnswer,whatIfAnswer,parseWhatIf,chatWhatIf,loadPreset,run,input,matchNow,sims,REFUSE,OUTSIDE,CONCL,tryInternal,compareHTML,
     reset(){CACHE.clear()}};
 })();
