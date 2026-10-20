@@ -1,6 +1,6 @@
 /* UC03 Solutions and UC04 What-if (SRS v2.3 sections 2.9 and 2.10, Appendix B MT01–MT03 and U401–U409, Appendix E E15–E40).
    Pure functions on the UC01 / UC02 runs of js/engine.js: no DOM, no network, no language model. Money is VND, dates are ISO strings
-   or day numbers (days since 1970-01-01, UTC). Where the SRS is silent the workbook v10 (UC3_Cong_thuc, UC4_Cong_thuc, F01_UC03,
+   or day numbers (days since 1970-01-01, UTC). Where the SRS is silent the workbook v11 (UC3_Cong_thuc, UC4_Cong_thuc, F01_UC03,
    F01_UC4) gives the formula or the number; such choices are marked SRS-DECISION. */
 const UC0304=(()=>{
   const {dnum,diso,sum,hash}=ENGINE;
@@ -15,7 +15,7 @@ const UC0304=(()=>{
   // MT01 / Table 2-110 (priority.v2): the order of the groups is policy and is never changed by a score or a chat request.
   const PRIORITY={M1:['O2'],M2:['I0'],M3:['O4','O1'],M4:['R0'],M5:['O4','O3','O1','O2'],M6:['R0']};
   const SIMULATED=['O4','O3','O1'];              // UC04 can simulate these groups only (UC03.6, BR-03-08)
-  // Workbook v10 D_UC03 parameters used where the SRS gives no number (T3-P06 minimum draw, T3-P07 sources per package).
+  // Workbook v11 D_UC03 parameters used where the SRS gives no number (T3-P06 minimum draw, T3-P07 sources per package).
   const MIN_DRAW_PCT=.05,MAX_SOURCES=4;
   // SRS-DECISION: the extension length of a supplier deferral is the lower bound of the extension frame cl.extDays (15 days, workbook T3-14).
   const AP_EXT_DAYS=()=>CFG.cl.extDays[0];
@@ -71,7 +71,7 @@ const UC0304=(()=>{
   const OBJ_GROUP={O0:'O0',O1:'O1',O2:'O2',O3:'O3',O4:'O4'};
   // SRS-DECISION: the demo catalogue has no validity dates in the workbook; it is published as an illustrative version valid for the
   // second half of 2026, so the expiry check (UC03.1 A4, UC03.5) has a date to test. Products are labelled illustrative (UC03.5 A3).
-  const CATALOGUE_META={version:'cat.F01.v10.1',valid_from:'2026-06-01',valid_until:'2026-12-31',status:'illustrative',source:'Workbook v10 D_UC03 (demo assumptions)',
+  const CATALOGUE_META={version:'cat.F01.v11.1',valid_from:'2026-06-01',valid_until:'2026-12-31',status:'illustrative',source:'Workbook v11 D_UC03 (demo assumptions)',
     confirmed_by:'Demo owner',warn_days:30};
   function catalogueOf(table,proposals){
     // Confirmed proposals (UC03.5) create a new version; the original rows are never edited in place.

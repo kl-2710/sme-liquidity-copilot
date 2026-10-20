@@ -56,7 +56,7 @@ const NARR=(()=>{
       need:A('need',b.need_rtarget,money(b.need_rtarget)),th:tx('th.'+u.th.th)+(u.matrix.cell&&!SIMPLE()?` (${u.matrix.cell})`:''),w:A('weeks',u.weeks,u.weeks)})
       +(b.first_below_rtarget?' '+tx('na.uc02.p1.first',{d:A('first',b.first_below_rtarget,fd(b.first_below_rtarget)),z:b.first_negative?A('first0',b.first_negative,fd(b.first_negative)):tx('ov.none')}):'');
     const tight=u.weekly.reduce((a,w)=>w.min<a.min?w:a,u.weekly[0]);
-    const p2=(u.episodes.length?tx('na.uc02.p2.eps',{n:A('neps',u.episodes.length,u.episodes.length),last:u.episodes.some(e=>e.censored)?tx('na.uc02.p2.open'):''}):tx('na.uc02.p2.none'))+' '
+    const p2=(u.episodes.length?tx(u.episodes.length===1?'na.uc02.p2.eps1':'na.uc02.p2.eps',{n:A('neps',u.episodes.length,u.episodes.length),last:u.episodes.some(e=>e.censored)?tx('na.uc02.p2.open'):''}):tx('na.uc02.p2.none'))+' '
       +tx('na.uc02.p2.week',{w:A('tw',tight.w,tight.w),a:A('tw_a',tight.start,fd(tight.start)),b:A('tw_b',tight.end,fd(tight.end)),v:A('tw_min',tight.min,money(tight.min))})+' '
       +tx('na.uc02.p2.band',{c:A('band_c',at('conservative'),money(at('conservative'))),o:A('band_o',at('optimistic'),money(at('optimistic')))});
     const cf=ctx.factors;

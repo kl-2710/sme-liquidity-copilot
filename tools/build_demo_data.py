@@ -1,9 +1,9 @@
-"""Regenerate the sample data in js/data.js from the UC01-UC04 specification workbook (v10).
+"""Regenerate the sample data in js/data.js from the UC01-UC04 specification workbook (v11).
 
 Usage:
-    python tools/build_demo_data.py data/uc_workbook_v10.xlsx
+    python tools/build_demo_data.py "data/Đặc tả công thức_ver 11.xlsx"
 
-The workbook ("Dac ta cong thuc FOB UC01-UC04 v10") holds one synthetic company, F01, an FOB garment maker (buys its own
+The workbook ("Dac ta cong thuc FOB UC01-UC04 v11") holds one synthetic company, F01, an FOB garment maker (buys its own
 materials, produces and sells finished goods; it holds no customer-owned stock) with a 171-day period. Every sheet has its title on row 2 and its header on row 4; columns are found by header name.
 
 Read from the workbook:
@@ -26,7 +26,7 @@ Read from the workbook:
   same product id, or of the same type for new ids. Excluded products are listed on stdout.
 
 The script writes DATA.raw, DATA.cat, DATA.uc03 and DATA.uc04 and the what-if presets (SC, defined below: three-lever
-presets on the v10 data). The
+presets on the v11 data). The
 browser builds every UC01/UC02 result from DATA.raw with the same engine as uploaded files (BR-02.18), so no computed
 figure is stored here.
 """
@@ -48,7 +48,7 @@ HEADER_ROW = 4  # every sheet: title on row 2, header on row 4
 # The demo UI is in English, so party, lot and category names of the workbook are translated here.
 # Keys are the workbook names with accents removed (see fold()), so this file holds no Vietnamese text.
 NAMES = {
-    # customers (v10, FOB buyers)
+    # customers (v11, FOB buyers)
     "Khach mua FOB Lon K1": "Large FOB Buyer K1",
     "Khach mua FOB K2": "FOB Buyer K2",
     "Nha mua hang FOB K5": "FOB Buyer K5",
@@ -73,7 +73,7 @@ NAMES = {
     "Vai phu tro moi NCC7": "New Auxiliary Fabric Mill SUP7",
     "Vat tu tieu hao NCC8": "Consumables SUP8",
     "Phu lieu chi dinh NCC9": "Customer-Designated Trims SUP9",
-    # inventory lots (v10 names first)
+    # inventory lots (v11 names first)
     "Vai chinh tu mua don FOB-0826": "Main fabric bought for order FOB-0826",
     "Phu lieu lot don FOB-0826": "Lining trims for order FOB-0826",
     "BTP da cat cho may – don FOB-0826": "Cut pieces awaiting sewing (WIP), order FOB-0826",
@@ -125,7 +125,7 @@ YES, NO = {"co", "yes", "y", "1", "true"}, {"khong", "no", "n", "0", "false"}
 # (selling slow stock) have no catalogue type in the app: they are listed as excluded.
 GROUP_TYPE = {"RF": "reverse_factoring", "FAC": "invoice_factoring", "INV_LOAN": "inventory_loan", "CL": "credit_line",
               "AR_EARLY": "dynamic_discounting"}
-OBJECT_PARTY = {"OBJ-AR-K1": "Large Exporter K1", "OBJ-AR-K2": "Exporter K2", "OBJ-AR-K6": "Seasonal Fashion Brand K6"}
+OBJECT_PARTY = {"OBJ-AR-K1": "Large FOB Buyer K1", "OBJ-AR-K2": "FOB Buyer K2", "OBJ-AR-K6": "Seasonal Fashion Brand K6"}  # v11 customer names
 # UC03 product names (D_UC03 "San pham"), by product id.
 PRODUCT_NAMES = {
     "NB-01": "Sell short-term investments (step 0)", "EX-01": "Extend non-essential supplier payments by 15–30 days",
@@ -388,8 +388,10 @@ def catalogue(wb, notes: list[str]) -> list[dict]:
             item["wl"] = party
         if typ == "credit_line":
             item["mx"] = int(num(p["Cơ sở (VND)"]))  # the unused limit is the most the line can give
-        if pid not in by_id:
-            item["provider"] = {"dynamic_discounting": f"{party} (early payment)" if party else "Buyer early payment"}.get(typ, base["provider"])
+        if typ == "dynamic_discounting":  # the buyer itself pays early, so the provider follows the object of D_UC03
+            item["provider"] = f"{party} (early payment)" if party else "Buyer early payment"
+        elif pid not in by_id:
+            item["provider"] = base["provider"]
         cat.append(item)
     notes.append("DATA.cat: provider, mn, mo, recourse and fbase are not in D_UC03 and keep the previous value of the same id "
                  "(or of the same type for new ids); mx too, except credit lines (mx = unused limit from D_UC03).")
@@ -461,8 +463,8 @@ def uc04_setup(wb, names: dict) -> dict:
 
 
 def presets(u: dict) -> list[dict]:
-    """What-if presets on the v10 data: one UC04 change set each (the three levers of SRS 2.10.10), applied to the three scenarios.
-    F01-C is the workbook default of F01_UC4 (case 1). There is no customer-owned stock in v10, so no ownership-block preset."""
+    """What-if presets on the v11 data: one UC04 change set each (the three levers of SRS 2.10.10), applied to the three scenarios.
+    F01-C is the workbook default of F01_UC4 (case 1). There is no customer-owned stock in v11, so no ownership-block preset."""
     ar = {"customer_id": u["customer_id"], "share": u["ar_share"], "mode": "shift_days", "days": -u["early_days"], "discount": u["discount"]}
     ap = {"supplier_id": u["supplier_id"], "share": u["ap_share"], "days": u["extend_days"], "fee": u["ap_fee"], "consent_assumed": bool(u["allow_essential"])}
     inv = {"lot_id": u["lot_id"], "share": u["sale_share"], "basis": "recovery", "recovery": u["recovery"], "lag_days": u["sale_lag"],
@@ -496,7 +498,7 @@ def main() -> None:
         ids[str(r["lot_id"]).strip()] = tr(r["Mặt hàng / lô"])
     uc03, uc04 = uc03_table(wb), uc04_setup(wb, ids)
     sc = "let SC=" + json.dumps([{"firm": "F01", **x} for x in presets(uc04)], ensure_ascii=False) + ";"
-    head = ("/* Sample data: the raw snapshot of F01 (generated by tools/build_demo_data.py from the FOB UC01-UC04 workbook v10), "
+    head = ("/* Sample data: the raw snapshot of F01 (generated by tools/build_demo_data.py from the FOB UC01-UC04 workbook v11), "
             "the financing catalogue and product table from D_UC03, the UC04 defaults of F01_UC4 and the what-if presets. */\n")
     id_map = {"customers": {k: v for k, v in ids.items() if k.startswith("BYR-")}, "suppliers": {k: v for k, v in ids.items() if k.startswith("SUP-")}}
     body = "const DATA=" + json.dumps({"cat": cat, "raw": raw, "ids": {"F01": id_map}, "uc03": {"F01": uc03}, "uc04": {"F01": uc04}}, ensure_ascii=False, separators=(",", ":")) + ";\n"

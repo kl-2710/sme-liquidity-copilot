@@ -144,7 +144,7 @@ function alertLegendHTML({surplus}={}){
   return `<div class="legend lv-legend" role="list" aria-label="Alert colours">${['red','orange','yellow','green'].map(l=>`<span role="listitem"><i class="lv-sw lv-${l}" aria-hidden="true"></i><b>${LV[l].label}</b>&nbsp;· ${LV_RULE[l]}</span>`).join('')}${surplus?`<span role="listitem"><i class="lv-sw lv-blue" aria-hidden="true"></i><b>Blue</b>&nbsp;· surplus, above Rupper for ≥ 14 days</span>`:''}</div>`;
 }
 function topBy(arr,kf,vf){const m=new Map();arr.forEach(a=>m.set(kf(a),(m.get(kf(a))||0)+vf(a)));return [...m].map(([k,v])=>({k,v})).sort((a,b)=>b.v-a.v)}
-// What-if presets of the sample company (js/data.js SC, three-lever change sets on the v10 data).
+// What-if presets of the sample company (js/data.js SC, three-lever change sets on the v11 data).
 const SCEN=()=>SC.filter(s=>s.firm===S.firm);
 
 
@@ -947,7 +947,7 @@ async function respondCause(bot,{focus}={}){
   }
   const list=focus?EPS.filter(e=>e.k===focus):EPS,big=largestGap(),tb=openAR(c).top[0];
   if(focus)await say(bot,`<p>${t('cf.focus',{k:focus})} <b>gap ${focus}</b> (${fds(list[0].start)}${list[0].start!==list[0].end?'–'+fds(list[0].end):''}, peak shortfall <b>${mm(list[0].peak)}</b>).</p>`);
-  else await say(bot,`<p>${tx('na.gaps',{n:EPS.length,rt:money(c.buffer)}).replace(' gaps</b>',EPS.length>1?' gaps</b>':' gap</b>')}</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>${t('cf.intro')}</p>`);
+  else await say(bot,`<p>${(EPS.length>1?tx('na.gaps',{n:EPS.length,rt:money(c.buffer)}):tx('na.gaps',{n:EPS.length,rt:money(c.buffer)}).replace('There are <b>1 gaps</b>','There is <b>1 gap</b>'))}</p><ul>${EPS.map(e=>`<li>Gap ${e.k}: ${fds(e.start)}${e.start!==e.end?'–'+fds(e.end):''}, peak shortfall <b>${mm(e.peak)}</b>${e.censored?' (not yet ended)':''}${e.k===big.k?' · largest':''}</li>`).join('')}</ul><p>${t('cf.intro')}</p>`);
   S.causes=S.causes||{};
   const wrap=document.createElement('div');wrap.className='gap-accs';
   wrap.innerHTML=list.map(e=>{

@@ -154,7 +154,9 @@ const U34=(()=>{
     // Rows follow the policy order of the cell (group first), then the rank inside the group on the first period short.
     const rk=s=>{const r=s.ranks?Object.values(s.ranks):[];return r.length?Math.min(...r):99};
     const ordered=m.sources.slice().sort((a,b)=>(a.policy_rank??9)-(b.policy_rank??9)||(a.status==='fails')-(b.status==='fails')||rk(a)-rk(b));
-    const rows=ordered.filter(s=>SOLF.g==='all'||s.group===SOLF.g).filter(s=>SOLF.f==='all'?s.in_policy:SOLF.f==='pkg'?s.in_package:SOLF.f==='ok'?s.in_policy&&!s.too_slow&&s.status!=='fails'&&s.status!=='user_excluded':!s.in_policy||s.too_slow||s.status==='fails'||s.status==='user_excluded');
+    // A source that is too slow for every period it could serve counts as late, like the hard TOO_SLOW.
+    const late=s=>s.too_slow||(!s.in_package&&(s.skips||[])[0]?.code==='TOO_SLOW');
+    const rows=ordered.filter(s=>SOLF.g==='all'||s.group===SOLF.g).filter(s=>SOLF.f==='all'?s.in_policy:SOLF.f==='pkg'?s.in_package:SOLF.f==='ok'?s.in_policy&&!late(s)&&s.status!=='fails'&&s.status!=='user_excluded':!s.in_policy||late(s)||s.status==='fails'||s.status==='user_excluded');
     const internal=new Set(m.internal.map(s=>s.id));
     const tr=(s,i)=>`<tr data-src="${s.id}" class="${s.in_package?'in':''}"><td>${internal.has(s.id)?`<input type="checkbox" data-try="${s.id}" aria-label="Test ${esc(s.name)}" ${s.in_package||(!draws.length&&s.in_policy&&!s.too_slow)?'checked':''}>`:'<span class="hint" title="Borrowing and investment are not simulated in What-if">—</span>'}</td>
       <td class="num">${i+1}</td><td><b>${esc(s.name)}</b>${xp()?` <code>${s.id}</code>`:''} <small class="u34-ill">illustrative</small></td><td>${G_PLAIN[s.group]||s.group}${xp()?` <code>${s.group}</code>`:''}</td>
