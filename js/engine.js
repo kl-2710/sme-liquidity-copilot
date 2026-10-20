@@ -468,7 +468,8 @@ const ENGINE=(()=>{
     // essential_suppliers list of Table 2-79 is explicit), while UC01 still shows the flag as unknown, never as "no".
     const isEssential=p=>p.essential==='yes'||essential.has(normName(p.supplier)),apTiming=opts.apTiming||'historical';
     const openSales=(snap.sales||[]).filter(s=>s.open),openPur=(snap.purchases||[]).filter(p=>p.open);
-    const odPur=openPur.filter(p=>p.due&&dnum(p.due)<=A).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);   // workbook v9: rank by invoice order
+    // Data v11 (F01_UC2 event table): Rank of MOD(Rank; 5) is the position of the bill among all open payables in invoice-id order.
+    const odPur=openPur.slice().sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
     const byK={};
     ['base','optimistic','conservative'].forEach(k=>{
       const rec=openSales.map(s=>{
