@@ -1,10 +1,10 @@
-"""Regenerate the sample data in js/data.js from the UC01-UC04 specification workbook (v9).
+"""Regenerate the sample data in js/data.js from the UC01-UC04 specification workbook (v10).
 
 Usage:
-    python tools/build_demo_data.py data/uc_workbook_v9.xlsx
+    python tools/build_demo_data.py data/uc_workbook_v10.xlsx
 
-The workbook ("Dac ta cong thuc UC01-UC04 v9") holds one synthetic company, F01, a CMT garment subcontractor with a
-171-day period. Every sheet has its title on row 2 and its header on row 4; columns are found by header name.
+The workbook ("Dac ta cong thuc FOB UC01-UC04 v10") holds one synthetic company, F01, an FOB garment maker (buys its own
+materials, produces and sells finished goods; it holds no customer-owned stock) with a 171-day period. Every sheet has its title on row 2 and its header on row 4; columns are found by header name.
 
 Read from the workbook:
 - D_F01: profile, financials and configuration (key/value): period_start, as_of, N, revenue, COGS, cash, short-term
@@ -18,11 +18,15 @@ Read from the workbook:
   are left out to avoid counting them twice. The second table at the bottom (invoice_id / ConfirmedDate / known_at) is the
   confirmed receipt schedule: it moves the date of an existing sales invoice and adds no money, so it is stored on that
   invoice (7th field of the sales record) when known_at <= as_of.
+- D_flows, third table ("Ngay" header): the 171-day daily cash history; its net flows give the sigma of the Miller-Orr reserve
+  levels L / Z / H (config.js cash.mo.*). D_F01 revenue_ttm_actual is the 12-month revenue behind L. The script checks that the
+  levels it recomputes match D_F01 rmin / rtarget / rupper within 1 VND.
 - D_UC03: the financing catalogue (DATA.cat). Only products with a matching catalogue type are kept; fields that D_UC03
   does not have (provider, minimum / maximum amount, overdue cap, recourse, fee base) keep the previous value of the
   same product id, or of the same type for new ids. Excluded products are listed on stdout.
 
-The script writes DATA.raw and DATA.cat and keeps the what-if presets (SC) of the current js/data.js unchanged. The
+The script writes DATA.raw, DATA.cat, DATA.uc03 and DATA.uc04 and the what-if presets (SC, defined below: three-lever
+presets on the v10 data). The
 browser builds every UC01/UC02 result from DATA.raw with the same engine as uploaded files (BR-02.18), so no computed
 figure is stored here.
 """
@@ -44,7 +48,10 @@ HEADER_ROW = 4  # every sheet: title on row 2, header on row 4
 # The demo UI is in English, so party, lot and category names of the workbook are translated here.
 # Keys are the workbook names with accents removed (see fold()), so this file holds no Vietnamese text.
 NAMES = {
-    # customers
+    # customers (v10, FOB buyers)
+    "Khach mua FOB Lon K1": "Large FOB Buyer K1",
+    "Khach mua FOB K2": "FOB Buyer K2",
+    "Nha mua hang FOB K5": "FOB Buyer K5",
     "Nha xuat khau Lon K1": "Large Exporter K1",
     "Nha xuat khau K2": "Exporter K2",
     "Thuong hieu noi dia K3": "Domestic Brand K3",
@@ -57,6 +64,8 @@ NAMES = {
     # suppliers (the (F02)/(F03) tags of the old three-company demo are dropped: only F01 remains)
     "Nha phan phoi vai Beta (F02)": "Beta Fabric Distributor",
     "Bao bi – phu lieu Gamma (F03)": "Gamma Packaging & Trims",
+    "Nha phan phoi vai Beta": "Beta Fabric Distributor",
+    "Bao bi – phu lieu Gamma": "Gamma Packaging & Trims",
     "Chi – nut – khoa NCC4": "Thread, Button, Zipper SUP4",
     "Van tai noi dia NCC5": "Domestic Transport SUP5",
     "Xuong theu – in ngoai NCC6": "Outsourced Embroidery and Print Trims SUP6",
@@ -64,7 +73,13 @@ NAMES = {
     "Vai phu tro moi NCC7": "New Auxiliary Fabric Mill SUP7",
     "Vat tu tieu hao NCC8": "Consumables SUP8",
     "Phu lieu chi dinh NCC9": "Customer-Designated Trims SUP9",
-    # inventory lots
+    # inventory lots (v10 names first)
+    "Vai chinh tu mua don FOB-0826": "Main fabric bought for order FOB-0826",
+    "Phu lieu lot don FOB-0826": "Lining trims for order FOB-0826",
+    "BTP da cat cho may – don FOB-0826": "Cut pieces awaiting sewing (WIP), order FOB-0826",
+    "Vai tu mua cho don FOB K1": "Fabric bought for the K1 FOB order",
+    "Vai tu mua cho don FOB K2": "Fabric bought for the K2 FOB order",
+    "Phu lieu tu mua cho don FOB K3": "Trims bought for the K3 FOB order",
     "Phu lieu chinh don CMT-0826": "Main trims for order CMT-0826",
     "Phu lieu lot don CMT-0826": "Lining trims for order CMT-0826",
     "Vai kaki ton tu mua truoc": "Khaki fabric left over from last season",
@@ -117,6 +132,8 @@ PRODUCT_NAMES = {
     "INV-003": "Loan secured on pledged lots", "CL-001": "Revolving credit line 1", "CL-002": "Revolving credit line 2",
     "TT-001": "Overdraft (no product data)",
 }
+ORDER_STATUS = {"dang hoat dong": "active", "khong gan don": "no_order", "hoan tat": "completed", "da huy": "cancelled",
+                "thay doi thiet ke": "redesigned"}
 CERTAINTY = {"Cao": 1, "Trung binh": 2, "Thap": 3}
 
 
@@ -242,21 +259,23 @@ def build(path: Path) -> tuple[dict, list, list[str]]:
     for r in sales_t:
         sid = str(col(r, "invoice_id"))
         sales.append([sid, tr(col(r, "Tên khách", "Ten khach")), int(col(r, "Amount net")), iso(col(r, "IssueDate")),
-                      iso(col(r, "DueDate")), iso(col(r, "PaidDate")), conf.get(sid)])
+                      iso(col(r, "DueDate")), iso(col(r, "PaidDate")), conf.get(sid), str(r.get("Status") or "").strip().lower() or None])
     missing = set(conf) - {s[0] for s in sales}
     if missing:
         raise SystemExit(f"Confirmed receipts for unknown invoices: {sorted(missing)}")
     purchases = [[str(col(r, "bill_id")), tr(col(r, "Tên NCC", "Ten NCC")), int(col(r, "Amount net")), iso(col(r, "IssueDate")),
                   iso(col(r, "DueDate")), iso(col(r, "PaidDate")), float(num(col(r, "DiscountPct")) or 0),
                   int(num(col(r, "DiscountDays")) or 0)] for r in pur_t]
-    # [name, type, qty, unit cost, days in stock at as_of, owner, cancelled, pledged]; days from ReceivedDate (not the Age helper).
+    # [name, type, qty, unit cost, days in stock at as_of, owner, cancelled, pledged, lot id, order id, order status];
+    # days from ReceivedDate (not the Age helper). Order status: active / no_order / completed / cancelled / redesigned.
     inventory = []
     for r in inv_t:
         owner = str(col(r, "Owner")).strip()
         status = fold(str(col(r, "OrderStatus") or "")).strip().lower()
         inventory.append([tr(col(r, "Mặt hàng / lô", "Mat hang / lo")), str(col(r, "Type")).strip().upper(), num(col(r, "Qty")),
                           num(col(r, "UnitCost")), (as_of - as_date(col(r, "ReceivedDate"))).days,
-                          "own" if owner == firm_id else "customer", "yes" if status == "da huy" else "no", flag(col(r, "Pledged"))])
+                          "own" if owner == firm_id else "customer", "yes" if status == "da huy" else "no", flag(col(r, "Pledged")),
+                          str(col(r, "lot_id")).strip(), str(r.get("Order") or "").strip() or None, ORDER_STATUS.get(status, "unknown")])
     # Planned flows: firm == F01, a known direction, a valid date and amount; rows copied from D_purchases are skipped (see above).
     planned, skipped = [], 0
     for r in flows_t:
@@ -275,14 +294,23 @@ def build(path: Path) -> tuple[dict, list, list[str]]:
                  f"{len(conf)} confirmed receipt date(s): {conf}")
 
     cash0 = int(num(kv["cash_total_vnd"]) - (num(kv.get("restricted_vnd")) or 0))
-    rmin, rtarget, rupper = (int(num(kv[k])) for k in ("rmin_vnd", "rtarget_vnd", "rupper_vnd"))
+    rmin, rtarget, rupper = (num(kv[k]) for k in ("rmin_vnd", "rtarget_vnd", "rupper_vnd"))
     if not (0 <= rmin <= rtarget < rupper):
         raise SystemExit("D_F01: Rmin / Rtarget / Rupper are not ordered")
+    # Daily cash history (third table of D_flows, header "Ngay"): [date, net flow] for the Miller-Orr sigma.
+    hh = next(i for i, r in enumerate(wb["D_flows"].iter_rows(values_only=True), 1) if r and r[0] is not None and fold(str(r[0])).strip() == "Ngay")
+    history = []
+    for r in wb["D_flows"].iter_rows(min_row=hh + 1, values_only=True):
+        if not r or as_date(r[0]) is None:
+            break
+        history.append([as_date(r[0]).isoformat(), int(num(r[4]))])
+    ttm = num(kv["revenue_ttm_actual"])
+    notes.append(f"D_flows: {len(history)} days of cash history ({history[0][0]}..{history[-1][0]}); revenue TTM {ttm:,.0f}")
     raw = {firm_id: {
-        "firm": {"id": firm_id, "name": "Alpha Garment Subcontractor", "industry": "Garment subcontracting (CMT)", "position": "cmt",
+        "firm": {"id": firm_id, "name": "Alpha Garment Subcontractor", "industry": "Garment manufacturing (FOB)", "position": "fob",
                  "business_model": str(kv["business_model"]).strip().upper(),
-                 # rtarget is the company's target level (firm_profile); the engine derives Rmin = 50 % and Rupper = 200 % of it.
-                 "rtarget": rtarget,
+                 # Reserve levels come from Miller-Orr in the engine (config.js cash.mo.*): revenue_ttm and history feed L / Z / H.
+                 "revenue_ttm": int(ttm),
                  "essential_suppliers": sorted(k for k, v in essential.items() if v == "yes"),
                  "non_essential_suppliers": sorted(k for k, v in essential.items() if v == "no"),
                  "strategic_customers": sorted(k for k, v in strategic.items() if v == "yes")},
@@ -290,19 +318,34 @@ def build(path: Path) -> tuple[dict, list, list[str]]:
                      "status": str(kv.get("status") or "provisional"), "horizon_weeks": int(num(kv["horizon_weeks"]))},
         # One financial row for the whole period (N days), with cash at the cut-off: Cash0 = cash_total − restricted.
         "fin": [{"period_start": start.isoformat(), "period_end": as_of.isoformat(), "revenue": int(num(kv["revenue_vnd"])),
-                 "cogs": int(num(kv["cogs_vnd"])), "opening_cash": cash0, "st_investments": int(num(kv["short_investments_vnd"]) or 0),
+                 "cogs": num(kv["cogs_vnd"]), "opening_cash": cash0, "st_investments": int(num(kv["short_investments_vnd"]) or 0),
                  "current_assets": int(round(current_assets)) if current_assets is not None else None}],
-        "sales": sales, "purchases": purchases, "inventory": inventory, "planned": planned,
+        "sales": sales, "purchases": purchases, "inventory": inventory, "planned": planned, "history": history,
         # D_F01 amount_basis net_noVAT; continuing_sales parameters (T2-21): credit days of new sales, incremental cost ratio and lag.
         "config": {"amount_basis": "net", "vat_rate": None,
                    "continuing": {"credit_days": int(num(kv["new_sales_credit_days"])), "cost_ratio": num(kv["incremental_cost_ratio"]),
                                   "cost_lag_days": int(num(kv["incremental_cost_lag_days"]))}},
     }}
-    if rmin != rtarget // 2 or rupper != 2 * rtarget:
-        notes.append(f"D_F01 Rmin/Rupper ({rmin}/{rupper}) differ from the engine's 50 % / 200 % of Rtarget: set them as owner policy")
+    lvl = miller_orr(wb, ttm, [h[1] for h in history])
+    for k, ref in zip(("L", "Z", "H"), (rmin, rtarget, rupper)):
+        if abs(lvl[k] - ref) > 1:
+            raise SystemExit(f"Miller-Orr {k} = {lvl[k]:,.2f} differs from D_F01 ({ref:,.2f}) by more than 1 VND")
+    notes.append("Miller-Orr L/Z/H = " + " / ".join(f"{lvl[k] / 1e6:,.1f}M" for k in "LZH") + " (match D_F01 within 1 VND)")
     if int(num(kv["horizon_weeks"])) != 13:
         notes.append("horizon_weeks differs from CFG.tv2.horizonWeeks (13)")
     return raw, catalogue(wb, notes), notes
+
+
+def miller_orr(wb, ttm: float, net: list[int]) -> dict:
+    """Same formula as the engine (SRS 2.8.9, Nguong rows 5-12): L = MAX(lower_ratio x TTM; owner floor), D = (3 b sigma^2 / 4 i)^(1/3)."""
+    p = {str(r[0]).strip(): r[1] for r in wb["Nguong"].iter_rows(min_row=HEADER_ROW + 1, values_only=True) if r and r[0]}
+    n = len(net)
+    mean = sum(net) / n
+    var = sum((x - mean) ** 2 for x in net) / (n - 1)
+    i = p["cash.mo.rate_annual"] / p["cash.mo.days_per_year"]
+    d = (3 * p["cash.mo.transaction_cost"] * var / (4 * i)) ** (1 / 3)
+    low = max(p["cash.mo.lower_ratio"] * ttm, p["cash.mo.lower_min_owner"] or 0)
+    return {"L": low, "Z": low + d, "H": low + 3 * d}
 
 
 def catalogue(wb, notes: list[str]) -> list[dict]:
@@ -401,16 +444,37 @@ def uc04_setup(wb, names: dict) -> dict:
         if r and r[0] not in (None, ""):
             kv[fold(str(r[0])).strip()] = r[1]
     g = lambda key: kv[key]
-    lot = str(g("Lo thu ban")).strip()
-    return {"case": int(num(g("Ma kich ban UC04"))), "customer": names[str(g("Khach duoc chon")).strip()], "ar_share": num(g("Phan khoan thu chuyen lich")),
+    lot, cust, sup = str(g("Lo thu ban")).strip(), str(g("Khach duoc chon")).strip(), str(g("NCC duoc chon")).strip()
+    return {"customer_id": cust, "supplier_id": sup, "lot_id": lot,
+            "case": int(num(g("Ma kich ban UC04"))), "customer": names[cust], "ar_share": num(g("Phan khoan thu chuyen lich")),
             "early_days": int(num(g("So ngay thu som"))), "discount": num(g("Chiet khau thu som")), "late_days": int(num(g("Stress so ngay khach tra cham"))),
-            "allow_confirmed": int(num(g("Cho thu thay lich da xac nhan"))), "supplier": names[str(g("NCC duoc chon")).strip()],
+            "allow_confirmed": int(num(g("Cho thu thay lich da xac nhan"))), "supplier": names[sup],
             "ap_share": num(g("Phan phai tra duoc gian")), "extend_days": int(num(g("So ngay gian tra"))), "ap_fee": num(g("Phi gian tra mot lan")),
             "allow_essential": int(num(g("Cho phep thu voi NCC thiet yeu"))), "lot": names[lot], "sale_share": num(g("Ty le lo ban")),
             "recovery": num(g("Ty le gia thu hoi")), "sale_lag": int(num(g("So ngay tu Start den ban/thu"))), "sale_cost": num(g("Chi phi tien khi ban")),
             "stress_sale_days": int(num(g("Stress ban ton tre them"))), "sale_confirmed": int(num(g("Xac nhan gia dinh co the ban lo"))),
             "partial_early": num(g("Ty le thu som thuc hien khi stress")), "critical_date": iso(g("Ngay doi chieu trong yeu")),
             "tolerance": num(g("Sai so tien kiem tra (VND)"))}
+
+
+def presets(u: dict) -> list[dict]:
+    """What-if presets on the v10 data: one UC04 change set each (the three levers of SRS 2.10.10), applied to the three scenarios.
+    F01-C is the workbook default of F01_UC4 (case 1). There is no customer-owned stock in v10, so no ownership-block preset."""
+    ar = {"customer_id": u["customer_id"], "share": u["ar_share"], "mode": "shift_days", "days": -u["early_days"], "discount": u["discount"]}
+    ap = {"supplier_id": u["supplier_id"], "share": u["ap_share"], "days": u["extend_days"], "fee": u["ap_fee"], "consent_assumed": bool(u["allow_essential"])}
+    inv = {"lot_id": u["lot_id"], "share": u["sale_share"], "basis": "recovery", "recovery": u["recovery"], "lag_days": u["sale_lag"],
+           "selling_cost": u["sale_cost"], "sale_confirmed": bool(u["sale_confirmed"])}
+    k1 = u["customer"].split()[-1]
+    return [
+        {"id": "F01-A", "name": f"{k1} pays half 7 days early (1% discount)", "ask": f"What if {k1} pays half of its invoices 7 days early?", "changes": {"ar": ar}},
+        {"id": "F01-B", "name": "Beta: half of the payments 14 days later", "ask": "What if Beta lets us pay half of its invoices 14 days later?", "changes": {"ap": ap}},
+        {"id": "F01-C", "name": f"{k1} early + Beta later + sell half of last season's finished goods", "main": True,
+         "ask": f"What if {k1} pays half 7 days early, Beta lets us pay half 14 days later and we sell half of last season's finished goods?",
+         "changes": {"ar": ar, "ap": ap, "inv": inv}},
+        {"id": "F01-D", "name": f"{k1} pays half 14 days late", "ask": f"What if {k1} pays half of its invoices 14 days late?",
+         "changes": {"ar": {**ar, "days": u["late_days"], "discount": 0}}},
+        {"id": "F01-E", "name": "Sell half of last season's finished goods", "ask": "What if we sell half of last season's finished goods?", "changes": {"inv": inv}},
+    ]
 
 
 def main() -> None:
@@ -428,11 +492,11 @@ def main() -> None:
     for r in table(wb, "D_inventory"):
         ids[str(r["lot_id"]).strip()] = tr(r["Mặt hàng / lô"])
     uc03, uc04 = uc03_table(wb), uc04_setup(wb, ids)
-    text = DATA_JS.read_text(encoding="utf-8")
-    sc = re.search(r"(let SC=.*)$", text, re.S).group(1).strip()
-    head = ("/* Sample data: the raw snapshot of F01 (generated by tools/build_demo_data.py from the UC01-UC04 workbook v9), "
-            "the financing catalogue from D_UC03 and the what-if presets. */\n")
-    body = "const DATA=" + json.dumps({"cat": cat, "raw": raw, "uc03": {"F01": uc03}, "uc04": {"F01": uc04}}, ensure_ascii=False, separators=(",", ":")) + ";\n"
+    sc = "let SC=" + json.dumps([{"firm": "F01", **x} for x in presets(uc04)], ensure_ascii=False) + ";"
+    head = ("/* Sample data: the raw snapshot of F01 (generated by tools/build_demo_data.py from the FOB UC01-UC04 workbook v10), "
+            "the financing catalogue and product table from D_UC03, the UC04 defaults of F01_UC4 and the what-if presets. */\n")
+    id_map = {"customers": {k: v for k, v in ids.items() if k.startswith("BYR-")}, "suppliers": {k: v for k, v in ids.items() if k.startswith("SUP-")}}
+    body = "const DATA=" + json.dumps({"cat": cat, "raw": raw, "ids": {"F01": id_map}, "uc03": {"F01": uc03}, "uc04": {"F01": uc04}}, ensure_ascii=False, separators=(",", ":")) + ";\n"
     DATA_JS.write_text(head + body + sc + "\n", encoding="utf-8")
     for f, r in raw.items():
         print(f, r["snapshot"]["id"], "as_of", r["snapshot"]["as_of"], "N", (date.fromisoformat(r["fin"][0]["period_end"]) -

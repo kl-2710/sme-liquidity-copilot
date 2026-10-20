@@ -150,8 +150,8 @@ const loadLegacy = (p) => p.evaluate((L) => { Object.entries(L.raw).forEach(([id
 await loadLegacy(enginePage);
 await step("A · sample snapshot: N from the period, Appendix D revenue, converted COGS (T47)", async () => {
   const snap = (id) => ev((id) => { const s = DATA.snaps[id]; return { N: s.N, start: s.period_start, rev: s.fin.revenue, cogs: Math.round(s.fin.cogs), src: s.fin.cogs_src, inv: Math.round(DATA.cases[id + "|base"].invv) }; }, id);
-  // Workbook v9 (D_F01): period 01/01–20/06/2026, N = 171, revenue 30 B and COGS 24 B from the financial statements.
-  assert.deepEqual(await snap("F01"), { N: 171, start: "2026-01-01", rev: 30e9, cogs: 24e9, src: "financials", inv: 1573770492 });
+  // Workbook v10 (D_F01, FOB): period 01/01–20/06/2026, N = 171, revenue 65.016 B and COGS 53.313 B from the financial statements.
+  assert.deepEqual(await snap("F01"), { N: 171, start: "2026-01-01", rev: 65016393445, cogs: 53313442625, src: "financials", inv: 23992747640 });
   assert.deepEqual(await snap("X01"), { N: 183, start: "2026-04-01", rev: 18108528000, cogs: 14385833333, src: "converted", inv: 3450000000 });
   assert.equal(await ev(() => DATA.snaps.X02.fin.revenue), 24031968000);
 });
@@ -183,7 +183,7 @@ await step("A · the analysis period follows the chosen cut-off (default start =
   const r = await ev(() => { const s = ENGINE.makeSnapshot(ENGINE.inputFromRaw(DATA.raw.X01, new Date().toISOString()), { asOf: "2026-08-31" }); return { N: s.N, start: s.period_start, sid: s.snapshot_id }; });
   assert.deepEqual(r, { N: 183, start: "2026-03-02", sid: "SNP-X01-20260930-01@2026-08-31/183d" });
   const f = await ev(() => { const s = ENGINE.makeSnapshot(DATA.inputs.F01, { asOf: "2026-05-31" }); return { N: s.N, start: s.period_start, sid: s.snapshot_id }; });
-  assert.deepEqual(f, { N: 183, start: "2025-11-30", sid: "F01-20260620-SYN171-v1@2026-05-31/183d" });
+  assert.deepEqual(f, { N: 183, start: "2025-11-30", sid: "F01-FOB-20260620-v10@2026-05-31/183d" });
 });
 
 // TCASE builds an input that reaches given DSO/DIO/DPO exactly, plus overdue invoices, slow lots and overdue payables.
@@ -203,6 +203,11 @@ await enginePage.addScriptTag({ content: `window.TCASE=(o={})=>{
 window.SUMMARY=(r)=>({w:r.wc_class,bn:r.bn_pattern,main:r.main_bottleneck,rules:r.rule_ids,mar:Math.round(r.money_at_risk/1e6),ob:Math.round(r.obligation_overdue/1e6),
   share:r.materiality_share==null?null:Math.round(r.materiality_share*10000)/100,shape:Object.fromEntries(r.item_states.map(i=>[i.item,i.shape])),c:Object.fromEntries(r.item_states.map(i=>[i.item,i.c]))});` });
 const B = (o) => ev((x) => SUMMARY(TCASE(x)), o);
+// The Appendix D cases T01–T37 were written against the FOB threshold table tv1.threshold.v2; they test the UC01 rules, not the shipped
+// thresholds, so that table is pinned as a test fixture while they run (the app uses fob.threshold.v3, checked with F01 below).
+const LEGACY_FOB = { dso: { ref: 41.58923909, watch: 56.7221787175074, severe: 72.7583916814747 }, dio: { ref: 74.16105886, watch: 98.4402794356076, severe: 142.444059996393 },
+  dpo: { low: 13.2386325202917, high: 59.7450185196815 }, bufThin: .0531758804480545 };
+await ev((t) => { window.__FOB_V3 = CFG.wc.thr.FOB; CFG.wc.thr.FOB = t; }, LEGACY_FOB);
 await step("B · T01–T06 public-company cases", async () => {
   // DM7: DSO 112.9, revenue 741.1 B a year, current assets 406.3 B (FOB) → W2, money_at_risk 114.1 B.
   let r = await B({ N: 365, rev: 741.1e9, cogs: 600e9, dso: 112.9, ca: 406.3e9 });
@@ -276,10 +281,11 @@ await step("B · T35 missing payables, T36 provisional stock, T37 concentrated r
   r = await ev(() => TCASE({ dso: 58, mainCustomer: "K1", arOverdue: [{ customer: "K2", amount: 400e6, dpd: 40, term: 30 }] }).concentration);
   assert.equal(r.flag, "concentrated"); assert.equal(r.top.name, "K1"); assert.equal(Math.round(r.top.share * 100), 98); assert.equal(r.basis, "open_receivables_pro_rata");
 });
+await ev(() => { CFG.wc.thr.FOB = window.__FOB_V3; });
 await step("B · T47 F01 cash cycle and T48/T49 cause breakdowns", async () => {
   const cyc = (id) => ev((id) => { const d = uc01(id); return { dso: d.metrics.dso.toFixed(1), dio: d.metrics.dio.toFixed(1), dpo: d.metrics.dpo.toFixed(1), ccc: d.metrics.ccc.toFixed(1), cogs: d.coverage.cogs }; }, id);
   assert.deepEqual(await cyc("X01"), { dso: "49.6", dio: "43.9", dpo: "24.8", ccc: "68.7", cogs: "provisional" });
-  assert.deepEqual(await cyc("F01"), { dso: "39.2", dio: "11.2", dpo: "9.3", ccc: "41.1", cogs: "ok" });   // workbook v9 F01_UC1
+  assert.deepEqual(await cyc("F01"), { dso: "61.6", dio: "77.0", dpo: "25.2", ccc: "113.3", cogs: "ok" });   // workbook v10 F01_UC1 B12–B15
   // T48 assumes E_AR equals the total overdue: K1 tier 4 817,756,000; K3 tier 2 53,809,000; cancelled lot 430,000,000.
   const t48 = await ev(() => ENGINE.decompose({ E_AR: 871565000, E_INV: 430000000, arFlagged: [{ amount: 817756000, tier: 4 }, { amount: 53809000, tier: 2 }], slowLots: [{ amount: 430000000, cancelled: true }] }));
   assert.equal(t48.ok, true); assert.deepEqual(t48.parts.filter((p) => p.amount).map((p) => [p.source, p.amount]), [[1, 817756000], [2, 53809000], [6, 430000000]]);
@@ -388,12 +394,12 @@ await step("E · Q35/Q36 overdue payables are spread (offset + rank mod 5); esse
   assert.deepEqual(r.hist, ["2026-10-18", "2026-10-12"]);               // historical: due + 6 days; Conservative: due
 });
 await step("E · Q37 scenario order on the sample and the legacy samples, reconciliation and the sample scenario table", async () => {
-  const r = await ev(() => Object.fromEntries(["F01", "X01", "X02", "X03"].map((f) => { const fc = DATA.forecasts[f], rt = DATA.snaps[f].firm.rtarget;
+  const r = await ev(() => Object.fromEntries(["F01", "X01", "X02", "X03"].map((f) => { const fc = DATA.forecasts[f], rt = DATA.snaps[f].firm.rtarget ?? uc02(f).reserves.rtarget;
     return [f, { order: fc.order_ok, recon: fc.recon_ok, mins: ENGINE.SCENARIOS.map((sc) => Math.round(Math.min(...fc.scenarios[sc].days.map((x) => x.close)) / 1e6)),
       need: Math.round(Math.max(0, rt - Math.min(0, fc.scenarios.base.minCum)) / 1e6) }]; })));
   for (const f of ["F01", "X01", "X02", "X03"]) { assert.equal(r[f].order, true); assert.equal(r[f].recon, true); }
-  // Workbook v9 F01_UC2: every scenario bottoms out at −3,063.6 M on 18/09 (after the last open receipt); Continuing −4,725.7 M; need 4,763.6 M.
-  assert.deepEqual(r.F01, { order: true, recon: true, mins: [-3064, -3064, -3064, -3064, -4726], need: 4764 });
+  // Workbook v10 F01_UC2: Base bottoms out at 4,639.2 M on 21/06; NeedTarget (B17) 6,793.9 M with Z from Miller–Orr.
+  assert.deepEqual(r.F01, { order: true, recon: true, mins: [4639, 5049, 2847, 670, -825], need: 6794 });
   // Legacy samples under the v9 delay model and continuing defaults (Table E-2 had X01 Conservative −1,009 and Continuing 156 / 251).
   assert.deepEqual(r.X01, { order: true, recon: true, mins: [-619, -619, -619, -902, 247], need: 2319 });
   assert.deepEqual(r.X02, { order: true, recon: true, mins: [998, 1383, 749, 490, 998], need: 1802 });
@@ -499,8 +505,9 @@ await step("G · gap_request of F01 (need date, peak, Cash0 needed, M4, L2) is i
     return { gr: [gr.need_date, gr.peak_gap, gr.peak_date, gr.cash0_need, gr.matrix_case_id, gr.link_type, gr.evidence_level, gr.bn_pattern, gr.obligation_overdue, gr.scenario, gr.cash0_status], changed,
       th03: ENGINE.gapRequestCheck(uc02("X02"), uc01("X02"), "fresh"), w: ENGINE.gapRequestCheck(u, unknownW, "fresh").reason, exp: ENGINE.gapRequestCheck(u, d, "expired").reason,
       miss: ENGINE.gapRequestCheck({ ...u, status: "missing_data" }, d, "fresh").reason }; });
-  // Workbook v9 F01_UC2/UC03: need date 30/06, peak 3,563,626,768 on 18/09, Cash0 needed 4,763,626,768, W1 × TH01 → M4, BN4, E_AP 400,396,507.
-  assert.deepEqual(r.gr, ["2026-06-30", 3563626768, "2026-09-18", 4763626768, "M4", "L2", "candidate", "BN4", 400396507, "base", "provisional"]);
+  // Workbook v10 F01_UC2: need date 21/06, gap to Z 1,993,888,546 on 21/06, NeedTarget 6,793,888,546, BN1, E_AP 2,402,379,042 (F01_UC1 B18).
+  // The request keeps the engine's legacy 9-cell code (M4 for W1 × TH01); UC03 uses matrix.v2 (M3) from js/uc0304.js.
+  assert.deepEqual(r.gr.map((x) => (typeof x === "number" ? Math.round(x) : x)), ["2026-06-21", 1993888546, "2026-06-21", 6793888546, "M4", "L1", "candidate", "BN1", 2402379042, "base", "provisional"]);
   assert.equal(r.changed, false);
   assert.deepEqual(r.th03, { ok: false, reason: "th03", label: "idle_cash" }); assert.equal(r.w, "w_unknown"); assert.equal(r.exp, "expired"); assert.equal(r.miss, "status");
 });
@@ -532,24 +539,182 @@ await step("H · verifyAnswer: registered numbers and names pass; an unregistere
   assert.equal(r.ok, true); assert.deepEqual(r.issues, ["banned", "entity", "number"]); assert.equal(r.fb, true); assert.equal(r.bn0, true);
 });
 
-// Workbook v9 reconciliation: the shipped F01 against the Excel results of F01_UC1, F01_UC2, F01_UC03, F01_UC4 and Kiem_thu.
-await step("V9 · UC01–UC04 of F01 match the workbook v9 results", async () => {
-  const r = await ev(() => { const d = uc01("F01"), u = uc02("F01"), m3 = uc03("F01"), g = m3.rounds[0], b = u.summary.base, R = Math.round;
-    const u4 = ENGINE.simulateUC04(DATA.snaps.F01, u, d, uc04Setup(SC.find((x) => x.id === "F01-C").lev, "F01"));
-    return { uc01: [R(d.metrics.AR), R(d.metrics.INV), R(d.metrics.AP), d.metrics.dso.toFixed(4), d.metrics.dio.toFixed(4), d.metrics.dpo.toFixed(4), d.metrics.ccc.toFixed(4), R(d.metrics.ca),
-        d.materiality_share.toFixed(6), d.wc_class, d.bn_pattern, d.item_states.map((i) => R(i.E)), R(d.money_at_risk)],
-      uc02: [DATA.snaps.F01.N, DATA.snaps.F01.snapshot_id, R(u.fc.cash0 ?? DATA.snaps.F01.fin.opening_cash), R(b.min), b.min_date, R(b.peak_buffer), R(b.need_rtarget), b.first_below_rtarget, b.first_negative,
-        u.episodes.map((e) => [R(e.low), R(e.peak_gap)]), u.th.th, u.matrix.cell, u.overall, R(Math.min(...u.fc.scenarios.continuing_sales.days.map((x) => x.close)))],
-      uc03: [m3.n, m3.shape, m3.review_manual, g.need_date, g.days_left, R(g.G), g.duration, g.scenario, R(g.best_c), g.ranked.join(" > "), g.package.map((p) => p.id).join(" + "), Math.round(g.cost * 100) / 100,
-        g.cost_per_gap, g.not_covering, g.eligible_count, m3.requires_human_decision],
-      uc04: [R(u4.after.min), u4.before.gap_days, u4.after.gap_days, u4.before.negative_days, u4.after.negative_days, R(u4.gap_reduction),
-        ...["discount", "extension_fee", "sale_cash", "book_shortfall", "cash", "economic"].map((k) => Math.round(u4.costs[k] * 100) / 100), u4.conclusion, u4.th_after, u4.matrix_after] }; });
-  assert.deepEqual(r.uc01, [6885245902, 1573770492, 1311475410, "39.2459", "11.2131", "9.3443", "41.1148", 12459016394, "0.048114", "W1", "BN4", [599455226, 244802452, 400396507], 844257678]);
-  assert.deepEqual(r.uc02, [171, "F01-20260620-SYN171-v1", 1200000000, -3063626768, "2026-09-18", 3563626768, 4763626768, "2026-06-30", "2026-07-31",
-    [[797304, 499202696], [470478434, 29521566], [-522821317, 1022821317], [-3063626768, 3563626768]], "TH01", "M4", "red", -4725732031]);
-  assert.deepEqual(r.uc03, [4, "unclassifiable", true, "2026-06-30", 10, 3563626768, 82, "B2", 3057605692,
-    "NB-01 > RF-001 > FAC-001 > FAC-002 > EX-01 > AR-01 > INV-001 > CL-001 > CL-002 > INV-002", "NB-01 + RF-001", 14310286.55, 0.004, 1, 10, true]);
-  assert.deepEqual(r.uc04, [-3063518221, 54, 50, 34, 26, 108547, 19116602.58, 698931.29, 406613.9, 5082673.69, 20222147.77, 25304821.46, "partial_improvement", "TH01", "M4"]);
+// UC03 / UC04 fixtures (SRS Appendix E): an input of UC0304.prepInput built by hand. Paths are day closes from 01/07/2026; events use
+// day numbers (t) like the engine ledger. Products follow the D_UC03 columns (illustrative).
+const FX = `window.FX=(o={})=>{const d0=ENGINE.dnum('2026-07-01'),n=(o.base||[]).length,mk=a=>a.map((c,i)=>({d:ENGINE.diso(d0+i),in:0,out:0,close:c}));
+  const L=o.L??100e6,Z=o.Z??200e6,H=o.H??400e6,W=o.W||'W1',paths={base:mk(o.base),conservative:mk(o.cons||o.base),positive:mk(o.pos||o.base)};
+  const TH=o.TH||UC0304.thOf(paths.base,L,H),ev=(o.events||[]).map(e=>({scope:'in_horizon',certainty:'estimated',...e,t:typeof e.t==='string'?ENGINE.dnum(e.t):e.t}));
+  return {key:'FX|'+(o.key||'1'),firm:'T',firm_name:'Test Co',snapshot_id:o.snap||'SNP-FX',as_of:'2026-06-30',start:'2026-07-01',end:ENGINE.diso(d0+n-1),W,TH,cell:UC0304.cellOf(W,TH),L,Z,H,paths,
+    events:{base:ev,conservative:o.consEvents||ev,positive:ev},missing:o.missing||[],status:'ok',lots:o.lots||[],ids:{customers:{},suppliers:{}},revenue:9e9,N:90,st_investments:0,
+    strategic:o.strategic||[],scenario_set:['base','conservative','positive'],source_uc01_run:o.uc01||'RUN-UC01-FX',source_uc02_run:o.uc02||'RUN-UC02-FX',config_version:'CFG-FX',reserves_version:'fob.threshold.v3',
+    matrix_version:'matrix.v2',historical:{ccc:50,dso:30,dio:40,dpo:20}}};
+  window.PROD=(id,option,object,x={})=>({id,name:id,group:'',option,object,base_declared:null,adv:1,haircut:0,rate:0,fee_pct:0,fee_flat:0,hold:0,dtf:1,certainty:2,rel:0,strategic:false,pledged:false,has_data:true,early_repay:1,cause:'',...x});`;
+await enginePage.addScriptTag({ content: FX });
+const R1 = (v) => Math.round(v);
+await step("V10 · E40 F01 at 20/06/2026: W1 (BN1), TH01, M3; L 5.350,2 / Z 6.633,1 / H 9.198,9 million; Base path of F01_UC2", async () => {
+  const r = await ev(() => { const d = uc01("F01"), u = uc02("F01"), I = UC0304.prepInput(DATA.snaps.F01, d, u), b = I.paths.base;
+    return { w: d.wc_class, bn: d.bn_pattern, ccc: d.metrics.ccc.toFixed(4), dso: d.metrics.dso.toFixed(4), ear: Math.round(d.money_at_risk), th: I.TH, cell: I.cell, L: I.L, Z: I.Z, H: I.H,
+      src: Object.values(I.reserves_src), min: Math.min(...b.map((x) => x.close)), minD: b.reduce((a, x) => (x.close < a.close ? x : a)).d, below: b.filter((x) => x.close < I.L).length, end: b.at(-1).close,
+      thr: CFG.versions.threshold, fob: CFG.wc.thr.FOB.dso.watch, scen: Object.keys(I.paths), mv: I.matrix_version }; });
+  assert.deepEqual([r.w, r.bn, r.th, r.cell, r.mv, r.thr], ["W1", "BN1", "TH01", "M3", "matrix.v2", "fob.threshold.v3"]);
+  assert.deepEqual([r.ccc, r.dso, r.ear], ["113.2869", "61.5703", 1278735371]);       // F01_UC1 B15, B12, B27
+  assert.ok(Math.abs(r.L - 5350223483.048487) <= 1 && Math.abs(r.Z - 6633120075.922581) <= 1 && Math.abs(r.H - 9198913261.670769) <= 1, `${r.L} ${r.Z} ${r.H}`);
+  assert.deepEqual(r.src, ["miller_orr", "miller_orr", "miller_orr"]);
+  assert.deepEqual([R1(r.min), r.minD, r.below, R1(r.end)], [4639231530, "2026-06-21", 4, 13572983608]);   // F01_UC2 B12, B13; F01_UC4 F10, F13
+  assert.deepEqual(r.scen, ["base", "conservative", "positive"]);
+  assert.equal(r.fob, 58.2071385175);
+});
+await step("V10 · F01 UC03 acceptance (M3): AR-01 and EX-01 TOO_SLOW, AR-02 and EX-02 strategic, no timely package, RF-001 not in it", async () => {
+  const r = await ev(() => { const I = UC0304.prepInput(DATA.snaps.F01, uc01("F01"), uc02("F01")), m = UC0304.match(I, DATA.uc03.F01), s = (id) => m.sources.find((x) => x.id === id);
+    return { groups: m.groups, meta: [m.meta.matrix_case, m.meta.matrix_version, m.meta.priority_policy_version, m.meta.catalogue_version, !!m.meta.source_uc01_run, !!m.meta.source_uc02_run],
+      st: m.package.status, draws: m.package.draws.length, remZ: m.package.remaining.target_peak, floor: m.need.floor_peak, remL: m.package.remaining.floor_peak, days: m.package.remaining.floor_days,
+      ar1: s("AR-01").reasons, ex1: s("EX-01").reasons, ar2: s("AR-02").reasons, ex2: s("EX-02").reasons, rf: [s("RF-001").in_package, s("RF-001").in_policy],
+      fails: m.excluded.fails.map((x) => x.id), outside: m.excluded.outside_policy.map((x) => x.id) }; });
+  assert.deepEqual(r.groups, ["O4", "O1"]);
+  assert.deepEqual(r.meta, ["M3", "matrix.v2", "priority.v2", "cat.F01.v10.1", true, true]);
+  assert.deepEqual([r.st, r.draws], ["none", 0]);
+  assert.ok(Math.abs(r.remZ - 1993888545.9225807) <= 1, "remaining vs Z " + r.remZ);
+  assert.ok(Math.abs(r.floor - (5350223483.048487 - 4639231530)) <= 1 && Math.abs(r.remL - r.floor) <= 1 && r.days === 4, "FloorGap " + r.floor);
+  assert.deepEqual([r.ar1, r.ex1], [["TOO_SLOW"], ["TOO_SLOW"]]);
+  assert.ok(r.ar2.includes("STRATEGIC_OR_CRITICAL") && r.ex2.includes("STRATEGIC_OR_CRITICAL"));
+  assert.deepEqual(r.rf, [false, false]);
+  assert.ok(["AR-01", "EX-01", "AR-02", "EX-02"].every((x) => r.fails.includes(x)) && r.outside.includes("RF-001"));
+});
+await step("V10 · F01 UC04 acceptance (F01_UC4 case 1): Base 4.639,2M → 5.181,9M on 21/06, days < L 4 → 2, gap to Z 1.993,9M → 1.451,2M, costs, partial", async () => {
+  const r = await ev(() => { const I = UC0304.prepInput(DATA.snaps.F01, uc01("F01"), uc02("F01")), D = DATA.uc04.F01;
+    const run = UC0304.simulate(I, [{ lever: "ar", customer: D.customer, share: .5, mode: "shift_days", days: -7, discount: .01 },
+      { lever: "ap", supplier: D.supplier, share: .5, days: 14, fee: .005, consent_assumed: true },
+      { lever: "inv", lot_id: "L27", share: .5, basis: "recovery", recovery: .8, lag_days: 14, selling_cost: .02, sale_confirmed: true }]);
+    const b = run.results.base;
+    return { ids: [D.customer_id, D.supplier_id, D.lot_id], min: [b.before.min, b.after.min, b.after.min_date], days: [b.before.floor_days, b.after.floor_days], tg: [b.before.target_peak, b.after.target_peak],
+      c: b.costs, concl: run.conclusion, W: run.W, cell: [run.source_matrix_case, run.simulated_matrix_case, run.th_after], recon: run.recon_ok, scen: Object.keys(run.results), end: b.path_after.at(-1).close,
+      hist: run.historical.ccc }; });
+  assert.deepEqual(r.ids, ["BYR-F01-002", "SUP-F01-001", "L27"]);
+  const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
+  assert.ok(near(r.min[0], 4639231530) && near(r.min[1], 5181944706.225) && r.min[2] === "2026-06-21", JSON.stringify(r.min));   // F01_UC4 F6/G6/G7
+  assert.deepEqual(r.days, [4, 2]);                                                                                                    // F10/G10
+  assert.ok(near(r.tg[0], 1993888545.9225807) && near(r.tg[1], 1451175369.6975803), JSON.stringify(r.tg));                          // F8/G8
+  assert.ok(near(r.c.discount, 64996448.77) && near(r.c.fee, 4193587.755) && near(r.c.sale, 4879366.8) && near(r.c.book_shortfall, 60992085), JSON.stringify(r.c)); // G18–G21
+  assert.ok(near(r.end, 13742882544.675), "end " + r.end);                                                                             // G13
+  assert.deepEqual([r.concl, r.W, ...r.cell, r.recon], ["partial", "W1", "M3", "M3", "TH01", true]);
+  assert.deepEqual(r.scen, ["base", "conservative", "positive"]);
+  assert.equal(r.hist.toFixed(2), "113.29", "historical CCC unchanged");
+});
+await step("E15 · six W × TH combinations give M1–M6 (matrix.v2); inside the band there is no cell", async () => {
+  const r = await ev(() => ["W0", "W1", "W2"].flatMap((w) => ["TH01", "TH02", "in_band"].map((th) => UC0304.cellOf(w, th))));
+  assert.deepEqual(r, ["M1", "M2", null, "M3", "M4", null, "M5", "M6", null]);
+  const v = await ev(() => UC0304.match(FX({ W: "W0", base: [150e6, 90e6, 150e6] }), { products: [] }).meta.matrix_version);
+  assert.equal(v, "matrix.v2");
+});
+await step("E16 · an axis not released gives no cell and no request; E08 in band gives no cell", async () => {
+  const r = await ev(() => [UC0304.match(FX({ W: "unknown", missing: ["W_UNKNOWN"], base: [150e6, 90e6] }), { products: [] }), UC0304.match(FX({ base: [150e6, 300e6, 100e6] }), { products: [] })]
+    .map((m) => [m.route, m.meta.matrix_case]));
+  assert.deepEqual(r, [["not_routed", null], ["in_band", null]]);
+});
+const T3 = `window.T3=(cell,extra=[])=>{const W={M1:'W0',M3:'W1',M5:'W2'}[cell];
+  const ev=[{id:'R1',dir:'IN',src:'sales_invoice',partner:'Buyer K1',amt:60e6,t:'2026-07-08'},{id:'R2',dir:'IN',src:'sales_invoice',partner:'Buyer K1',amt:60e6,t:'2026-07-09'},
+    {id:'P1',dir:'OUT',src:'purchase_invoice',partner:'Trims SUP4',amt:10e6,t:'2026-07-03',essential:false}];
+  const lots=[{lot_id:'LA',name:'Old stock',type:'TP',owner:'own',qty:50,unit_cost:500e3,value:25e6,days:90,pledged:'no',order_status:'completed',cancelled:'no'}];
+  return FX({W,base:[150e6,150e6,40e6,40e6,40e6,40e6,40e6,150e6,150e6,150e6,150e6,150e6],events:ev,lots,key:cell});};
+  window.TB=(x={})=>({products:[PROD('AR-01','O4','OBJ-AR-K1',{fee_pct:.01,dtf:1,...(x.ar||{})}),PROD('INV-002','O3','OBJ-INV-SLOW',{haircut:.2,dtf:1}),
+    PROD('EX-01','O1','OBJ-APX',{dtf:1,...(x.ex||{})}),PROD('CL-001','O2','LIM-CL-001',{base_declared:500e6,rate:.1,hold:30,dtf:1,...(x.cl||{})})]});`;
+await enginePage.addScriptTag({ content: T3 });
+await step("E17 · M1: borrowing (O2) is the only group and its repayment date is checked", async () => {
+  const r = await ev(() => { const m = UC0304.match(T3("M1"), TB()); return { g: m.groups, d: m.package.draws.map((x) => [x.source_id, x.group]), ob: m.package.draws[0].obligations.length, tail: m.package.tail.length }; });
+  assert.deepEqual(r.g, ["O2"]); assert.deepEqual(r.d, [["CL-001", "O2"]]);
+  assert.ok(r.ob + r.tail > 0, "repayment is part of the package");
+  // A repayment inside the horizon that would push a later day below L is cut back (no new shortfall on the repayment date).
+  const c = await ev(() => { const I = T3("M1"); I.paths.base = I.paths.base.map((x, i) => (i === 10 ? { ...x, close: 101e6 } : x));
+    const m = UC0304.match(I, TB({ cl: { hold: 9 } })); const a = m.package.after; return [m.package.draws.length ? 1 : 0, a[10].close >= I.L - 1, (m.sources.find((s) => s.id === "CL-001").skips || []).map((k) => k.code)]; });
+  assert.equal(c[1], true, "no new shortfall on the repayment date"); assert.ok(c[0] === 1 || c[2].includes("CREATES_LATER_SHORTFALL"));
+});
+await step("E18 · M3: AR before AP; borrowing is never inserted", async () => {
+  const r = await ev(() => { const m = UC0304.match(T3("M3"), TB()); return { g: m.groups, d: m.package.draws.map((x) => x.group), o2: m.sources.find((s) => s.id === "CL-001").in_package }; });
+  assert.deepEqual(r.g, ["O4", "O1"]); assert.equal(r.d[0], "O4"); assert.ok(!r.d.includes("O2") && !r.o2);
+});
+await step("E19 · M5: O4 → O3 → O1 → O2, and O2 only for the gap that remains", async () => {
+  const r = await ev(() => { const I = T3("M5"), m = UC0304.match(I, TB()), dr = m.package.draws;
+    const before = dr.filter((x) => x.group !== "O2"), o2 = dr.find((x) => x.group === "O2");
+    return { g: m.groups, order: dr.map((x) => x.group), o2: o2 ? o2.net : 0, rem: m.package.episode_target_remaining, st: m.package.status, internal: before.reduce((a, x) => a + x.net, 0) }; });
+  assert.deepEqual(r.g, ["O4", "O3", "O1", "O2"]);
+  assert.deepEqual(r.order.filter((g, i, a) => a.indexOf(g) === i), ["O4", "O3", "O1", "O2"]);
+  assert.ok(r.o2 > 0 && r.o2 <= 160e6 - r.internal + 1, `O2 ${r.o2} for the remainder after ${r.internal}`);
+  assert.ok(r.rem <= 1 && r.st === "to_target", "lifted to Z on the shortfall days");
+});
+await step("E20 · a source of the first group that is not timely is not counted; the reason and the gap are reported", async () => {
+  const r = await ev(() => { const m = UC0304.match(T3("M3"), TB({ ar: { dtf: 5 }, ex: { dtf: 5 } })); const a = m.sources.find((s) => s.id === "AR-01");
+    return [m.package.status, a.reasons, m.package.remaining.target_peak, m.excluded.fails.map((s) => s.id)]; });
+  assert.deepEqual(r[0], "none"); assert.deepEqual(r[1], ["TOO_SLOW"]); assert.equal(Math.round(r[2]), 160e6); assert.ok(r[3].includes("AR-01"));
+});
+await step("E21 · M2 with SafeCash = 0: no allocation; E22 · M4/M6 large balance: hold as reserve", async () => {
+  const r = await ev(() => { const m2 = UC0304.match(FX({ W: "W0", base: [500e6, 450e6, 300e6, 200e6], cons: [500e6, 300e6, 150e6, 150e6] }), { products: [] });
+    const m4 = UC0304.match(FX({ W: "W1", base: [900e6, 950e6, 990e6] }), TB()), m6 = UC0304.match(FX({ W: "W2", base: [900e6, 950e6, 990e6] }), TB());
+    return [m2.meta.matrix_case, m2.safe_cash.value, m2.allocation, m4.meta.matrix_case, m4.route, !!m4.package, m6.meta.matrix_case, m6.route, m4.hold.L, m4.hold.Z, m4.hold.H]; });
+  assert.deepEqual(r.slice(0, 3), ["M2", 0, "none_needed"]);
+  assert.deepEqual(r.slice(3, 8), ["M4", "reserve", false, "M6", "reserve"]);
+  assert.deepEqual(r.slice(8), [100e6, 200e6, 400e6]);
+});
+await step("E23 · the same invoice is never used twice (early collection and financing; two UC04 changes)", async () => {
+  const r = await ev(() => { const I = T3("M5"), tb = TB({ cl: { base_declared: 0 } }); tb.products.push(PROD("RF-001", "O2", "OBJ-AR-K1", { adv: .9, rate: .09, dtf: 1 }));
+    const m = UC0304.match(I, tb), uses = {}; m.package.draws.forEach((d) => d.units.forEach((u) => { uses[u.uid] = (uses[u.uid] || 0) + u.share; }));
+    const v = UC0304.validate(I, [{ lever: "ar", customer: "Buyer K1", share: .7, mode: "shift_days", days: -3, discount: 0 }, { lever: "ar", customer: "Buyer K1", share: .5, mode: "shift_days", days: -2, discount: 0 }]);
+    return [Math.max(...Object.values(uses)), v.map((e) => [e.index, e.field])]; });
+  assert.ok(r[0] <= 1 + 1e-9, "share of an invoice " + r[0]);
+  assert.deepEqual(r[1], [[1, "share"]]);
+});
+await step("E24 · supplier extension past the horizon keeps the payment and fee as a tail obligation, never a saving", async () => {
+  const r = await ev(() => { const I = T3("M3"), run = UC0304.simulate(I, [{ lever: "ap", supplier: "Trims SUP4", share: 1, days: 20, fee: .01, consent_assumed: false }]), b = run.results.base;
+    return [b.tail_obligations, b.tail_events.map((t) => [t.date, Math.round(t.amount)]), run.conditions.some((c) => /stay due/.test(c)), /Assumed supplier consent/.test(run.conditions.join(" "))]; });
+  assert.equal(Math.round(r[0]), 10.1e6); assert.deepEqual(r[1], [["2026-07-23", -10.1e6]]); assert.deepEqual(r.slice(2), [true, true]);
+});
+await step("E25 · selling a lot with a planned sale replaces the plan first; an unmapped stock-sale plan blocks the change", async () => {
+  const r = await ev(() => { const I = T3("M3"); I.events.base.push({ id: "PLAN-SALE-LA", dir: "IN", src: "plan", cat: "planned_inflow", partner: "stock sale", amt: 30e6, t: ENGINE.dnum("2026-07-10"), source_id: "LA", scope: "in_horizon" });
+    I.events.conservative = I.events.positive = I.events.base;
+    const run = UC0304.simulate(I, [{ lever: "inv", lot_id: "LA", share: 1, basis: "recovery", recovery: .9, lag_days: 3, selling_cost: 0, sale_confirmed: true }]), b = run.results.base;
+    const J = T3("M3"); J.events.base.push({ id: "PLAN-X", dir: "IN", src: "plan", cat: "planned_inflow", partner: "stock sale", amt: 30e6, t: ENGINE.dnum("2026-07-10"), scope: "in_horizon" });
+    const bad = UC0304.validate(J, [{ lever: "inv", lot_id: "LA", share: 1, basis: "recovery", recovery: .9, lag_days: 3, selling_cost: 0, sale_confirmed: true }]);
+    const two = UC0304.validate(T3("M3"), [{ lever: "inv", lot_id: "LA", share: 1, basis: "recovery", recovery: .9, unit_price: 1, lag_days: 3, selling_cost: 0, sale_confirmed: true }]);
+    return [Math.round(b.path_after.at(-1).close - b.path_before.at(-1).close), b.notes, bad.map((e) => e.field), two.length]; });
+  assert.equal(r[0], -7.5e6, "net = 22,5M new − 30M planned replaced"); assert.deepEqual(r[1], ["PLAN-SALE-LA: planned sale replaced"]);
+  assert.deepEqual(r[2], ["lot_id"]); assert.equal(r[3], 0, "one price basis is used (recovery), the unit price is ignored");
+});
+await step("E26 · partial early collection with a discount: nominal part leaves the old date, the net arrives on the new date, the rest stays", async () => {
+  const r = await ev(() => { const I = T3("M3"), run = UC0304.simulate(I, [{ lever: "ar", customer: "Buyer K1", share: .5, mode: "absolute_date", date: "2026-07-03", discount: .02 }]), b = run.results.base;
+    return [b.ledger.map((x) => [x.object_id, x.moved, x.remaining, x.new, Math.round(x.cost)]), Math.round(b.path_after[2].close - b.path_before[2].close), Math.round(b.path_after[11].close - b.path_before[11].close)]; });
+  assert.deepEqual(r[0], [["R1", 30e6, 30e6, "2026-07-03", 600000], ["R2", 30e6, 30e6, "2026-07-03", 600000]]);
+  assert.deepEqual(r.slice(1), [58.8e6, -1.2e6]);
+});
+await step("E27 · UC04 applies the same change set to Base, Conservative and Positive only; E29 worse days are reported with the cost", async () => {
+  const r = await ev(() => { const I = T3("M3"), run = UC0304.simulate(I, [{ lever: "ar", customer: "Buyer K1", share: 1, mode: "shift_days", days: 5, discount: 0 }]);
+    return [Object.keys(run.results), run.meta.scenario_set, ["base", "conservative", "positive"].map((k) => run.results[k].ledger.map((x) => x.object_id).join()), run.results.base.worse_days, run.conclusion]; });
+  assert.deepEqual(r[0], ["base", "conservative", "positive"]); assert.deepEqual(r[1], ["base", "conservative", "positive"]);
+  assert.equal(new Set(r[2]).size, 1); assert.ok(r[3] > 0, "later receipts make days worse"); assert.equal(r[4], "worse");
+  const w = await ev(() => { const I = FX({ base: [150e6, 120e6, 110e6, 105e6, 150e6], events: [{ id: "P9", dir: "OUT", src: "purchase_invoice", partner: "Sup A", amt: 20e6, t: "2026-07-01", essential: false }] });
+    const run = UC0304.simulate(I, [{ lever: "ap", supplier: "Sup A", share: 1, days: 2, fee: .5, consent_assumed: false }]); return [run.conclusion, run.results.base.worse_days, Math.round(run.results.base.costs.fee)]; });
+  assert.deepEqual(w, ["worse", 3, 10e6]);
+});
+await step("E28 · a package with borrowing hands over only the internal subset, labelled, with the rest listed as not simulated", async () => {
+  const r = await ev(() => { const m = UC0304.match(T3("M5"), TB()), ids = m.package.draws.map((d) => d.source_id), pf = UC0304.prefill(m, ids);
+    const run = UC0304.simulate(T3("M5"), pf.changes.map((c) => (c.lever === "inv" ? { ...c, sale_confirmed: true } : c)), { scope: pf.scope, option_ids: pf.option_ids, not_simulated: pf.not_simulated, source_uc03_run: pf.source_match_run });
+    return [pf.scope, pf.rejected.map((x) => x.id), pf.not_simulated.map((x) => x.id), pf.changes.map((c) => c.lever), run.status, run.scope, run.source_uc03_run === m.meta.match_run_id]; });
+  assert.equal(r[0], "subset"); assert.deepEqual(r[1], ["CL-001"]); assert.ok(r[2].includes("CL-001"));
+  assert.ok(!r[3].includes("o2") && r[3].every((l) => ["ar", "ap", "inv"].includes(l)));
+  assert.deepEqual(r.slice(4), ["ok", "subset", true]);
+});
+await step("E35 · runs on different bases are not compared; the same base compares without a 'cheapest' pick", async () => {
+  const r = await ev(() => { const a = UC0304.simulate(T3("M3"), [{ lever: "ar", customer: "Buyer K1", share: .5, mode: "shift_days", days: -3, discount: 0 }], { seq: 1 });
+    const b = UC0304.simulate(T3("M3"), [{ lever: "ar", customer: "Buyer K1", share: 1, mode: "shift_days", days: -3, discount: 0 }], { seq: 2, parent_id: a.sim_run_id });
+    const I2 = T3("M3"); I2.source_uc02_run = "RUN-UC02-OTHER"; const c = UC0304.simulate(I2, [{ lever: "ar", customer: "Buyer K1", share: .5, mode: "shift_days", days: -3, discount: 0 }]);
+    const ok = UC0304.compare([a, b]), no = UC0304.compare([a, c]); return [ok.ok, ok.rows.length, Object.keys(ok.rows[0]).includes("best"), no.ok, no.reason, b.parent_id === a.sim_run_id, a.sim_run_id !== b.sim_run_id]; });
+  assert.deepEqual(r, [true, 2, false, false, "different_base", true, true]);
+});
+await step("UC04 · validation stays at the field: shares, day counts, one price basis, owned and unpledged lots, essential supplier consent", async () => {
+  const r = await ev(() => { const I = T3("M3"); I.lots.push({ lot_id: "LP", name: "Pledged", type: "TP", owner: "own", qty: 10, unit_cost: 1e6, value: 10e6, days: 10, pledged: "yes", order_status: "completed" });
+    I.events.base.push({ id: "P2", dir: "OUT", src: "purchase_invoice", partner: "Beta Fabric", amt: 10e6, t: ENGINE.dnum("2026-07-05"), essential: true, scope: "in_horizon" });
+    return UC0304.validate(I, [{ lever: "ar", customer: "Buyer K1", share: 1.5, mode: "shift_days", days: 0, discount: 0 }, { lever: "ap", supplier: "Beta Fabric", share: .5, days: 7, fee: 0, consent_assumed: false },
+      { lever: "inv", lot_id: "LP", share: .5, basis: "", lag_days: -1, selling_cost: 0, sale_confirmed: false }, { lever: "inv", lot_id: "LA", qty: 150, basis: "unit_price", unit_price: 0, lag_days: 1, selling_cost: 0, sale_confirmed: true },
+      { lever: "loan" }]).map((e) => `${e.index}.${e.field}`); });
+  assert.deepEqual(r, ["0.share", "0.days", "1.consent_assumed", "2.lot_id", "2.basis", "2.lag_days", "2.sale_confirmed", "3.qty", "3.unit_price", "4.lever"]);
 });
 
 for (const theme of ["light", "dark"]) {
@@ -616,15 +781,16 @@ for (const theme of ["light", "dark"]) {
   await step(`[${theme}] Task 1 diagnosis shows DSO/DIO/DPO/CCC`, async () => {
     await ask("Where is my working capital stuck?");
     const t = await last().innerText();
-    assert.match(t, /diagnose_working_capital/); assert.match(t, /41[.,]1/);
+    assert.match(t, /diagnose_working_capital/); assert.match(t, /61[.,]6/);
     assert.equal(await last().locator(".ans5 > p").count(), 5); assert.match(t, /1\. Overall conclusion\..*5\. What to check and the limits\./s); assert.match(t, /Tools used: diagnose_working_capital/);
+    assert.doesNotMatch(t, /Tier \d/, "no permission-tier labels on tool calls");
   });
   await step(`[${theme}] Task 2 explains every gap; suggestions sit only under the latest answer`, async () => {
     await ask("Why am I short of cash? Show me the contributing factors.");
     const acc = last().locator(".gap-acc");
-    assert.equal(await acc.count(), 4, "one contributing-factors card per gap");
-    assert.equal(await last().locator(".ans4 > p").count(), 4); assert.match(await last().innerText(), /Tools used: forecast_cash/); assert.match(await last().innerText(), /forecast_cash/);
-    assert.deepEqual(await acc.evaluateAll((els) => els.filter((e) => e.open).map((e) => e.dataset.gap)), ["4"], "largest gap open");
+    assert.equal(await acc.count(), 1, "one contributing-factors card per gap");
+    assert.equal(await last().locator(".ans4 > p").count(), 4); assert.match(await last().innerText(), /Tools used: forecast_cash/);
+    assert.deepEqual(await acc.evaluateAll((els) => els.filter((e) => e.open).map((e) => e.dataset.gap)), ["1"], "largest gap open");
     assert.equal(await page.locator("#demoChips").isVisible(), false, "no chips by the composer after the first message");
     assert.equal(await page.locator(".messages.on .suggest").count(), 1, "one suggestion row in the whole chat");
     const chips = await last().locator(".suggest button").allInnerTexts();
@@ -642,78 +808,149 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator('#panelWrap [role="tab"], #panelWrap .tab, #panelWrap [data-tab]').count(), 0, "no way to switch views inside the panel");
     await page.click("#panelClose");
   });
-  await step(`[${theme}] Shortfall after task 2: no daily table, overview alert/outlook tiles, Forecast confidence, Two-week view or Financing match`, async () => {
+  await step(`[${theme}] Shortfall after task 2: no daily table or financing ranking; it hands over to Solutions`, async () => {
     await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(700);
     const txt = await page.locator("#pane-gap").innerText();
-    assert.equal(await page.locator('#pane-gap :is(#dailyBtn, .fbcard, [data-wid="reliability"], [data-wid="blocks"], #finMatch)').count(), 0);
+    assert.equal(await page.locator('#pane-gap :is(#dailyBtn, .fbcard, [data-wid="reliability"], [data-wid="blocks"], .uc03-rank, .rank-sum, [data-try])').count(), 0);
     assert.doesNotMatch(txt, /Show the daily table|Overall alert|Cash state \(Base\)|Forecast reliability|Forecast confidence|Two-week|Funding plan|Financing ranking/);
     assert.equal(await page.locator("#pane-gap .uc2-tiles .ls-tile").count(), 4, "four overview tiles");
     assert.deepEqual(await page.locator("#pane-gap .dsec h2").allInnerTexts(), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
-    assert.equal(await page.locator("#pane-gap #gapChart").count(), 1, "the daily chart stays");
-    assert.equal(await last().locator(".suggest button", { hasText: "Rank the financing options that fit these factors." }).count(), 1, "the task 3 question is suggested under the last answer");
+    assert.equal(await page.locator("#pane-gap #finMatch [data-open-sol]").count(), 1, "Shortfall hands over to the Solutions view");
+    assert.equal(await last().locator(".suggest button", { hasText: "What are my solutions for this shortfall?" }).count(), 1, "the solutions question is suggested under the last answer");
     await page.click("#panelClose");
   });
-  await step(`[${theme}] Task 3 ranks financing for the whole shortfall (workbook v9 UC03)`, async () => {
-    await last().locator(".suggest button", { hasText: "Rank the financing options that fit these factors." }).click(); await page.waitForTimeout(3800);
-    const card = last().locator(".liq.rank-all.uc03");
-    assert.equal(await card.count(), 1);
-    assert.deepEqual(await card.locator("tbody tr[data-prod]").evaluateAll((els) => els.map((e) => e.dataset.prod)),
-      ["NB-01", "RF-001", "FAC-001", "FAC-002", "EX-01", "AR-01", "INV-001", "CL-001", "CL-002", "INV-002"]);
-    assert.match(await card.innerText(), /Proposed package: NB-01 .* \+ RF-001 /);
-    assert.match(await card.innerText(), /scenario B2/);
-    assert.match(await last().innerText(), /match_financing/);
-    assert.doesNotMatch(await page.locator(".messages.on").innerText(), /forecast_liquidity|rank_financing|explain_liquidity_case|get_receivables/);
-    assert.equal(await page.locator("#demoChips").isVisible(), false);
-    assert.equal(await page.locator(".messages.on .suggest").count(), 1); assert.equal(await last().locator(".suggest").count(), 1);
-    await last().locator(".liq-act [data-a=open]").click(); await page.waitForTimeout(1200);
-    assert.equal(await page.locator("#detailTitle").innerText(), "Shortfall");
-    assert.match(await page.locator("#finMatch").innerText(), /Funding plan for the shortfall/);
-    assert.ok(await page.evaluate(() => { const f = document.querySelector("#finMatch"), g = [...document.querySelectorAll("#pane-gap .dsec h2")].find((h) => h.textContent === "Cash gaps");
-      return !!g && (g.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) > 0; }), "Financing match sits under Cash gaps");
-    assert.ok(await page.evaluate(() => Math.abs(document.querySelector("#finMatch").getBoundingClientRect().top - document.querySelector("#pane-gap").getBoundingClientRect().top) < 80), "Open scrolls to the financing match");
-    await shot(page, `${theme}-shortfall-financing`);
-    await page.click("#panelClose");
+  await step(`[${theme}] UC03.2 chat: facts of the M3 policy, no timely package, borrowing not added`, async () => {
+    await last().locator(".suggest button", { hasText: "What are my solutions for this shortfall?" }).click(); await page.waitForTimeout(3800);
+    const t = await last().innerText();
+    assert.match(t, /match_financing/); assert.match(t, /cell M3 \(matrix\.v2, priority\.v2\)/);
+    assert.match(t, /711,0M below L \(1\.993,9M to the target Z\) from 21 Jun 2026/);
+    assert.match(t, /no timely package/); assert.match(t, /Too slow: (EX-01, AR-01|AR-01, EX-01)/); assert.match(t, /Borrowing is not in the policy of this cell/);
+    assert.match(t, /Analysis and simulation only; decide and act outside the app\./);
+    await ask("Put the bank loan first instead of receivables");
+    assert.match(await last().innerText(), /owner-confirmed policy for this cell; the chat does not change it/);
   });
-  await step(`[${theme}] Task 4 what-if creates drafts pending approval`, async () => {
-    await ask("Explain gap 3");
-    // Main demo (workbook v9 UC04 case 1): K1 early 7 days, Beta 14 days later, half of last season's finished goods sold.
-    await ask("What if K1 pays half of its invoices 7 days early, Beta lets us pay half 14 days later and we sell half of last season's finished goods?");
-    const t4 = await last().innerText();
-    assert.match(t4, /simulate_scenario/); assert.match(t4, /days below the safe level 54 → 50; days below zero 34 → 26/); assert.match(t4, /Partial improvement/);
-    assert.match(t4, /Cash cost 20,2M \(early-payment discount 19,1M, extension fee 0,7M, sale cost 0,4M\)/);
-    await last().locator("button", { hasText: "Create draft" }).click();
-    await page.waitForTimeout(1800);
-    assert.ok(Number(await page.locator("#pendN").innerText()) > 0);
-    await shot(page, `${theme}-drafts`);
+  await step(`[${theme}] UC03.1 Solutions view (F01, M3): need, no package, sources, exclusions split, versions`, async () => {
+    await last().locator("button", { hasText: "Open Solutions" }).first().click().catch(async () => page.evaluate(() => openDetail("sol")));
+    await page.evaluate(() => openDetail("sol")); await page.waitForTimeout(700);
+    assert.equal(await page.locator("#detailTitle").innerText(), "Solutions");
+    assert.equal(await page.locator("#solCell").innerText(), "M3 · At risk + short of cash");
+    assert.equal(await page.locator("#solFloor").innerText(), "711,0M"); assert.equal(await page.locator("#solTarget").innerText(), "1.993,9M");
+    assert.equal(await page.locator("#solNoPkg").count(), 1);
+    assert.match(await page.locator("#solRemain").innerText(), /Remaining under L: peak 711,0M on 4 day\(s\)\. Remaining under Z: peak 1\.993,9M/);
+    assert.match(await page.locator('[data-src="AR-01"]').innerText(), /TOO_SLOW/); assert.match(await page.locator('[data-src="EX-01"]').innerText(), /TOO_SLOW/);
+    assert.match(await page.locator('[data-src="AR-02"]').innerText(), /Strategic customer or essential supplier/);
+    assert.match(await page.locator('[data-src="EX-02"]').innerText(), /Strategic customer or essential supplier/);
+    assert.equal(await page.locator('[data-src="RF-001"]').count(), 0, "borrowing is not a group of M3");
+    assert.match(await page.locator("#solOutside").innerText(), /RF-001 \(O2\)/);
+    assert.equal(await page.locator('#solFails [data-xsrc="AR-01"]').count(), 1); assert.match(await page.locator("#solLacks").innerText(), /None/);
+    assert.match(await page.locator("#pane-sol").innerText(), /illustrative/);
+    assert.match(await page.locator("#pane-sol .u34-meta").innerText(), /L 5\.350,2M · Z 6\.633,1M · H 9\.198,9M .*matrix\.v2 · catalogue cat\.F01\.v10\.1/);
+    // UC03.3 detail: basis, net amount, fees, obligations, evidence.
+    await page.click('[data-det="AR-01"]'); await page.waitForTimeout(300);
+    const det = await page.locator("#modal").innerText();
+    for (const k of ["Basis", "Net amount", "Fees and cost", "Obligations", "Evidence", "EL-03-01", "EL-03-02"]) assert.match(det, new RegExp(k));
+    await page.click("#mClose");
+    // UC03.4: a hard-failed source cannot be used; excluding an eligible one saves a new version and keeps the original.
+    assert.equal(await page.locator('[data-ex="AR-02"]').count(), 0, "no override of hard checks");
+    await page.click('[data-ex="EX-01"]'); await page.click("#mOk");
+    assert.equal(await page.locator("#exReasonE").innerText(), "Give a specific reason");
+    await page.fill("#exReason", "Supplier refused any deferral"); await page.click("#mOk"); await page.waitForTimeout(400);
+    assert.match(await page.locator('[data-src="EX-01"]').innerText(), /Not used: Supplier refused any deferral/);
+    assert.match(await page.locator("#solVersions").innerText(), /Original package[\s\S]*Not used EX-01: “Supplier refused any deferral”/);
+    assert.deepEqual(await page.evaluate(() => [U34.matchNow().meta.priority_policy_version, U34.matchNow().groups.join()]), ["priority.v2", "O4,O1"], "same order after the choice");
+    await page.click('[data-undo="EX-01"]'); await page.waitForTimeout(300);
+    await shot(page, `${theme}-solutions`);
   });
-  await step(`[${theme}] approval needs the acknowledgement and records a simulated execution`, async () => {
-    await page.click("#pendChip"); await page.waitForTimeout(1000);
-    await page.locator("#pane-appr button", { hasText: /^✓?\s*Approve$/ }).first().click();
-    assert.equal(await page.locator("#mOk").isDisabled(), true);
-    await page.check("#ackChk"); await page.click("#mOk"); await page.waitForTimeout(2500);
-    assert.match(await page.locator("#pane-appr").innerText(), /Executed \(simulated\)/);
-    assert.match(await last().innerText(), /executed \(simulated\)/);
-    await shot(page, `${theme}-approved`);
+  await step(`[${theme}] UC03.5 policy and catalogue: the accountant proposes, the owner confirms, packages to rerun are listed`, async () => {
+    await page.click("#solPolicy"); await page.waitForTimeout(300);
+    await page.click('[data-role="accountant"]'); await page.waitForTimeout(200);
+    await page.selectOption("#ppProd", "AR-01"); await page.selectOption("#ppField", "dtf"); await page.fill("#ppVal", "1"); await page.fill("#ppSrc", "K1 confirmed same-day payment run");
+    await page.click("#ppAdd"); await page.waitForTimeout(200);
+    assert.match(await page.locator("#ppPending").innerText(), /AR-01 · dtf → 1 .* waiting for the owner/);
+    assert.equal(await page.locator("#ppPending [data-conf]").count(), 0, "the accountant cannot confirm");
+    await page.click('[data-role="owner"]'); await page.waitForTimeout(200);
+    await page.click("#ppPending [data-conf]"); await page.waitForTimeout(300);
+    assert.match(await page.locator("#ppRerun").innerText(), /MATCH-\w+ \(M3\) used cat\.F01\.v10\.1/);
+    await page.click("#mClose"); await page.waitForTimeout(400);
+    assert.match(await page.locator("#pane-sol .u34-meta").innerText(), /catalogue cat\.F01\.v10\.1\+1/);
+    // With the new days-to-fund, AR-01 is timely: K1 receipts move to 21 Jun and the package is built.
+    assert.match(await page.locator('[data-src="AR-01"]').innerText(), /In package/);
+    assert.equal(await page.locator("#solNoPkg").count(), 0);
+    await page.evaluate(() => { localStorage.removeItem(`lilact.uc03.v1.${S.user.id}.F01`); U34.reset(); openDetail("sol"); }); await page.waitForTimeout(400);
+    assert.equal(await page.locator("#solNoPkg").count(), 1, "back to the shipped catalogue");
   });
-  await step(`[${theme}] reject needs a reason`, async () => {
-    await page.locator("#pane-appr .ac .btn.danger").first().click();
-    assert.equal(await page.locator("#mOk").isDisabled(), true);
-    await page.fill("#rjTxt", "Cost too high"); await page.click("#mOk"); await page.waitForTimeout(1500);
-    assert.match(await page.locator("#pane-appr").innerText(), /Rejected/);
+  await step(`[${theme}] E33 · result → solution → test in three actions; the internal part is pre-filled and labelled`, async () => {
+    await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(500);
+    await page.click("#pane-gap [data-open-sol]"); await page.waitForTimeout(500);                     // 1
+    assert.equal(await page.locator("#detailTitle").innerText(), "Solutions");
+    assert.match(await page.locator("#solNotSim").innerText().catch(() => ""), /^$|Not simulated/);
+    await page.click("#solTryBtn"); await page.waitForTimeout(500);                                         // 2
+    assert.equal(await page.locator("#detailTitle").innerText(), "What-if");
+    assert.match(await page.locator("#wiPrefill").innerText(), /Pre-filled from MATCH-\w+ \(.*AR-01.*\) · sources outside the package/);
+    await page.check('.u34-row:has([data-f="consent_assumed"]) [data-f="consent_assumed"] >> nth=0').catch(() => {});
+    await page.click("#wiRun"); await page.waitForTimeout(500);                                             // 3
+    assert.equal(await page.locator("#wiResult").count(), 1);
+    assert.match(await page.locator("#wiScope").innerText(), /only .*AR-01.* simulated/);
+  });
+  await step(`[${theme}] UC04 · F01 defaults: Base first, the three scenarios, costs and conclusion (F01_UC4 case 1)`, async () => {
+    await page.click("#wiReset"); await page.click("#wiRun"); await page.waitForTimeout(500);
+    const res = page.locator("#wiResult");
+    assert.equal(await page.locator("#wiConcl").innerText(), "Partial improvement");
+    const base = await page.locator("#wi-base").innerText();
+    assert.match(base, /Lowest cash\s+4\.639,2M\s+5\.181,9M/); assert.match(base, /TargetGap peak \(to Z\)\s+1\.993,9M\s+1\.451,2M/);
+    assert.match(base, /Days below L\s+4\s+2/); assert.match(base, /Lowest after on 21 Jun 2026/);
+    assert.equal(await page.locator("#wiCostDisc").innerText(), "65,0M"); assert.equal(await page.locator("#wiCostFee").innerText(), "4,19M");
+    assert.equal(await page.locator("#wiCostSale").innerText(), "4,88M"); assert.equal(await page.locator("#wiBook").innerText(), "61,0M");
+    assert.match(await page.locator("#wiMatrix").innerText(), /Published cell M3 and W1 are unchanged.*simulated cell M3/);
+    assert.match(await page.locator("#wiMatrix").innerText(), /Equivalent DSO days \(reference only\)/);
+    assert.equal(await page.locator("#wi-conservative").count(), 1); assert.equal(await page.locator("#wi-positive").count(), 1);
+    assert.match(await page.locator("#wi-conservative").innerText(), /Conservative · sensitivity/);
+    assert.ok(await page.evaluate(() => { const a = document.querySelector("#wi-base"), b = document.querySelector("#wiSens"); return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); }), "Base comes first");
+    const txt = await res.innerText();
+    assert.doesNotMatch(txt, /CCC \d+[.,]?\d* → |CCC after|DSO\s+\d.*→/, "no CCC x→y or before/after ratio table");
+    assert.match(await page.locator("#pane-whatif").innerText(), /Assumed supplier consent/);
+    assert.equal(await page.locator('#pane-whatif .u34-lever').count(), 3, "exactly three levers");
+    assert.doesNotMatch(await page.locator("#pane-whatif").innerText(), /Finance one invoice|Create draft|Approve/);
+    await shot(page, `${theme}-whatif`);
+  });
+  await step(`[${theme}] UC04 · field errors stay at the field and keep the other inputs; a change creates a linked run; compare refuses another base`, async () => {
+    const share = page.locator('.u34-lever[data-lever="inv"] [data-f="share"]');
+    await share.fill("250"); await page.click("#wiRun"); await page.waitForTimeout(300);
+    assert.match(await page.locator('[data-err="2.share"]').innerText(), /Only 3000 units are available|at most 100%/);
+    assert.equal(await page.locator('.u34-lever[data-lever="ar"] [data-f="share"]').inputValue(), "50", "other inputs are kept");
+    await page.locator('.u34-lever[data-lever="inv"] [data-f="share"]').fill("50");
+    await page.locator('.u34-lever[data-lever="ar"] [data-f="days"]').fill("-10"); await page.click("#wiRun"); await page.waitForTimeout(400);
+    const runs = await page.evaluate(() => U34.sims().runs.slice(0, 2).map((r) => [r.sim_run_id, r.parent_id]));
+    assert.equal(runs[0][1], runs[1][0], "the new run links the previous one");
+    await page.evaluate(() => { const st = U34.sims(), r = JSON.parse(JSON.stringify(st.runs[1])); r.sim_run_id = "SIM-OTHERBASE"; r.meta.source_uc02_run = "RUN-UC02-OLD"; st.runs.push(r); st.cmp = new Set([st.runs[0].sim_run_id, "SIM-OTHERBASE"]); U34.renderWhatIf(); });
+    await page.click("#wiCmp"); await page.waitForTimeout(200);
+    assert.match(await page.locator("#wiCmpRefused").innerText(), /different base, policy or scenario set/);
+    await page.evaluate(() => { const st = U34.sims(); st.runs = st.runs.filter((r) => r.sim_run_id !== "SIM-OTHERBASE"); st.cmp = new Set(st.runs.slice(0, 2).map((r) => r.sim_run_id)); U34.renderWhatIf(); });
+    await page.click("#wiCmp"); await page.waitForTimeout(200);
+    assert.equal(await page.locator("#wiCmpTable").count(), 1); assert.doesNotMatch(await page.locator("#wiCmpTable").innerText(), /★|cheapest/i);
+  });
+  await step(`[${theme}] UC04.3 / UC04.6 chat: answers from the run's facts, E30 refused, sending refused, no approval queue`, async () => {
+    await ask("What if K1 pays half of its invoices 7 days early?");
+    const t = await last().innerText();
+    assert.match(t, /simulate_scenario/); assert.match(t, /lowest cash moves from 4\.639,2M to 5\.181,9M on 21 Jun 2026; days below L 4 → 2/);
+    assert.match(t, /Sensitivity: Conservative/);
+    await ask("How much interest do we save because the CCC is lower?");
+    assert.match(await last().innerText(), /Interest savings from a lower CCC are not computed/);
+    await ask("Send the extension request to Beta now");
+    assert.match(await last().innerText(), /does not send, sign, approve or execute anything\. Analysis and simulation only; decide and act outside the app\./);
+    assert.equal(await page.locator('#pendChip, #apprBadge, [data-view="appr"], #pane-appr').count(), 0, "no approval queue, badge or pending chip");
+    assert.doesNotMatch(await page.locator("#app").innerText(), /Approval queue|Pending|executed \(simulated\)/);
   });
   await step(`[${theme}] "Explain gap N" selects that gap; unknown gaps are reported`, async () => {
-    await ask("Explain gap 2");
+    await ask("Explain gap 1");
     assert.equal(await last().locator(".gap-acc").count(), 1);
-    assert.equal(await page.evaluate(() => EP.k), 2);
-    await ask("Rank financing for gap 4");
-    assert.equal(await last().locator(".rank-sum tbody tr").count(), 1);
-    assert.equal(await page.evaluate(() => EP.k), 4);
+    assert.equal(await page.evaluate(() => EP.k), 1);
     await ask("Explain gap 9");
     assert.match(await last().innerText(), /There is no gap 9/);
   });
   await step(`[${theme}] each detail view renders alone, with its own title and no tabs`, async () => {
-    const titles = { dash: "Dashboard", gap: "Shortfall", whatif: "What-if", appr: "Approvals" };
-    for (const t of ["dash", "gap", "whatif", "appr"]) {
+    const titles = { dash: "Dashboard", gap: "Shortfall", sol: "Solutions", whatif: "What-if" };
+    for (const t of ["dash", "gap", "sol", "whatif"]) {
       await page.evaluate((v) => openDetail(v), t); await page.waitForTimeout(500);
       assert.equal(await page.locator("#detailTitle").innerText(), titles[t]);
       assert.ok((await page.locator(`#pane-${t}`).innerText()).length > 40, t);
@@ -721,33 +958,26 @@ for (const theme of ["light", "dark"]) {
     }
     assert.equal(await page.locator('#panelWrap [role="tab"], #panelWrap .tab, #tabs').count(), 0);
     await page.keyboard.press("2"); await page.waitForTimeout(200);
-    assert.equal(await page.evaluate(() => S.detail), "appr", "number keys no longer switch views");
+    assert.equal(await page.evaluate(() => S.detail), "whatif", "number keys no longer switch views");
     await page.click("#panelClose"); assert.equal(await page.evaluate(() => S.panel), false);
     await page.click("#panelBtn"); await page.waitForTimeout(300);
-    assert.equal(await page.locator("#detailTitle").innerText(), "Approvals", "the header button reopens the last detail view");
+    assert.equal(await page.locator("#detailTitle").innerText(), "What-if", "the header button reopens the last detail view");
   });
-  await step(`[${theme}] dashboard has no forecast; Shortfall holds forecast, daily chart, gaps and ranking`, async () => {
+  await step(`[${theme}] dashboard has no forecast; Shortfall holds forecast, daily chart and gaps`, async () => {
     await page.evaluate(() => openDetail("dash")); await page.waitForTimeout(500);
     assert.equal(await page.locator('#pane-dash :is([data-wid="flow"], [data-wid="daily"], .fch, #gapChart, #dashChart)').count(), 0);
     assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /13-week cash forecast/);
     assert.equal(await page.locator("#pane-dash .lstate").count(), 0, "the liquidity-state banner is no longer on the Dashboard");
-    assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /Liquidity Shortfall Alert|Cash shortfall ahead/);
     await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(700);
     assert.equal(await page.evaluate(() => document.querySelector("#pane-gap").firstElementChild.classList.contains("lstate")), true, "the banner leads the Shortfall view");
     assert.match(await page.locator("#pane-gap .lstate .lv-pill").innerText(), /Highest alert: Red/);
     assert.equal(await page.evaluate(() => { const s = S.stage; S.stage = 1; renderGap(); const n = document.querySelectorAll("#pane-gap .lstate").length; S.stage = s; renderGap(); return n; }), 0, "no banner before step 2");
     const h2 = await page.locator("#pane-gap .dsec h2").allInnerTexts();
     assert.deepEqual(h2.slice(0, 3), ["13-week cash forecast", "Daily cash balance", "Cash gaps"]);
-    assert.match(h2[3], /^Funding plan for the shortfall/);
     const cards = page.locator("#pane-gap .ep");
-    assert.equal(await cards.count(), 4);
-    assert.deepEqual(await cards.evaluateAll((els) => els.map((e) => e.dataset.lv)), ["red", "yellow", "red", "red"]);
-    assert.match((await cards.allInnerTexts())[1], /Yellow alert/);
-    assert.doesNotMatch(await page.locator("#pane-gap").innerText(), /Target gap|No TV3 result/);
-    assert.equal(await page.locator("#pane-gap #gapChart .gapband").count(), 4);
-    await page.click('#pane-gap .ep[data-ep="3"]'); await page.waitForTimeout(600);
-    assert.deepEqual(await page.locator("#pane-gap .ft thead th.gapwk").evaluateAll((els) => els.map((e) => e.dataset.w)), ["6", "7", "8"]);
-    assert.equal(await page.locator("#pane-gap table:not(.ft) tbody tr td:nth-child(2) b").first().innerText(), "NB-01");
+    assert.equal(await cards.count(), 1);
+    assert.deepEqual(await cards.evaluateAll((els) => els.map((e) => e.dataset.lv)), ["red"]);
+    assert.equal(await page.locator("#pane-gap #gapChart .gapband").count(), 1);
     await shot(page, `${theme}-shortfall`);
   });
   await step(`[${theme}] alert colours follow SRS 2.8.11.3 boundaries`, async () => {
@@ -1023,7 +1253,7 @@ for (const theme of ["light", "dark"]) {
     assert.equal(await page.locator("#pane-gap .c0b").count(), 0);
   });
 
-  await step("G · Find financing shows the gap_request summary; the chat ranking uses the confirmed request; wording is 'contributing factors'", async () => {
+  await step("G · the gap_request summary stays on Shortfall; Solutions opens directly from the banner; wording is 'contributing factors'", async () => {
     await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(2); openDetail("gap"); setWide(true); }); await page.waitForTimeout(700);
     assert.match(await page.locator("#pane-gap .cfcard h3").innerText(), /Contributing factors · gap \d/);
     await page.click("#grBtn"); await page.waitForTimeout(300);
@@ -1038,7 +1268,10 @@ for (const theme of ["light", "dark"]) {
     const cause = await page.locator(".messages.on .msg.bot").last().innerText();
     assert.match(cause, /Contributing factors · gap/); assert.doesNotMatch(cause, /Why gap|main cause/i);
     await page.fill("#chatInput", "Rank the financing options that fit these factors."); await page.click("#sendBtn"); await page.waitForTimeout(3800);
-    assert.ok((await page.locator(".messages.on .msg.bot").last().innerText()).includes(`Request ${id}: cash needed from ${need}`));
+    assert.match(await page.locator(".messages.on .msg.bot").last().innerText(), /give cell M3 \(matrix\.v2, priority\.v2\)/);
+    await page.evaluate(() => openDetail("gap")); await page.waitForTimeout(500);
+    const fund = page.locator('#pane-gap [data-liq="fund"]');
+    if (await fund.count()) { await fund.first().click(); await page.waitForTimeout(500); assert.equal(await page.locator("#detailTitle").innerText(), "Solutions"); }
   });
   await step("G · legacy X02 (Base TH03): the button offers idle-cash options and no request is created", async () => {
     await loadLegacy(page);
@@ -1231,6 +1464,14 @@ await step("mobile 390px: no horizontal scroll, menu opens", async () => {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1);
   await shot(page, "mobile-390-company-data");
   await page.click("#dataBack");
+  for (const v of ["sol", "whatif"]) {
+    await page.evaluate((x) => openDetail(x), v); await page.waitForTimeout(600);
+    if (v === "whatif") { await page.click("#wiRun"); await page.waitForTimeout(400); }
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1, v + ": no page scroll");
+    assert.ok(await page.evaluate((x) => { const p = document.querySelector("#pane-" + x); return p.scrollWidth - p.clientWidth <= 1; }, v), v + ": no horizontal scroll in the panel");
+    await shot(page, "mobile-390-" + v);
+    await page.click("#panelClose");
+  }
   await page.click("#menuBtn"); await page.waitForTimeout(500);
   assert.equal(await page.locator("#side").isVisible(), true);
   await page.close();

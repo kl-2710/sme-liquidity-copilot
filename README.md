@@ -21,12 +21,12 @@ python3 -m http.server 8000        # or any static file server
 - **Chat:** one continuous conversation. Analysis advances through the same four business stages in order:
   1. Working-capital diagnosis (DSO · DIO · DPO · CCC)
   2. Cash-flow forecast (13 weeks, shortfall windows)
-  3. Financing match (one funding plan for the whole shortfall, ranked by the workbook UC03 rules)
-  4. What-if and drafts (levers, then drafts awaiting approval)
-- **Detail views:** Dashboard, Shortfall, What-if and Approvals open one at a time in the right-hand panel, from the "Open…" button of the matching chat answer; there is no tab bar. Audit events remain available internally but are not displayed. Company data is a single full-page Files screen.
+  3. Solutions (UC03, SRS v2.3 §2.9): sources in the priority order of the matrix cell (matrix.v2, priority.v2), the daily package and what remains under L and under Z
+  4. What-if (UC04, SRS v2.3 §2.10): three levers applied to Base, Conservative and Positive
+- **Detail views:** Dashboard, Shortfall, Solutions and What-if open one at a time in the right-hand panel. Solutions and What-if also open directly from the sidebar and prepare their own UC01/UC02 results (no stage gate). Audit events remain available internally but are not displayed. Company data is a single full-page Files screen.
+- **Analysis and simulation only:** two roles (owner, accountant); there is no approval queue, no drafts and no "executed" state. Decisions and actions happen outside the app; results can be exported (JSON / CSV).
 - **Company files:** upload CSV, XLSX, XLS and DOCX files. Files stay in this browser's IndexedDB; Word files are reference-only. Recognised tables (sales and purchase invoices, inventory, 13-week plan, financial statements) are read and checked in the background; once financial statements and at least one cash-flow table are present, the company data is updated automatically and each file shows *Used in analysis* (or what is still missing). The newest file of each type wins. Deleting a file keeps the data already in use.
-- **Permission tiers:** T0 Read · T1 Advise · T2 Draft · T3 Approve. Only the Approve click in the UI runs a *simulated* execution.
-- **Data:** one synthetic company, F01 (CMT garment subcontractor), from the workbook `data/uc_workbook_v9.xlsx`: period 01/01–20/06/2026 (N = 171 days), cut-off 20/06/2026, 13-week horizon, opening cash 1,2 billion VND, Rmin / Rtarget / Rupper 250 / 500 / 1.000 million VND. Every figure is computed in the browser by `js/engine.js` (UC01–UC04 rules aligned with the workbook) from the raw invoices, lots and plans in `js/data.js`; uploaded files go through the same engine. This is not a credit decision.
+- **Data:** one synthetic company, F01 (FOB garment maker: own materials, no customer-owned stock), from the workbook `data/uc_workbook_v10.xlsx`: period 01/01–20/06/2026 (N = 171 days), cut-off 20/06/2026, 13-week horizon, opening cash 4,8 billion VND, thresholds `fob.threshold.v3`, reserve levels from Miller–Orr L / Z / H = 5.350,2 / 6.633,1 / 9.198,9 million VND (aliases Rmin / Rtarget / Rupper). F01 is W1 (BN1), TH01, cell M3. UC01/UC02 figures are computed in the browser by `js/engine.js`, UC03/UC04 by `js/uc0304.js`, from the raw invoices, lots, plans and cash history in `js/data.js`; uploaded files go through the same engines. This is not a credit decision.
 - **Language:** English only. Numbers use `1.200.000.000`, money `11,85B` / `619,3M` (B = billion VND, M = million VND), dates `30 Sep 2026`. Uploaded files may still use Vietnamese column headers (hidden aliases in `js/config.js`).
 
 ## Test
@@ -37,9 +37,9 @@ node tests/e2e.mjs                 # engine acceptance cases (SRS Appendix D/E) 
 
 ## Regenerate the sample data
 ```bash
-python3 tools/build_demo_data.py data/uc_workbook_v9.xlsx
+python3 tools/build_demo_data.py data/uc_workbook_v10.xlsx
 ```
-The script reads the sheets of the workbook by column name (D_F01, D_sales, D_purchases, D_inventory, D_flows, D_UC03, F01_UC1, F01_UC4), translates names to English and overwrites `js/data.js`: the raw F01 snapshot, the financing table of UC03, the UC04 defaults and the financing catalogue. The what-if presets (`SC`) are kept.
+The script reads the sheets of the workbook by column name (D_F01, D_sales, D_purchases, D_inventory, D_flows, D_UC03, F01_UC1, F01_UC4, Nguong), translates names to English and overwrites `js/data.js`: the raw F01 snapshot (with the 171-day cash history for Miller–Orr), the illustrative product table of UC03, the UC04 defaults, an ID → name map and the what-if presets (`SC`, three-lever change sets). It checks that its Miller–Orr L / Z / H match D_F01 within 1 VND.
 
 ## Structure
 ```
@@ -47,16 +47,18 @@ index.html              prototype markup with the Lilact logo and name
 css/lilact-tokens.css   Lilact design tokens (brand kit, unchanged)
 css/app.css             prototype layout and Lilact single-flow styles; every colour is a Lilact token
 js/data.js              raw sample snapshots (generated), financing catalogue and what-if presets
-js/config.js            SRS v1.3 parameters (Appendix C) and threshold table tv1.threshold.v2
-js/engine.js            deterministic UC01–UC04 engine: snapshot, diagnosis, profiles, five-scenario forecast, reserves, links, gap_request, financing match, what-if, feedback loop
+js/config.js            SRS parameters (Appendix C), threshold table fob.threshold.v3 and the Miller–Orr parameters
+js/engine.js            deterministic UC01–UC02 engine: snapshot, diagnosis, profiles, five-scenario forecast, Miller–Orr reserves, links, gap_request, feedback loop
+js/uc0304.js            UC03 / UC04 engine: prepInput (W, TH, cell, L/Z/H, three paths), priority policy, hard checks, daily package, SafeCash, what-if on three scenarios, compare
+js/ui0304.js            Solutions and What-if views, policy/catalogue panel, exports and the UC03/UC04 chat answers
 js/i18n.js              English strings of the UC01/UC02 screens and chat answers
 js/narrative.js         fact registry, five- and four-part answers, verifyAnswer
-js/app.js               application logic and single-flow UI wiring (four-step chat flow unchanged)
+js/app.js               application logic and single-flow UI wiring
 assets/                 Lilact logos, favicons, Inter fonts (OFL)
 tools/port_prototype.py historical importer; do not rerun after the single-flow UI changes
-tools/build_demo_data.py regenerates js/data.js from the workbook v9
-data/uc_workbook_v9.xlsx source workbook of the sample data and of the reconciliation test
-tests/e2e.mjs           Playwright tests (engine acceptance cases, workbook v9 reconciliation and UI)
+tools/build_demo_data.py regenerates js/data.js from the workbook v10
+data/uc_workbook_v10.xlsx source workbook of the sample data and of the acceptance tests
+tests/e2e.mjs           Playwright tests (engine acceptance cases, SRS Appendix E E15–E40, F01 acceptance of UC03/UC04, UI in light, dark and 390 px)
 tests/fixtures/         legacy sample companies X01–X03 for the SRS Appendix D cases (test only)
 ```
 See `docs/PORTING.md` for what was changed relative to the prototype.

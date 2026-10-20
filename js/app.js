@@ -3,53 +3,11 @@ const DAY=864e5;
 const dn=iso=>{const [y,m,d]=iso.split('-').map(Number);return Date.UTC(y,m-1,d)/DAY};
 const iso=n=>new Date(n*DAY).toISOString().slice(0,10);
 function episodes(C){const out=[];let cur=null;C.days.forEach(([d,c],i)=>{const g=Math.max(0,C.buffer-c);if(g>0){if(!cur){cur={start:d,end:d,peak:g,peakDay:d,cashMin:c,i0:i,i1:i};out.push(cur)}else{cur.end=d;cur.i1=i;if(g>cur.peak){cur.peak=g;cur.peakDay=d;cur.cashMin=c}}}else cur=null});out.forEach((e,k)=>{e.k=k+1;e.censored=e.i1===C.days.length-1});return out}
-function simulate(C,ep,lev,CAT){
- const asOf=dn(C.as_of),N=C.N,buf=C.buffer;
- const revBy=b=>C.sales.filter(s=>s[1]===b&&s[3]===1).reduce((a,s)=>a+s[2],0);
- const purBy=b=>C.pur.filter(s=>s[0]===b&&s[2]===1).reduce((a,s)=>a+s[1],0);
- const vLine=l=>C.inv.filter(x=>x.name===l).reduce((a,x)=>a+x.own,0);
- const revC=revBy(lev.cust),purS=purBy(lev.supp),vL=vLine(lev.line);
- const l1v=!!lev.l1_on&&lev.X>=-30&&lev.X<=30&&revC>0,l2v=!!lev.l2_on&&lev.Y>=0&&lev.Y<=30&&purS>0,l3v=!!lev.l3_on&&lev.Z>=0&&lev.Z<=50&&vL>0;
- const delta=new Map(),add=(d,x)=>delta.set(d,(delta.get(d)||0)+x);
- const recv=new Map();
- // Workbook v9 UC04 (U4-04 … U4-13): companies with a UC04 setup move only a share of the receipts / payments, with the discount, fee,
- // recovery and sale cost of that setup; the levers keep their meaning (customer and days, supplier and days, lot and %).
- const U=uc04Applies(C)?uc04For(lev):null;
- let l1=l1v,l2=l2v,l3=l3v,freed=0,rel=0,uCost=0;
- if(U&&U.status==='rejected'){l3=l3&&!U.errors.some(x=>/^LOT_|SALE_/.test(x));l2=l2&&!U.errors.includes('ESSENTIAL_SUPPLIER_NOT_CONFIRMED');C.ev.forEach(e=>recv.set(e[0],dn(e[5])))}
- if(U&&U.status!=='rejected'){let prev=0;U.path.forEach(x=>{const inc=x.delta-prev;prev=x.delta;if(Math.abs(inc)>1e-9)add(dn(x.d),inc)});
-  const moved=new Map(U.affected.filter(a=>a.lever==='AR').map(a=>[a.id,dn(a.new)]));C.ev.forEach(e=>recv.set(e[0],moved.get(e[0])??dn(e[5])));
-  freed=U.sale.released_book;rel=U.sale.net;uCost=U.costs.cash}
- else if(!U){
- C.ev.forEach(e=>{const [id,dir,cat,partner,amt,date]=e;let nd=dn(date);const od=nd;
-  if(l1&&cat==='invoice_receipt'&&partner===lev.cust){nd=Math.max(asOf+1,od-lev.X);if(nd!==od){add(nd,amt);add(od,-amt)}}
-  if(l2&&cat==='supplier_payment'&&partner===lev.supp){nd=od+lev.Y;if(nd!==od){add(od,amt);add(nd,-amt)}}
-  recv.set(id,nd)});
- freed=l3?vL*lev.Z/100:0;rel=freed*(1-lev.hair/100);if(l3)add(asOf+lev.lag,rel)}
- let l4=false,cost=0,Iu=0,Cc=0,status='OFF',reason='';
- const need=dn(ep.start);
- if(lev.l4_on){status='BLOCKED';const cat=CAT.find(c=>c.id===lev.prod),e=C.ev.find(x=>x[0]===lev.inv_id&&x[1]==='IN');
-  if(!cat||!['invoice_factoring','reverse_factoring','dynamic_discounting'].includes(cat.type)){reason='Product outside the catalogue or not tied to an invoice'}
-  else if(!e){reason='Invoice is no longer open'}
-  else{const rd=recv.get(e[0]),fund=need,sale=C.sales.find(s=>s[0]===lev.inv_id),dpd=sale&&typeof sale[5]==='number'?Math.max(0,sale[5]):0,wl=cat.wl?cat.wl.split('|'):[];
-   if(dn(e[5])<need)reason='Invoice is collected before the cash-needed date';
-   else if(e[4]<cat.mn)reason='Invoice is below the product minimum';
-   else if(wl.length&&!wl.includes(e[3]))reason='Customer is not on the product list';
-   else if(dpd>cat.mo)reason='Invoice overdue beyond the cap';
-   else if(rd<fund)reason='After early collection the invoice no longer lands after the cash-needed date';
-   else{l4=true;status='OK';Iu=Math.min(e[4],cat.mx);const t=Math.max(1,rd-fund);
-    if(cat.type==='dynamic_discounting'){Cc=Iu*(1-cat.disc/100);cost=Iu*cat.disc/100}
-    else{Cc=Iu*cat.adv/100;const base=cat.fbase==='invoice'?Iu:Cc;cost=Cc*cat.rate/100*t/365+(cat.fee?base*cat.fee/100:0)}
-    add(fund,Cc);add(rd,-(Cc+cost))}}}
- let cum=0;const path=C.days.map(([d,c])=>{cum+=delta.get(dn(d))||0;return {d,c,s:c+cum}});
- const gap0=p=>Math.max(0,buf-p.c),gap1=p=>Math.max(0,buf-p.s);
- const epi=path.filter(p=>dn(p.d)>=need&&dn(p.d)<=dn(ep.end));
- // UC04 keeps DSO/DIO/DPO/CCC at the cut-off unchanged (U4-26); the cash moved is reported as cash days instead.
- const AR=C.ar-(!U&&l1?revC/N*lev.X:0)-(l4?Iu*1:0),INV=C.invv-(U?0:freed),AP=C.ap+(!U&&l2?purS/N*lev.Y:0);
- const dso=AR/C.rev*N,dio=INV/C.cogs*N,dpo=AP/C.cogs*N;
- const pk=epi.reduce((a,p)=>p.c<a.c?p:a,epi[0]);
- return {ccc:dso+dio-dpo,dso,dio,dpo,gap_epi:Math.max(...epi.map(gap1)),newDays:path.filter(p=>gap0(p)===0&&gap1(p)>0).length,cost:cost+(U?uCost:freed*lev.hair/100),cashPeak:pk.s,l:[l1,l2,l3,l4],status4:status,reason,path,financed:l4?{Iu,Cc,fin:cost}:null,
-  valid:{l1:!lev.l1_on||l1,l2:!lev.l2_on||l2,l3:!lev.l3_on||l3},freed,rel,uc04:U&&U.status!=='rejected'?U:null,uc04_errors:U&&U.status==='rejected'?U.errors:null};
+// Baseline path and cut-off ratios of the displayed case (Shortfall chart and the UC01 cards). The UC04 levers are in js/uc0304.js.
+function baseline(C,ep){
+ const N=C.N,path=C.days.map(([d,c])=>({d,c,s:c})),need=dn(ep.start),epi=path.filter(p=>dn(p.d)>=need&&dn(p.d)<=dn(ep.end));
+ const dso=C.ar/C.rev*N,dio=C.invv/C.cogs*N,dpo=C.ap/C.cogs*N;
+ return {ccc:dso+dio-dpo,dso,dio,dpo,gap_epi:epi.length?Math.max(...epi.map(p=>Math.max(0,C.buffer-p.c))):0,path};
 }
 
 
@@ -63,10 +21,8 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const FIRMS={F01:{name:'Alpha Garment Subcontractor',short:'Alpha Garment'}};
 const SAMPLE_FIRMS=Object.keys(FIRMS); // the fixed sample company (workbook v9 has only F01)
-const LV_NAME={l1:'Early collection',l2:'Extend payables',l3:'Cut inventory',l4:'Finance one invoice'};
 const REJ={INVOICE_TOO_SMALL:'Invoice is below the product minimum',NO_OPEN_INVOICE:'No suitable open invoice',NOT_ELIGIBLE:'Not eligible'};
 const TYPE_VN={invoice_factoring:'Invoice factoring',reverse_factoring:'Reverse factoring',inventory_loan:'Inventory-backed loan',credit_line:'Credit line',dynamic_discounting:'Dynamic discounting'};
-const INV_PRODUCTS=['FAC-001','FAC-002','FAC-003','RF-001','DD-001'];
 
 
 /* Sample companies: every case is computed here from the raw snapshots in DATA.raw with the same engine that
@@ -100,28 +56,10 @@ function uc02(firm=S.firm){
   if(!RUNS.has(key)){RUNS.set(key,ENGINE.runUC02(snap,p,{weeks:S.weeks,uc01:d,config_version:vid,freshness:fr,model:d.model.model}));if(typeof FEEDBACK!=='undefined')FEEDBACK.log(firm,RUNS.get(key))}
   return RUNS.get(key);
 }
-// UC03 (workbook v9): the funding plan for the shortfall of the same UC01/UC02 runs. Only companies with a D_UC03 product table (the
-// sample company); uploaded companies keep the per-gap catalogue ranking (rankFor).
-function uc03(firm=S.firm){
-  const tb=(DATA.uc03||{})[firm];if(!tb)return null;const u=uc02(firm),d=uc01(firm);if(!u||!d)return null;
-  const key='uc03|'+u.run_id+'|'+d.run_id;if(!RUNS.has(key))RUNS.set(key,ENGINE.matchFinancing(DATA.snaps[firm],d,u,tb));return RUNS.get(key);
-}
-// UC04 (workbook v9) applies on the Base case of a company with a UC04 setup; the lever object maps onto that setup.
-const uc04Applies=c=>!!(DATA.uc04||{})[c.firm]&&S.case==='base'&&c.firm===S.firm&&!(S.weeks<CFG.tv2.horizonWeeks);
-function uc04Setup(lev,firm=S.firm){
-  const d=DATA.uc04[firm],late=lev.l1_on&&lev.X<0;
-  return {...d,case:late?6:1,customer:lev.l1_on?lev.cust:'',ar_share:lev.l1_on?(lev.ar_share??d.ar_share):0,early_days:lev.l1_on&&lev.X>0?lev.X:0,late_days:late?-lev.X:d.late_days,
-    discount:lev.discount??d.discount,supplier:lev.l2_on?lev.supp:'',ap_share:lev.l2_on?(lev.ap_share??d.ap_share):0,extend_days:lev.l2_on?lev.Y:0,ap_fee:lev.ap_fee??d.ap_fee,
-    lot:lev.l3_on?lev.line:'',sale_share:lev.l3_on?lev.Z/100:0,recovery:1-lev.hair/100,sale_lag:lev.lag,sale_cost:lev.sale_cost??d.sale_cost};
-}
-function uc04For(lev){
-  const u=uc02(),d=uc01(),setup=uc04Setup(lev),key='uc04|'+u.run_id+'|'+JSON.stringify(setup);
-  if(!RUNS.has(key))RUNS.set(key,ENGINE.simulateUC04(DATA.snaps[S.firm],u,d,setup));return RUNS.get(key);
-}
 // Rmin of the current configuration for the daily colours (alertLevel falls back to 50 % of Rtarget when it is missing).
 const RMIN=()=>{const u=uc02();return u&&u.reserves.rmin!=null?u.reserves.rmin:undefined};
 Object.entries(DATA.raw).forEach(([id,raw])=>registerCases(id,ENGINE.inputFromRaw(raw,SESSION_LOADED_AT)));
-const S={uc01Sel:null,weeks:13,firm:'F01',case:'base',detail:'dash',epIdx:0,lev:null,last:null,cmp:[],log:[],drafts:[],draftN:0,logFilter:{status:'all',q:''},apprFilter:'all',overlay:true,done:new Set(),seq:0,runN:0,stage:0,cause:null};
+const S={uc01Sel:null,weeks:13,firm:'F01',case:'base',detail:'dash',epIdx:0,log:[],logFilter:{status:'all',q:''},done:new Set(),seq:0,stage:0,cause:null};
 const C=()=>{const c=DATA.cases[S.firm+'|'+S.case];if(!c||!(S.weeks<CFG.tv2.horizonWeeks))return c;
   const k=[S.firm,S.case,S.weeks,DATA.caseVersion[S.firm]].join('|');if(!VIEW.has(k))VIEW.set(k,viewCase(c,S.weeks));return VIEW.get(k)};
 function viewCase(c,H){const last=dn(c.as_of)+7*H,v={...c,days:c.days.slice(0,7*H),ev:c.ev.filter(e=>dn(e[5])<=last),defk:null,tv3:null,weeks:H};setDefaultGap(v);return v}
@@ -171,18 +109,10 @@ function derive(){
   const c=C();EPS=episodes(c);
   S.epIdx=Math.min(S.epIdx,Math.max(0,EPS.length-1));
   EP=EPS[S.epIdx]||{start:c.days[0][0],end:c.days.at(-1)[0],k:0,peak:0,none:true};
-  BASE=simulate(c,EP,offLev(),CAT);
-}
-// TV3 ranking for any gap: the stored ranking for c.defk, otherwise rankFor(); cached per firm|case|gap.
-const TV3_CACHE={};
-function tv3For(ep){
-  const c=C();if(!ep||ep.none)return null;
-  if(c.defk===ep.k&&c.tv3)return c.tv3;
-  const key=`${S.firm}|${S.case}|${ep.k}`;
-  return TV3_CACHE[key]||(TV3_CACHE[key]=rankFor(c,ep,EPS.length));
+  BASE=baseline(c,EP);
 }
 const largestGap=()=>EPS.length?EPS.reduce((a,e)=>e.peak>a.peak?e:a,EPS[0]):null;
-function selectGap(k){const i=EPS.findIndex(e=>e.k===k);if(i<0)return false;S.epIdx=i;derive();S.lev=freshLev();return true}
+function selectGap(k){const i=EPS.findIndex(e=>e.k===k);if(i<0)return false;S.epIdx=i;derive();return true}
 // Daily alert level (SRS 2.8.11.3), checked in this order on unrounded values:
 // red: below 0, below Rmin or more than 50% short of Rtarget · orange: 20–50% short · yellow: up to 20% short · green: at or above Rtarget.
 function alertLevel(cashEnd,Rt,Rmin=0.5*Rt){
@@ -200,18 +130,8 @@ function alertLegendHTML({surplus}={}){
   if(!XP())return `<p class="legend lv-legend lv-one"><span class="lv-dots" aria-hidden="true">${['green','yellow','orange','red'].concat(surplus?['blue']:[]).map(l=>`<i class="lv-sw lv-${l}"></i>`).join('')}</span>${t('s.legend')}${surplus?t('s.legend.blue'):''}</p>`;
   return `<div class="legend lv-legend" role="list" aria-label="Alert colours">${['red','orange','yellow','green'].map(l=>`<span role="listitem"><i class="lv-sw lv-${l}" aria-hidden="true"></i><b>${LV[l].label}</b>&nbsp;· ${LV_RULE[l]}</span>`).join('')}${surplus?`<span role="listitem"><i class="lv-sw lv-blue" aria-hidden="true"></i><b>Blue</b>&nbsp;· surplus, above Rupper for ≥ 14 days</span>`:''}</div>`;
 }
-function offLev(){
-  const c=C(),buyers=topBy(c.sales.filter(s=>s[3]===1),s=>s[1],s=>s[2]),sup=topBy(c.pur.filter(s=>s[2]===1),s=>s[0],s=>s[1]);
-  const own=c.inv.filter(x=>x.own>0),slow=own.find(x=>x.slow===1)||own[0];
-  const lev={l1_on:0,cust:buyers[0]?.k||'',X:7,l2_on:0,supp:sup[0]?.k||'',Y:7,l3_on:0,line:slow?.name||'',Z:25,lag:14,hair:10,l4_on:0,inv_id:'',prod:'RF-001'};
-  // Companies with a workbook UC04 setup start from it (customer, supplier, lot, days, sale share, recovery and sale lag).
-  const u4=(DATA.uc04||{})[c.firm];if(u4)Object.assign(lev,{cust:u4.customer,X:u4.early_days,supp:u4.supplier,Y:u4.extend_days,line:u4.lot,Z:Math.round(u4.sale_share*100),hair:Math.round((1-u4.recovery)*100),lag:u4.sale_lag});
-  return lev;
-}
 function topBy(arr,kf,vf){const m=new Map();arr.forEach(a=>m.set(kf(a),(m.get(kf(a))||0)+vf(a)));return [...m].map(([k,v])=>({k,v})).sort((a,b)=>b.v-a.v)}
-function candInvoices(){const c=C(),need=dn(EP.start);return c.ev.filter(e=>e[1]==='IN'&&e[2]==='invoice_receipt'&&dn(e[5])>=need).sort((a,b)=>dn(a[5])-dn(b[5]))}
-function defaultInvoice(){const g=EP.peak||0,list=candInvoices();if(!list.length)return '';const fit=list.filter(e=>e[4]>=g).sort((a,b)=>a[4]-b[4])[0];return (fit||list.sort((a,b)=>b[4]-a[4])[0])[0]}
-function freshLev(){const l=offLev();l.inv_id=defaultInvoice();return l}
+// What-if presets of the sample company (js/data.js SC, three-lever change sets on the v10 data).
 const SCEN=()=>SC.filter(s=>s.firm===S.firm);
 
 
@@ -318,10 +238,10 @@ let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{red
 
 
 function switchContext(firm,cs,{silent}={}){
-  for(const k in TV3_CACHE)delete TV3_CACHE[k];S.causes={};
-  S.firm=firm;S.case=cs;S.lev=null;S.last=null;S.cmp=[];S.epIdx=0;S.uc01Sel=null;S.gapRequest=null;S.weeks=CFG.tv2.horizonWeeks;policyCases(firm);
+  S.causes={};
+  S.firm=firm;S.case=cs;S.epIdx=0;S.uc01Sel=null;S.gapRequest=null;S.weeks=CFG.tv2.horizonWeeks;policyCases(firm);
   const c=C();const eps=episodes(c);if(c.defk)S.epIdx=c.defk-1;else if(eps.length)S.epIdx=eps.reduce((a,e,i)=>e.peak>eps[a].peak?i:a,0);
-  derive();S.lev=freshLev();$('#firmSel').value=firm;$$('.chipdate b').forEach(b=>b.textContent=fd(C().as_of));
+  derive();$('#firmSel').value=firm;$$('.chipdate b').forEach(b=>b.textContent=fd(C().as_of));
   const w=$('#work');w.classList.add('loading');setTimeout(()=>w.classList.remove('loading'),260);
   $('#panelSub').textContent=`${firm} · ${FIRMS[firm].name}`;renderDemoChips();refreshTab();
   Object.values(THREADS).forEach(t=>{t.innerHTML='';t.dataset.init='0'});S.done=new Set();resetFlow();
@@ -527,7 +447,7 @@ function scenarioTableHTML(u){
 }
 function renderGap(){
   const c=C(),p=$('#pane-gap'),u=uc02(),M=weeklyModel(c),big=largestGap(),asOf=dn(c.as_of),H=u.weeks;
-  const ov=!!(S.last&&S.overlay&&!EP.none),weeklyOnly=u.weekly_only,sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
+  const ov=false,weeklyOnly=u.weekly_only,sumIn=M.W.reduce((a,x)=>a+x.inn,0),sumOut=M.W.reduce((a,x)=>a+x.out,0),minB=Math.min(...M.W.map(x=>x.bal)),minW=M.W.find(x=>x.bal===minB);
   // The liquidity-state banner (TH01 / TH02 / TH03 × W) leads the Shortfall view once the forecast step has run.
   const head=(S.stage>=2?liquidityStateHTML():'')+uc02HeaderHTML(u,c);
   if(u.status==='invalid_data'){p.innerHTML=head;bindGapHeader(p);return}
@@ -543,7 +463,7 @@ function renderGap(){
    ${XP()?`<p class="lv-note">Week columns are coloured by the week-end balance; the “Lowest in week” row is coloured by the worst day of the week.${weeklyOnly?' '+t('gap.weekly'):''}</p>`:''}</div>`);
   const daily=dashSec(2,'var(--lc-color-status-error)',t('gap.h.daily'),XP()?'Every gap below Rtarget is shaded; each dot shows that day’s alert level; Rmin, Rtarget and Rupper lines; Optimistic–Conservative band':tx('gap.h.sub.daily'),weeklyOnly?`<div class="card"><div class="empty">${t('gap.weekly')}</div></div>`
     :`<div class="card hov" data-wid="daily"><div class="card-head"><div><h3>Daily balance and gaps</h3><p>VND million · ${scName}</p></div>
-      <label class="legend" style="cursor:pointer;user-select:none;${S.last&&!EP.none?'':'display:none'}" id="ovLbl"><input type="checkbox" id="ovChk" ${S.overlay?'checked':''} style="accent-color:var(--lc-color-status-success)"> Show latest scenario</label></div>
+</div>
     <div class="chartbox" id="gapChart"></div>
     <div class="legend" style="margin-top:8px"><span><i class="ln" style="background:var(--lc-color-data-cash)"></i>${scName}</span>${ov?'<span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span>':''}<span><i class="band-sw"></i>${t('chart.band')}</span><span><i class="ds"></i>${RN('rt')} ${money(c.buffer)}</span><span><i class="ds rmin"></i>${RN('rmin')} ${money(u.reserves.rmin)}</span><span><i class="ds rup"></i>${RN('rup')} ${money(u.reserves.rupper)}</span><span><i style="background:color-mix(in srgb,var(--lc-color-alert-red-mark) 30%,transparent);border:1px dashed var(--lc-color-status-error)"></i>Gap (selected gap is darker)</span></div>
     ${alertLegendHTML()}<h4 class="sub-h">${tx('cmp.title')}</h4>${scenarioTableHTML(u)}</div>`);
@@ -552,7 +472,7 @@ function renderGap(){
   if(!EPS.length){
     p.innerHTML=head+forecast+daily+`<div class="card" style="margin-top:14px"><div class="empty"><b>No cash shortfall in the ${H}-week forecast (${scName}), so there is nothing to simulate.</b></div></div>`+stuck+foot;
   }else{
-    const dl=dn(EP.start)-asOf,t3=S.stage>=3?tv3For(EP):null;
+    const dl=dn(EP.start)-asOf;
     const card=e=>{const lv=episodeLevel(c,e),rec=e.censored?null:c.days[e.i1+1];return `<button class="ep gap-lv lv-${lv} ${EP.k===e.k?'on':''}" data-ep="${e.k}" data-lv="${lv}" aria-pressed="${EP.k===e.k}"><div class="ep-tags"><span class="lv-tag" style="--lvc:${LV[lv].color}"><i class="lv-sw lv-${lv}" aria-hidden="true"></i>${t('ep.alert',{l:lvLabel(lv)})}</span>${big&&big.k===e.k?'<span class="status blue">Largest gap</span>':''}${e.censored?`<span class="status gray">${t('ep.open')}</span>`:''}</div><div class="k">Gap ${e.k}</div><div class="a num">${mm(e.peak)}</div><div class="d">${fds(e.start)}${e.start!==e.end?' – '+fds(e.end):''} · ${t('ep.days',{n:e.i1-e.i0+1})} · lowest ${money(e.cashMin)} on ${fds(e.peakDay)}</div><div class="d">${rec?t('ep.recovery',{d:fds(rec[0])}):t('ep.notended')}</div></button>`};
     const gaps=dashSec(3,'var(--lc-color-status-error)',t('gap.h.gaps'),XP()?`Gap = a run of consecutive days with balance below Rtarget ${money(c.buffer)} (${scName}). The colour is the worst daily alert level inside the gap. Pick a gap to see its weeks, KPIs and financing ranking.`:tx('gap.h.sub.gaps',{rt:money(c.buffer)}),`<div class="eps">${EPS.map(card).join('')}</div>
   <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px">
@@ -561,23 +481,20 @@ function renderGap(){
     <div class="card kpi k3"><div class="t">Lowest balance</div><div class="v num">${money(EP.cashMin)}</div><div class="f">on ${fds(EP.peakDay)}</div></div>
     <div class="card kpi k4"><div class="t">Gap ends</div><div class="v num">${fds(EP.end)}</div><div class="f">${EP.censored?'not recovered within the period':'recovered'}</div></div>
   </div><div class="card cfcard" data-wid="factors"><div class="card-head"><div><h3>${t('cf.title',{k:EP.k})}</h3><p>${tx('cf.sub')}</p></div></div>${factorsHTML(gapFactors(EP))}</div>${stuck}`);
-    const m3=S.stage>=3?uc03():null;
-    // Financing match (task 3) appears under Cash gaps only once the financing question has been answered (stage 3).
-    const rank=S.stage<3?'':`<div id="finMatch">${m3&&m3.status!=='not_applicable'?dashSec(4,'var(--lc-color-action-primary)',t('uc03.title'),t('uc03.sub',{n:m3.rounds[0]?m3.rounds[0].products.length:0}),`<div class="card uc03">${uc03HTML(m3)}</div>`):dashSec(4,'var(--lc-color-action-primary)',t('gap.h.rank',{k:EP.k}),XP()?'Tier (fully covers and funds in time), then cost relative to the shortfall':tx('gap.h.sub.rank'),
-      !t3?'':`<div class="card"><div class="card-head"><div><h3>Financing ranking · gap ${EP.k}</h3><p>${CAT.length} products in the synthetic catalogue · loan period ${t3.inputs.t_loan} days · inventory collateral ${money(t3.inputs.V)}</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>${t3.ranked.length?rankTable(t3):'<div class="empty">No product fits this gap.</div>'}</div>`)}</div>`;
+    // UC03 lives in its own Solutions view; Shortfall only hands over to it (no financing ranking here).
+    const rank=`<div id="finMatch" class="card u34-handoff"><div class="card-head"><div><h3>Solutions</h3><p>Sources in the policy order of the matrix cell, the daily package and what remains under L and Z.</p></div><button class="btn primary sm" type="button" data-open-sol>Open Solutions →</button></div></div>`;
     p.innerHTML=head+forecast+daily+gaps+rank+foot;
   }
   if(!weeklyOnly){
     const band=['optimistic','conservative'].map(k=>DATA.cases[S.firm+'|'+k].days.slice(0,c.days.length).map(d=>d[1]));
-    cashChart($('#gapChart',p),{path:(ov?S.last.res:BASE).path,buf:c.buffer,rmin:u.reserves.rmin,rup:u.reserves.rupper,band,ep:EP,eps:EPS,scen:ov});
+    cashChart($('#gapChart',p),{path:BASE.path,buf:c.buffer,rmin:u.reserves.rmin,rup:u.reserves.rupper,band,ep:EP,eps:EPS,scen:ov});
   }
-  const chk=$('#ovChk',p);chk&&chk.addEventListener('change',e=>{S.overlay=e.target.checked;renderGap()});
   $$('[data-csv]',p).forEach(b=>b.onclick=()=>exportFlowCSV(c,M));window._csvCtx=()=>exportFlowCSV(c,M);
   $$('[data-ask]',p).forEach(b=>b.onclick=()=>sendChat(b.dataset.ask));
   bindGapHeader(p);bindExpert(p);
   setTimeout(redrawCharts,480);
   $$('[data-ep]',p).forEach(b=>b.addEventListener('click',()=>{selectGap(+b.dataset.ep);renderGap();renderDemoChips()}));
-  $$('[data-try]',p).forEach(b=>b.addEventListener('click',()=>{const [inv,prod]=b.dataset.try.split('|');S.lev=freshLev();S.lev.l4_on=1;S.lev.inv_id=inv;S.lev.prod=prod;runNow('Finance '+inv+' via '+prod);detailHandoff(`What-if is ready: finance <b>${esc(inv)}</b> via <b>${esc(prod)}</b>.`,'whatif')}));
+  $$('[data-open-sol]',p).forEach(b=>b.onclick=()=>openDetail('sol'));
 }
 function bindGapHeader(p){
   const ss=$('#scSel',p);ss&&(ss.onchange=()=>setScenario(ss.value));
@@ -587,8 +504,8 @@ function bindGapHeader(p){
   $$('[data-liq="fund"]',p).forEach(b=>b.onclick=goFinancing);
 }
 // The scenario selector changes the displayed scenario only; the chat, the stage and TH (Base) stay as they are.
-function setScenario(sc){if(!SC_KEYS.includes(sc))return;S.case=sc;S.epIdx=0;const c=C();if(c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];refreshTab();renderDemoChips()}
-function setWeeks(h){S.weeks=Math.min(CFG.tv2.horizonWeeks,Math.max(1,h|0));S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];refreshTab();renderDemoChips()}
+function setScenario(sc){if(!SC_KEYS.includes(sc))return;S.case=sc;S.epIdx=0;const c=C();if(c.defk)S.epIdx=c.defk-1;derive();refreshTab();renderDemoChips()}
+function setWeeks(h){S.weeks=Math.min(CFG.tv2.horizonWeeks,Math.max(1,h|0));S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();refreshTab();renderDemoChips()}
 // Cash0 and reserve-level form (UC02.3). Saving creates a configuration version (owner_policy); earlier results become stale.
 function essentialDailySpend(){
   const fc=DATA.forecasts[S.firm],ess=new Set(['payroll','tax','rent','debt_service']);
@@ -632,290 +549,10 @@ function openCash0Form(){
       if((differs&&reason.length<10)||reason.length>500){err.textContent=t('pol.reason.err');return}
       const md=(m.querySelector('input[name=c0m]:checked')||{}).value||'direct',ess=[...m.querySelectorAll('.c0s input:checked')].map(x=>x.value);
       POLICY.set(f,{cash0:tot==null?null:{total:tot,restricted:res,confirmed:true},reserve:{method:md,rmin,rtarget:rt,rupper:rup,reason},amount_basis:q('#c0Basis').value,vat_rate:vat==null?null:vat/100,essential_suppliers:ess},reason);
-      closeModal();policyCases(f);S.gapRequest=null;S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();S.lev=freshLev();S.last=null;for(const k in TV3_CACHE)delete TV3_CACHE[k];
+      closeModal();policyCases(f);S.gapRequest=null;S.epIdx=0;const c=C();if(c&&c.defk)S.epIdx=c.defk-1;derive();
       toast(tx('c0.saved',{v:POLICY.versionId(f)}));refreshTab();renderDemoChips()};
   });
 }
-function rankTable(t3){
-  const G=t3.inputs.gap,maxC=Math.max(...t3.ranked.map(r=>r.cpg));
-  const rows=t3.ranked.map((r,i)=>{const cat=CAT.find(c=>c.id===r.product_id),isInv=INV_PRODUCTS.includes(r.product_id)&&r.invoice_id!=='–';
-    return `<tr class="${i===0?'top1':''}"><td><span class="rank">${r.rank}</span></td><td><b>${r.product_id}</b> · ${esc(cat.provider)}<small>${TYPE_VN[cat.type]||cat.type}${cat.recourse==='Y'?' · with recourse':''}</small></td><td>${isInv?`<span class="num">${r.invoice_id}</span>`:'<span class="neu">–</span>'}</td><td><span class="tier t${r.tier}">${r.tier===0?'0 · fully covered':'1 · partly covered'}</span></td><td class="num">${mm(r.cash)}</td><td class="num">${nf(r.cost/1e6,2)}M</td><td class="num">${nf(r.cpg*100,2)}%<div class="bar"><span style="width:${Math.max(6,r.cpg/maxC*100)}%"></span></div></td><td class="num">${r.days} days</td><td class="num ${r.gap_rem>0?'neg':'pos'}">${r.gap_rem>0?mm(r.gap_rem):'0'}</td>${XP()?`<td class="num">${nf(r.ccc_after,1)}</td>`:''}<td>${isInv?`<button class="btn sec sm" data-try="${r.invoice_id}|${r.product_id}">Try →</button>`:'<span class="subtle" style="font-size:10.5px;color:var(--muted)">Not an invoice lever</span>'}</td></tr>`}).join('');
-  const rej=t3.rejected.length?`<div style="margin-top:12px"><div class="legend" style="margin-bottom:6px"><b style="color:var(--ink2)">Excluded (${t3.rejected.length})</b></div>${t3.rejected.map(r=>`<span class="status gray" style="margin:0 6px 6px 0" title="${r.reason}">${r.product_id} · ${REJ[r.reason]||r.reason}</span>`).join('')}</div>`:'';
-  return `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Option</th><th>Invoice</th><th>Tier</th><th>Cash received</th><th>Cost</th><th>Cost / shortfall</th><th>Funding</th><th>Remaining gap</th>${XP()?'<th>CCC after</th>':''}<th></th></tr></thead><tbody>${rows}</tbody></table></div>${rej}`;
-}
-
-
-const shortN=s=>String(s||'').replace(/^Large Exporter /,'').replace(/^Garment Factory (subcontract )?/,'').replace(/^Beta Fabric Distributor.*/,'Beta').replace(/^Overseas fabric mill /,'').slice(0,30);
-function describeLev(l){
-  const a=[];
-  const u4=(DATA.uc04||{})[S.firm],sh=(v,d)=>u4?`${nf((v??d)*100,0)}% of `:'';
-  if(l.l1_on)a.push(l.X<0?`${sh(l.ar_share,u4&&u4.ar_share)}${shortN(l.cust)} receipts ${-l.X} days late`:`Collect ${sh(l.ar_share,u4&&u4.ar_share)}${shortN(l.cust)} ${l.X} days early`);
-  if(l.l2_on)a.push(`Extend ${sh(l.ap_share,u4&&u4.ap_share)}${shortN(l.supp)} ${l.Y} days`);
-  if(l.l3_on)a.push(u4?`Sell ${l.Z}% of ${String(l.line).slice(0,28)}`:`Cut inventory ${String(l.line).slice(0,22)} ${l.Z}%`);
-  if(l.l4_on)a.push(`Finance ${l.inv_id} via ${l.prod}`);
-  return a.join(' + ')||'No lever switched on';
-}
-const anyOn=l=>l.l1_on||l.l2_on||l.l3_on||l.l4_on;
-function leverArgs(l){
-  const a={};
-  if(l.l1_on)a[l.X<0?'late_collection':'early_collection']={customer:l.cust,days:Math.abs(l.X),...(l.ar_share!=null?{share:l.ar_share}:{})};
-  if(l.l2_on)a.extend_payables={supplier:l.supp,days:l.Y};
-  if(l.l3_on)a.reduce_inventory={product_line:l.line,pct:l.Z};
-  if(l.l4_on)a.finance_invoice={invoice_id:l.inv_id,product_id:l.prod};
-  return a;
-}
-function statusOf(l,res){
-  if(!anyOn(l))return {k:'na',t:'No lever on'};
-  const bad=[];
-  if(l.l1_on&&!res.valid.l1)bad.push('Early collection: the customer has no valid invoice or the days are out of range');
-  if(l.l2_on&&!res.valid.l2)bad.push('Extend payables: the supplier has no valid payable or the days are out of range');
-  if(l.l3_on&&!res.valid.l3)bad.push('Cut inventory: the line is not owned (e.g. goods held for subcontracting)');
-  if(l.l4_on&&res.status4==='BLOCKED')bad.push('Financing: '+res.reason);
-  if(bad.length)return {k:'bl',t:'Blocked · '+bad[0],all:bad};
-  return res.gap_epi<1?{k:'yes',t:'Fully covers the gap'}:{k:'no',t:'Not enough · still short '+mm(res.gap_epi)};
-}
-function runSim(l){return simulate(C(),EP,l,CAT)}
-function commit(l,res,label,{fromChat}={}){
-  const st=statusOf(l,res);
-  S.last={lev:{...l},res,label,st,ts:Date.now(),id:'RUN-'+String(++S.runN).padStart(3,'0')};
-  addLog({tool:'simulate_scenario',tier:1,args:{firm_id:S.firm,levers:leverArgs(l)},status:st.k==='bl'?'blocked':'ok',summary:`${label} → CCC ${nf(BASE.ccc,1)}→${nf(res.ccc,1)}; short ${mm(BASE.gap_epi)}→${mm(res.gap_epi)}; cost ${nf(res.cost/1e6,2)}M`+(st.k==='bl'?' · '+st.all[0]:''),reason:st.k==='bl'?st.all[0]:''});
-  $('#ovLbl')&&($('#ovLbl').style.display='');
-  return S.last;
-}
-let wiTimer;
-function scheduleRun(){const r=$('#wiRes');r&&r.classList.add('loading');clearTimeout(wiTimer);wiTimer=setTimeout(()=>runNow(),420)}
-function runNow(label){
-  const l={...S.lev},res=runSim(l);commit(l,res,label||describeLev(l));
-  if(S.detail==='whatif'){renderWhatIf(true)}
-  return S.last;
-}
-function renderWhatIf(keep){
-  const c=C(),p=$('#pane-whatif'),L=S.lev;
-  if(EP.none){p.innerHTML=`<div class="card"><div class="empty"><div class="big">⟳</div><b>No shortfall to simulate</b><br>No cash shortfall in the 13-week forecast, so there is nothing to simulate.</div></div>`;return}
-  if(!keep||!$('#wiRes')){buildWI(p)}
-  syncWI();
-}
-function buildWI(p){
-  const c=C(),L=S.lev;
-  const buyers=topBy(c.sales.filter(s=>s[3]===1),s=>s[1],s=>s[2]),sup=topBy(c.pur.filter(s=>s[2]===1),s=>s[0],s=>s[1]);
-  const invs=candInvoices();
-  const lever=(id,ic,t,sub,body)=>`<div class="lever" id="lv-${id}"><div class="lever-h"><div class="ic">${ic}</div><div><strong>${t}</strong><small>${sub}</small></div><button class="sw" role="switch" aria-checked="false" aria-label="Switch on ${t}" data-sw="${id}"></button></div><div class="lever-b">${body}</div></div>`;
-  const slider=(id,min,max,val,unit,tk)=>`<div class="f"><label>${unit.l}<span class="val num" id="${id}V">${val}${unit.u}</span></label><input type="range" id="${id}" min="${min}" max="${max}" value="${val}" aria-label="${unit.l}"><div class="ticks">${tk.map(t=>`<span>${t}</span>`).join('')}</div></div>`;
-  p.innerHTML=`
-  <div class="card-head" style="margin-bottom:8px"><div><h3>Test levers · gap ${EP.k}</h3><p>Drag the sliders; results recompute on a copy of the data; original data is unchanged. Cash needed ${fd(EP.start)} · peak shortfall ${mm(EP.peak)}.</p></div><button class="btn sec sm" id="wiReset">↺ Reset</button></div>
-  <div class="presets" id="presets"><span class="legend" style="margin-right:2px">Sample scenarios:</span>${SCEN().map(s=>`<button data-sc="${s.id}" title="${esc(s.name)}">${s.id.split('-')[1]} · ${esc(s.name.length>30?s.name.slice(0,29)+'…':s.name)}</button>`).join('')}</div>
-  <div class="wi">
-   <div>
-    ${lever('l1','⇢','Early collection','Move one customer collection earlier by X days',`
-      <div class="f"><label for="cust">Customer</label><select class="sel" id="cust">${buyers.map(b=>`<option value="${esc(b.k)}">${esc(b.k)} · ${mm(b.v)}</option>`).join('')}</select></div>
-      ${slider('X',0,30,L.X,{l:'Early collection',u:' days'},['0','10','20','30'])}<div class="hint" id="h1"></div>`)}
-    ${lever('l2','⇠','Extend payables','Delay one supplier payment by Y days',`
-      <div class="f"><label for="supp">Supplier</label><select class="sel" id="supp">${sup.map(b=>`<option value="${esc(b.k)}">${esc(b.k)} · ${mm(b.v)}</option>`).join('')}</select></div>
-      ${slider('Y',0,30,L.Y,{l:'Extend terms',u:' days'},['0','10','20','30'])}<div class="hint" id="h2"></div>`)}
-    ${lever('l3','▤','Cut inventory','Sell down Z% of one owned inventory line',`
-      <div class="f"><label for="line">Inventory line</label><select class="sel" id="line">${c.inv.map(x=>`<option value="${esc(x.name)}" ${x.own>0?'':'disabled'}>${esc(x.name)} · ${mm(x.own)}${x.excl?' (subcontracted goods)':x.slow?' · aged':''}${/in transit/.test(x.name)?' · heading to port':''}</option>`).join('')}</select></div>
-      ${slider('Z',0,50,L.Z,{l:'Cut inventory',u:'%'},['0','15','30','50'])}<div class="hint" id="h3"></div>`)}
-    ${lever('l4','◈','Finance one invoice','Receive cash on the cash-needed date, repay when the customer pays',`
-      <div class="f"><label for="inv_id">Invoice</label><select class="sel" id="inv_id">${invs.map(e=>`<option value="${e[0]}">${e[0]} · ${esc(shortN(e[3]))} · ${mm(e[4])} · expected ${fds(e[5])}</option>`).join('')}</select></div>
-      <div class="f"><label for="prod">Catalogue product</label><select class="sel" id="prod">${CAT.filter(x=>INV_PRODUCTS.includes(x.id)).map(x=>`<option value="${x.id}">${x.id} · ${x.provider} · ${TYPE_VN[x.type]}</option>`).join('')}</select></div><div class="hint" id="h4"></div>`)}
-   </div>
-   <div>
-    <div class="result shim" id="wiRes">
-      <div class="lb" id="rLbl">SIMULATION RESULT · TIER 1</div><h3 id="rHead">—</h3>
-      <div style="margin:-4px 0 12px"><span class="cover na" id="rCover">No lever on</span></div>
-      <div class="bigs"><div class="big"><span>Remaining gap</span><strong class="num" id="bGap">0</strong><small id="bGapS"></small></div><div class="big"><span>New gap days</span><strong class="num" id="bNew">0</strong><small>outside the gap under review</small></div><div class="big"><span>Total cost</span><strong class="num" id="bCost">0</strong><small>financing + inventory sale discount</small></div></div>
-    </div>
-    <div class="card" style="margin-top:12px"><div class="card-head" style="margin-bottom:6px"><div><h3>Cash line before / after</h3><p>VND million · hover for each day</p></div></div><div class="chartbox" id="wiChart"></div>
-      <div class="legend" style="margin-top:6px"><span><i class="ln" style="background:var(--lc-color-data-historical)"></i>Base</span><span><i class="ln" style="background:var(--lc-color-status-success)"></i>After levers</span><span><i class="ds"></i>Buffer</span></div></div>
-    <div class="card" style="margin-top:12px"><div class="table-wrap" style="border:0"><table class="dtable" style="min-width:0"><thead><tr><th>Metric</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody id="mTbl"></tbody></table></div></div>
-    <div class="row" style="margin-top:12px"><button class="btn sec" id="wiSave">＋ Save to compare</button><button class="btn primary" id="wiDraft">✎ Create draft</button><span class="subtle" style="font-size:11px;color:var(--muted);align-self:center">Drafts are only created, never sent.</span></div>
-    <div id="cmpBox"></div>
-   </div>
-  </div>
-  <div class="foot-note">Slider bounds (X ≤ 30, Y ≤ 30, Z ≤ 50%) are proposals. Early collection and extended terms assume zero cost; inventory reduction is discounted ${C()&&S.lev?S.lev.hair:10}% and cash arrives after ${S.lev?S.lev.lag:14} days. TV4 formula · runs in the browser, matched on 17/17 scenarios against the Python calculation.</div>`;
-  bindWI(p);
-}
-function bindWI(p){
-  if(p._bound)return;p._bound=1;
-  const L=()=>S.lev;
-  p.addEventListener('click',e=>{
-    const sw=e.target.closest('[data-sw]');if(sw){const id=sw.dataset.sw;L()['l'+id.slice(1)+'_on']=L()['l'+id.slice(1)+'_on']?0:1;syncWI();scheduleRun();return}
-    const pr=e.target.closest('[data-sc]');if(pr){loadScenario(SC.find(s=>s.id===pr.dataset.sc),true);return}
-    if(e.target.closest('#wiReset')){S.lev=freshLev();syncWI();runNow();toast('Levers reset');return}
-    if(e.target.closest('#wiSave')){saveCmp();return}
-    if(e.target.closest('#wiDraft')){draftFromLast();return}
-    const rm=e.target.closest('[data-rm]');if(rm){S.cmp.splice(+rm.dataset.rm,1);renderCmp();return}
-  });
-  p.addEventListener('input',e=>{const t=e.target;if(t.type==='range'){L()[t.id]=+t.value;$('#'+t.id+'V').textContent=t.value+(t.id==='Z'?'%':' days');fillRange(t);syncWI(true);scheduleRun()}});
-  p.addEventListener('change',e=>{const t=e.target;if(t.tagName==='SELECT'){L()[t.id]=t.value;syncWI(true);scheduleRun()}});
-}
-const fillRange=t=>t.style.setProperty('--p',((t.value-t.min)/(t.max-t.min)*100)+'%');
-function syncWI(soft){
-  const L=S.lev,c=C(),p=$('#pane-whatif');if(!p.querySelector('#wiRes'))return;
-  ['l1','l2','l3','l4'].forEach(k=>{const el=$('#lv-'+k),on=!!L[k+'_on'];el.classList.toggle('on',on);$('.sw',el).setAttribute('aria-checked',on)});
-  ['cust','supp','line','inv_id','prod'].forEach(id=>{const s=$('#'+id);if(s&&s.value!==L[id])s.value=L[id]});
-  [['X'],['Y'],['Z']].forEach(([id])=>{const r=$('#'+id);r.value=L[id];$('#'+id+'V').textContent=L[id]+(id==='Z'?'%':' days');fillRange(r)});
-  $$('#presets button').forEach(b=>b.classList.remove('on'));
-  const res=S.last&&S.last.lev&&JSON.stringify(S.last.lev)===JSON.stringify(L)?S.last.res:runSim(L);
-  const st=statusOf(L,res);
-
-  const asOf=dn(c.as_of);
-  const near=(kind,partner,f)=>c.ev.filter(e=>e[2]===kind&&e[3]===partner&&dn(e[5])>asOf).map(e=>({...f(e)}));
-  const h1=$('#h1'),h2=$('#h2'),h3=$('#h3'),h4=$('#h4');
-  const rc=c.sales.filter(s=>s[1]===L.cust&&s[3]===1).reduce((a,s)=>a+s[2],0),ev1=c.ev.filter(e=>e[2]==='invoice_receipt'&&e[3]===L.cust&&dn(e[5])>asOf).sort((a,b)=>dn(a[5])-dn(b[5]))[0];
-  h1.innerHTML=ev1?`Nearest invoice ${fds(ev1[5])} → ${fds(iso(Math.max(asOf+1,dn(ev1[5])-L.X)))} · period revenue ${mm(rc)} → receivables drop ${mm(rc/c.N*L.X)}`:'This customer has no invoice awaiting collection.';
-  const ps=c.pur.filter(s=>s[0]===L.supp&&s[2]===1).reduce((a,s)=>a+s[1],0),ev2=c.ev.filter(e=>e[2]==='supplier_payment'&&e[3]===L.supp&&dn(e[5])>asOf).sort((a,b)=>dn(a[5])-dn(b[5]))[0];
-  h2.innerHTML=ev2?`Nearest payment ${fds(ev2[5])} → ${fds(iso(dn(ev2[5])+L.Y))} · payables rise ${mm(ps/c.N*L.Y)}`:'This supplier has no upcoming payment.';
-  h3.className='hint'+(L.l3_on&&!res.valid.l3?' err':'');h3.innerHTML=L.l3_on&&!res.valid.l3?'This inventory line is not owned, so the lever is blocked.':`Releases ${mm(res.freed)} · cash arrives ${mm(res.rel)} on ${fds(iso(asOf+L.lag))} (after discount ${L.hair}%)`;
-  h4.className='hint '+(L.l4_on?(res.status4==='OK'?'ok':'err'):'');
-  h4.innerHTML=L.l4_on?(res.status4==='OK'?`Eligible: receive ${mm(res.financed.Cc)} on ${fds(EP.start)} · cost ${nf(res.financed.fin/1e6,2)}M`:'Blocked: '+res.reason):'Pick an invoice collected after the cash-needed date and a product whose conditions fit.';
-  ['l1','l2','l3','l4'].forEach(k=>$('#lv-'+k).classList.toggle('bad',!!L[k+'_on']&&(k==='l4'?res.status4==='BLOCKED':!res.valid[k])));
-
-  const hasLast=S.last&&JSON.stringify(S.last.lev)===JSON.stringify(L),label=describeLev(L);
-  $('#rHead').textContent=label;
-  const cv=$('#rCover');cv.className='cover '+st.k;cv.textContent=(st.k==='yes'?'✓ ':st.k==='no'?'◐ ':st.k==='bl'?'⛔ ':'')+st.t;
-  animNum($('#bGap'),res.gap_epi/1e6,v=>nf(v,1)+'M');$('#bGapS').textContent='before: '+mm(BASE.gap_epi);
-  animNum($('#bNew'),res.newDays,v=>Math.round(v)+' days');
-  animNum($('#bCost'),res.cost/1e6,v=>nf(v,2)+'M');
-  const rows=[['DSO',BASE.dso,res.dso],['DIO',BASE.dio,res.dio],['DPO',BASE.dpo,res.dpo],['CCC',BASE.ccc,res.ccc]];
-  $('#mTbl').innerHTML=rows.map(([n,a,b])=>{const d=b-a,good=n==='DPO'?d>0:d<0,cls=Math.abs(d)<.005?'neu':(good?'pos':'neg');return `<tr><td><b>${n}</b></td><td class="num">${nf(a,1)} days</td><td class="num"><b>${nf(b,1)} days</b></td><td class="num ${cls}">${Math.abs(d)<.005?'—':(d>0?'+':'−')+nf(Math.abs(d),1)}</td></tr>`}).join('');
-  cashChart($('#wiChart'),{path:res.path,buf:c.buffer,ep:EP,scen:anyOn(L)&&st.k!=='na'});
-  const r=$('#wiRes');if(!soft||hasLast)r.classList.remove('loading');
-  $('#wiDraft').disabled=!anyOn(L)||st.k==='bl'&&!res.l.some(Boolean);
-  renderCmp();
-}
-function loadScenario(sc,run){
-  const l={...offLev(),inv_id:defaultInvoice(),...sc.lev};S.lev=l;
-  if($('#pane-whatif').querySelector('#wiRes')){syncWI();$$('#presets button').forEach(b=>b.classList.toggle('on',b.dataset.sc===sc.id))}
-  if(run){const r=runNow(sc.name);if(S.detail==='whatif')$$('#presets button').forEach(b=>b.classList.toggle('on',b.dataset.sc===sc.id));return r}
-}
-function saveCmp(){
-  const l={...S.lev};if(!anyOn(l)){toast('Switch on at least one lever');return}
-  if(S.cmp.length>=4){toast('Compare at most 4 scenarios');return}
-  const res=runSim(l);if(S.cmp.some(x=>JSON.stringify(x.lev)===JSON.stringify(l))){toast('This scenario is already in the comparison');return}
-  S.cmp.push({label:describeLev(l),lev:l,res,st:statusOf(l,res)});renderCmp();toast('Scenario saved to comparison');
-}
-function renderCmp(){
-  const b=$('#cmpBox');if(!b)return;
-  if(!S.cmp.length){b.innerHTML='';return}
-  const ok=S.cmp.filter(x=>x.st.k==='yes'),best=ok.length?ok.reduce((a,x)=>x.res.cost<a.res.cost?x:a):null;
-  b.innerHTML=`<div class="cmp-h"><h3 style="margin:0;font-size:14px">Compare scenarios</h3><span class="subtle" style="font-size:11px;color:var(--muted)">${S.cmp.length}/4 · the cheapest that fully covers is highlighted</span></div>
-  <div class="table-wrap"><table class="dtable" style="min-width:0"><thead><tr><th>Metric</th>${S.cmp.map((x,i)=>`<th class="${x===best?'cmpcol best':''}">${x===best?'★ ':''}Scenario ${i+1} <button data-rm="${i}" aria-label="Delete" style="color:var(--lc-color-text-muted)">✕</button></th>`).join('')}</tr></thead><tbody>
-  <tr><td>Content</td>${S.cmp.map(x=>`<td style="text-align:right;font-size:11px;white-space:normal;min-width:120px">${esc(x.label)}</td>`).join('')}</tr>
-  <tr><td>CCC after</td>${S.cmp.map(x=>`<td class="num ${x===best?'cmpcol best':''}">${nf(x.res.ccc,1)}</td>`).join('')}</tr>
-  <tr><td>Remaining gap</td>${S.cmp.map(x=>`<td class="num ${x.res.gap_epi<1?'pos':'neg'}">${mm(x.res.gap_epi)}</td>`).join('')}</tr>
-  <tr><td>New gap days</td>${S.cmp.map(x=>`<td class="num">${x.res.newDays}</td>`).join('')}</tr>
-  <tr><td>Cost</td>${S.cmp.map(x=>`<td class="num">${nf(x.res.cost/1e6,2)}M</td>`).join('')}</tr>
-  <tr><td>Verdict</td>${S.cmp.map(x=>`<td><span class="status ${x.st.k==='yes'?'green':x.st.k==='no'?'amber':x.st.k==='bl'?'red':'gray'}">${x.st.k==='yes'?'Covers':x.st.k==='no'?'Not enough':x.st.k==='bl'?'Blocked':'—'}</span></td>`).join('')}</tr></tbody></table></div>`;
-}
-
-
-function mkDrafts(run){
-  const c=C(),l=run.lev,res=run.res,asOf=dn(c.as_of),firm=FIRMS[S.firm].short,out=[];
-  const impact={ccc0:BASE.ccc,ccc1:res.ccc,gap0:BASE.gap_epi,gap1:res.gap_epi,cost:res.cost};
-  const sign=`\n\nBest regards,\n${firm} Finance Team\n\n${DISC}`;
-  if(l.l1_on&&res.valid.l1){
-    const ev=c.ev.filter(e=>e[2]==='invoice_receipt'&&e[3]===l.cust&&dn(e[5])>asOf),tot=ev.reduce((a,e)=>a+e[4],0);
-    out.push({type:'payment_reminder',to:l.cust,subject:'Request for earlier settlement of open invoices',body:`Dear ${l.cust} team,\n\nWe would be grateful if you could settle the ${ev.length} open invoices listed in the attached statement (total ${enM(tot)}) ${l.X} days earlier than currently scheduled. Earlier settlement would help us manage our working capital in late October.\n\nPlease let us know if this is possible.`+sign,lever:'l1',args:{customer:l.cust,days_earlier:l.X},impact});
-  }
-  if(l.l2_on&&res.valid.l2){
-    const ev=c.ev.filter(e=>e[2]==='supplier_payment'&&e[3]===l.supp&&dn(e[5])>asOf).sort((a,b)=>dn(a[5])-dn(b[5])).slice(0,4);
-    out.push({type:'term_extension_request',to:l.supp,subject:`Request for ${l.Y}-day extension of payment terms`,body:`Dear ${l.supp} team,\n\nDue to a short-term timing difference in our collections, we kindly request a ${l.Y}-day extension on the following payments:\n${ev.map(e=>`  - ${enDate(e[5])}: ${enM(e[4])}`).join('\n')}\n\nWe value our relationship and will settle promptly on the revised dates.`+sign,lever:'l2',args:{supplier:l.supp,extra_days:l.Y},impact});
-  }
-  if(l.l4_on&&res.status4==='OK'){
-    const cat=CAT.find(x=>x.id===l.prod),e=c.ev.find(x=>x[0]===l.inv_id&&x[1]==='IN'),f=res.financed;
-    out.push({type:'financing_application',to:`${cat.provider} · ${l.prod}`,subject:`${TYPE_VN[cat.type]} application – invoice ${l.inv_id}`,body:`To the ${cat.provider} desk,\n\nWe would like to apply for ${cat.type.replace('_',' ')} (product ${l.prod}) on invoice ${l.inv_id}.\n\n  Debtor:             ${e[3]}\n  Invoice amount:     ${enM(e[4])}\n  Expected receipt:   ${enDate(e[5])}\n  Funds needed on:    ${enDate(EP.start)}\n  Indicative advance: ${enM(f.Cc)}\n  Indicative cost:    ${enM(f.fin)}\n\nThis application is a simulated draft and has not been submitted.`+sign,lever:'l4',args:{invoice_id:l.inv_id,product_id:l.prod},impact});
-  }
-  return out;
-}
-function createDrafts(run,{silent}={}){
-  const made=[],ds=mkDrafts(run);
-  ds.forEach(d=>{
-    const dup=S.drafts.find(x=>x.firm===S.firm&&x.run===run.id&&x.type===d.type);if(dup)return;
-    const o={...d,id:`D-${S.firm}-${String(++S.draftN).padStart(3,'0')}`,firm:S.firm,run:run.id,label:run.label,status:'pending_approval',ts:Date.now(),open:false,scId:run.scId||''};
-    S.drafts.unshift(o);made.push(o);
-    addLog({tool:'draft_action',tier:2,args:{action_type:d.type,details:d.args},status:'pending_approval',summary:`${o.id} · ${d.type} → ${d.to}`,draftId:o.id});
-  });
-
-  if(run.lev.l4_on&&run.res.status4==='BLOCKED'&&!S.drafts.find(x=>x.run===run.id&&x.status==='blocked')){
-    const o={id:`D-${S.firm}-${String(++S.draftN).padStart(3,'0')}`,firm:S.firm,run:run.id,label:run.label,type:'financing_application',to:`${run.lev.prod}`,subject:'Financing application – blocked',body:'',args:{invoice_id:run.lev.inv_id,product_id:run.lev.prod},status:'blocked',reason:run.res.reason,ts:Date.now(),impact:null};
-    S.drafts.unshift(o);made.push(o);
-    addLog({tool:'draft_action',tier:2,args:{action_type:'financing_application',details:o.args},status:'blocked',summary:`${o.id} blocked · ${o.reason}`,draftId:o.id,reason:o.reason});
-  }
-  updatePending();
-  if(!silent&&made.length)toast(`Drafted ${made.filter(x=>x.status==='pending_approval').length} drafts, awaiting your approval`);
-  if(S.detail==='appr')renderAppr();
-  return made;
-}
-function draftFromLast(){
-  if(!S.last||JSON.stringify(S.last.lev)!==JSON.stringify(S.lev)){runNow()}
-  const made=createDrafts(S.last);
-  if(!made.length){toast('No valid lever to draft (inventory reduction is simulation only)');return}
-  if(S.panel&&S.detail==='appr'){renderAppr();const first=$('#pane-appr .ac');first&&first.classList.add('open')}
-  else detailHandoff(`${made.length} draft${made.length===1?'':'s'} created and waiting for your approval.`,'appr','Open Approvals →');
-}
-function updatePending(){
-  const n=S.drafts.filter(d=>d.status==='pending_approval'&&d.firm===S.firm).length,chip=$('#pendChip'),nEl=$('#pendN');
-  const prev=+nEl.textContent;nEl.textContent=n;chip.classList.toggle('zero',n===0);
-  if(n>prev){chip.classList.remove('bump');void chip.offsetWidth;chip.classList.add('bump')}
-  const b=$('#apprBadge');b.textContent=n;b.classList.toggle('zero',n===0); // badge sits on the sidebar "Approval queue" item
-}
-$('#pendChip').addEventListener('click',()=>openDetail('appr'));
-const DT={payment_reminder:['✉','Payment reminder'],term_extension_request:['⏱','Terms extension request'],financing_application:['◈','Pre-filled financing application']};
-function renderAppr(){
-  const p=$('#pane-appr'),f=S.apprFilter,list=S.drafts.filter(d=>d.firm===S.firm&&(f==='all'||d.status===f||(f==='executed'&&d.status.startsWith('executed'))));
-  const cnt=k=>S.drafts.filter(d=>d.firm===S.firm&&(k==='all'||d.status===k)).length;
-  const pend=list.filter(d=>d.status==='pending_approval'),hist=list.filter(d=>d.status!=='pending_approval');
-  p.innerHTML=`<div class="card-head"><div><h3>Approval queue</h3><p>Only here does a draft become a simulated action. Nothing is sent outside.</p></div>
-  <div class="seg" id="apprSeg">${[['all','All'],['pending_approval','Pending'],['executed','Executed'],['rejected','Rejected'],['blocked','Blocked']].map(([k,t])=>`<button data-f="${k}" class="${f===k?'on':''}">${t} ${cnt(k)}</button>`).join('')}</div></div>
-  ${!list.length?`<div class="card"><div class="empty"><div class="big">☑</div><b>No drafts yet${f!=='all'?' in this status':''}</b><br>Ask Copilot in the chat to test a lever, then create a draft from its answer.</div></div>`:`<div class="appr">${[...pend,...hist].map(draftCard).join('')}</div>`}
-  <div class="callout" style="margin-top:14px"><span>⛨</span><div><b>Approval does not mean a real send.</b> When you press Approve, the UI only calls <code>submit_action</code> in simulation mode and writes the log (tier 3).</div></div>`;
-  $$('#apprSeg button',p).forEach(b=>b.addEventListener('click',()=>{S.apprFilter=b.dataset.f;renderAppr()}));
-  p.onclick=e=>{
-    const card=e.target.closest('.ac');if(!card)return;const d=S.drafts.find(x=>x.id===card.dataset.id);
-    if(e.target.closest('[data-tg]')){d.open=!d.open;card.classList.toggle('open',d.open);e.target.closest('[data-tg]').textContent=d.open?'Collapse':'Show full text';return}
-    if(e.target.closest('[data-ap]'))approveDlg(d);
-    if(e.target.closest('[data-rj]'))rejectDlg(d);
-  };
-}
-function draftCard(d){
-  const [ic,tn]=DT[d.type],st={pending_approval:['amber','Pending'],executed:['green','Executed (simulated)'],rejected:['gray','Rejected'],blocked:['red','Blocked']}[d.status];
-  const im=d.impact,pend=d.status==='pending_approval';
-  return `<div class="ac ${d.status==='executed'?'executed':d.status} ${d.open?'open':''}" data-id="${d.id}">
-   <div class="ac-h"><div class="ac-ic" style="${d.status==='blocked'?'background:var(--red-bg)':d.status==='executed'?'background:var(--green-bg)':''}">${ic}</div><div><h4>${tn} · ${esc(d.to)}</h4><div class="sub">${d.id} · ${esc(d.label)} · tier 2 · ${new Date(d.ts).toLocaleTimeString('en-GB')}</div></div><span class="status ${st[0]}"><i></i>${st[1]}</span></div>
-   ${d.status==='blocked'?`<div class="callout red" style="margin-top:12px"><span>⛔</span><div><b>Does not enter the queue.</b> ${esc(d.reason)}. This draft has no Approve button.</div></div>`:`
-   <div class="impact"><div class="imp"><span>CCC</span><strong class="num">${nf(im.ccc0,1)} → ${nf(im.ccc1,1)}</strong></div><div class="imp"><span>Remaining gap</span><strong class="num">${mm(im.gap0)} → ${mm(im.gap1)}</strong></div><div class="imp"><span>Estimated cost</span><strong class="num">${nf(im.cost/1e6,2)}M</strong></div><div class="imp"><span>Lever</span><strong>${LV_NAME[d.lever]}</strong></div></div>
-   <pre class="mail">Subject: ${esc(d.subject)}\n\n${esc(d.body)}</pre>
-   <div class="ac-f">${pend?`<button class="btn ok" data-ap>✓ Approve</button><button class="btn danger" data-rj>Rejected</button>`:''}<button class="btn sec sm" data-tg>${d.open?'Collapse':'Show full text'}</button><span class="grow"></span>
-   ${d.status==='executed'?`<span class="done-line"><span class="tick"><svg viewBox="0 0 12 12"><path d="M2 6.5l2.6 2.6L10 3.4"/></svg></span>submit_action · simulated · ${new Date(d.decidedAt).toLocaleTimeString('en-GB')}</span>`:''}
-   ${d.status==='rejected'?`<span class="done-line">Reason: ${esc(d.reasonTxt)}</span>`:''}</div>`}
-  </div>`;
-}
-function approveDlg(d){
-  openModal(`<h3>Approve draft ${d.id}?</h3><p>${DT[d.type][1]} sent to <b>${esc(d.to)}</b>. This is a simulation: no email, application or money is really sent.</p>
-  <div class="impact" style="grid-template-columns:1fr 1fr;margin:0"><div class="imp"><span>CCC</span><strong class="num">${nf(d.impact.ccc0,1)} → ${nf(d.impact.ccc1,1)}</strong></div><div class="imp"><span>Remaining gap</span><strong class="num">${mm(d.impact.gap0)} → ${mm(d.impact.gap1)}</strong></div></div>
-  <label class="chk"><input type="checkbox" id="ackChk"> I understand this is a simulation and take responsibility for this approval decision.</label>
-  <div class="acts"><button class="btn sec" id="mCancel">Cancel</button><button class="btn ok" id="mOk" disabled>Confirm approval</button></div>`,m=>{
-    $('#ackChk',m).onchange=e=>$('#mOk',m).disabled=!e.target.checked;$('#mCancel',m).onclick=closeModal;
-    $('#mOk',m).onclick=()=>{closeModal();d.status='executed';d.decidedAt=Date.now();
-      addLog({tool:'submit_action',tier:3,args:{draft_id:d.id,mode:'simulated'},status:'executed (simulated)',summary:`${d.id} approved, simulated execution`,draftId:d.id});
-      updatePending();renderAppr();toast('Approved: executed (simulated)');botNote(`Recorded <b>${d.id}</b> as <b>executed (simulated)</b>. Nothing was really sent.`,{suggest:nextSuggest()});};
-  });
-}
-function rejectDlg(d){
-  const R=['Cost too high','Customer or supplier does not agree','Want to try another option','Data is inaccurate'];
-  openModal(`<h3>Reject draft ${d.id}</h3><p>The reason is written to the log, and Copilot will suggest another option.</p><div class="reasons">${R.map(r=>`<button type="button">${r}</button>`).join('')}</div><textarea id="rjTxt" placeholder="Reason for rejection (required)"></textarea><div class="acts"><button class="btn sec" id="mCancel">Cancel</button><button class="btn danger" id="mOk" disabled>Confirm rejection</button></div>`,m=>{
-    const t=$('#rjTxt',m),ok=$('#mOk',m);t.oninput=()=>ok.disabled=t.value.trim().length<3;
-    $$('.reasons button',m).forEach(b=>b.onclick=()=>{$$('.reasons button',m).forEach(x=>x.classList.remove('on'));b.classList.add('on');t.value=b.textContent;t.oninput()});
-    $('#mCancel',m).onclick=closeModal;
-    ok.onclick=()=>{closeModal();d.status='rejected';d.reasonTxt=t.value.trim();d.decidedAt=Date.now();
-      addLog({tool:'reject_draft',tier:2,args:{draft_id:d.id,reason:d.reasonTxt},status:'rejected',summary:`${d.id} rejected · ${d.reasonTxt}`,draftId:d.id,reason:d.reasonTxt});
-      updatePending();renderAppr();toast('Draft rejected');suggestAlternative(d)};
-  });
-}
-
-
-const ST_CLS={ok:'blue','pending_approval':'amber','executed (simulated)':'green',rejected:'gray',blocked:'red'};
 function addLog(e){
   const o={n:++S.seq,ts:Date.now(),firm:S.firm,...e};S.log.unshift(o);
 
@@ -938,7 +575,7 @@ async function botNote(html,{suggest}={}){const b=newBot();await say(b,html);sug
 async function say(bot,html,cls=''){const b=document.createElement('div');b.className='bubble '+cls;bot.appendChild(b);await typeHTML(b,html);return b}
 async function toolCall(bot,name,tier,args,work,{ms=650}={}){
   const el=document.createElement('div');el.className='toolchip';
-  el.innerHTML=`<button type="button" aria-expanded="false"><span>⚙</span><code>${name}</code><span class="tl t${tier}">Tier ${tier}</span><span class="st"><i class="spin"></i>running…</span></button><pre>${esc(JSON.stringify({tool:name,tier,args},null,2))}</pre>`;
+  el.innerHTML=`<button type="button" aria-expanded="false"><span>⚙</span><code>${name}</code><span class="st"><i class="spin"></i>running…</span></button><pre>${esc(JSON.stringify({tool:name,args},null,2))}</pre>`;
   bot.appendChild(el);scroll();
   $('button',el).onclick=()=>{el.classList.toggle('open');$('button',el).setAttribute('aria-expanded',el.classList.contains('open'))};
   await sleep(reduceMotion?0:ms+Math.random()*250);
@@ -961,43 +598,33 @@ function placeSuggest(bot=lastBot()){
   items.forEach(it=>{const b=document.createElement('button');b.type='button';b.textContent=typeof it==='string'?it:it.t;b.onclick=()=>typeof it==='string'?sendChat(it):it.f();d.appendChild(b)});bot.appendChild(d);scroll();
 }
 
-const STOP=new Set(['the','what','if','we','can','you','for','from','and','with','more','how','about','than','this','that','our','my','please','collect','early','extend','terms','days','day','pay','payment','payments','cut','sell','down','stock','inventory','finance','financing','invoice','line','customer','supplier','by','to','of','in','on','is','are','do','does','get','ask','try','let','me','us','a','an','it','its','at','as','any','not','too','longer','earlier','faster','delay','defer','reduce','clear','slow','items','item']);
-function pick(text,names){
-  const toks=text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=2&&!STOP.has(w)&&!/^\d+$/.test(w));
-  let best=null,bs=0;names.forEach(n=>{const nl=n.toLowerCase();const sc=toks.filter(w=>nl.split(/[^\p{L}\p{N}]+/u).includes(w)||(w.length>=4&&nl.includes(w))).length;if(sc>bs){bs=sc;best=n}});
-  return bs>0?best:null;
-}
-function parseLev(t){
-  const c=C(),low=t.toLowerCase(),L={...offLev(),inv_id:defaultInvoice()},carry=S.last?S.last.lev:null,miss=[];
-  const days=(low.match(/(\d+)\s*(?:days?|d\b)/)||[])[1],pct=(low.match(/(\d+)\s*%/)||[])[1];
-  const t1=/collect[^.?!]*early|early[^.?!]*(collect|pay)|pay[^.?!]*early|bring forward/.test(low),t2=/extend|defer|postpone|delay (our |the )?pay|stretch|longer terms/.test(low),t3=/inventory|sell (down|off)|cut stock|reduce stock|liquidat|clear (the )?stock/.test(low),t4=/financ|factoring|advance|s-f0\d-\d+|\b(fac|rf|dd)-\d{3}\b/.test(low);
-  if(!(t1||t2||t3||t4))return null;
-  const buyers=topBy(c.sales.filter(s=>s[3]===1),s=>s[1],s=>s[2]).map(x=>x.k),sup=topBy(c.pur.filter(s=>s[2]===1),s=>s[0],s=>s[1]).map(x=>x.k),lines=c.inv.map(x=>x.name);
-  if(t1){L.l1_on=1;L.X=days?+days:7;const m=pick(t,buyers)||(carry&&carry.l1_on?carry.cust:null);if(m)L.cust=m;else miss.push({what:'customer',opts:buyers})}
-  if(t2){L.l2_on=1;L.Y=days?+days:7;const m=pick(t,sup)||(carry&&carry.l2_on?carry.supp:null);if(m)L.supp=m;else miss.push({what:'supplier',opts:sup})}
-  if(t3){L.l3_on=1;L.Z=pct?+pct:25;const m=pick(t,lines);if(m)L.line=m;else miss.push({what:'product line',opts:lines.filter((n,i)=>c.inv[i].own>0)})}
-  if(t4){L.l4_on=1;const inv=(t.match(/[S]-F0\d-\d{4}/)||[])[0],pr=(t.match(/\b(?:FAC|RF|DD)-\d{3}\b/)||[])[0];if(inv)L.inv_id=inv;if(pr)L.prod=pr;if(!pr&&carry&&carry.l4_on)L.prod=carry.prod}
-  if(!t1&&!t2&&!t3&&!t4)return null;
-  return {lev:L,miss};
-}
+// UC03 / UC04 chat guards (UC03.2 A1, UC04.3 A2, UC04.6, UC03.4 A1).
+const RE_EXEC=/\b(send|submit|sign|execute|approve|transfer|disburse|wire)\b|apply for (the|a) (loan|financing)|\bdraft\b/i;
+const RE_E30=/interest[^.?!]*(sav|save|cheaper|lower)|sav(e|ing|ings)[^.?!]*interest/i;
+const RE_REORDER=/(put|move|rank|place|prioriti[sz]e|switch|swap|change|reorder)[^.?!]*(loan|borrow|bank|financ|order|priorit|group)[^.?!]*(first|before|ahead|top|instead|order)|reorder|re-order|change the (priority|order)/i;
+const RE_OVERRIDE=/(use|include|allow)[^.?!]*(anyway|even though|despite|regardless)|override[^.?!]*(check|exclusion|rule)/i;
 function routeBase(raw){
   const t=raw.trim(),low=t.toLowerCase();
   const ex=SCEN().find(s=>norm(s.ask)===norm(t));if(ex)return {type:'sc',sc:ex};
   const noInv=t.replace(/\b[SP]-F0\d-\d+/g,'');
   const other=(noInv.match(/\bF0\d\b/g)||[]).find(f=>f!==S.firm);if(other)return {type:'block',kind:'firm',other};
-  const prods=(noInv.match(/\b[A-Z]{2,4}-\d{1,3}\b/g)||[]).filter(x=>!CAT.some(c=>c.id===x));
+  const known=new Set([...CAT.map(c=>c.id),...(((DATA.uc03||{})[S.firm]||{}).products||[]).map(p=>p.id)]);
+  const prods=(noInv.match(/\b[A-Z]{2,4}-\d{1,3}\b/g)||[]).filter(x=>!known.has(x));
   if(prods.length||/bank\s*z\b|outside (the )?catalogue|not in (the )?catalogue/i.test(t))return {type:'block',kind:'product',ref:prods[0]||'Bank Z'};
-  if(/(send|submit|transfer|file)[^.?!]*(now|immediately|right away|directly)|(no need|without|skip|bypass)[^.?!]*approval/i.test(t))return {type:'block',kind:'send'};
+  if(RE_EXEC.test(t))return {type:'exec'};
+  if(RE_E30.test(t))return {type:'e30'};
+  if(RE_REORDER.test(t))return {type:'reorder'};
+  if(RE_OVERRIDE.test(t))return {type:'override'};
   const g=guardRoute(t);if(g)return g;
-  if(/(draft|prepare|write|create)[^.?!]*(draft|proposal)|\bdraft\b/.test(low))return {type:'draft'};
-  if(/rank|reject|catalogue/.test(low)&&!/collect|early|extend|inventory|s-f0/.test(low))return {type:'rank'};
-  const pl=parseLev(t);if(pl)return pl.miss.length?{type:'clarify',miss:pl.miss[0]}:{type:'custom',lev:pl.lev};
+  if(/\bcompare\b/.test(low)&&/run|what.?if|scenario|option/.test(low))return {type:'cmp'};
+  const rows=U34.parseWhatIf(t);if(rows)return {type:'wi',rows};
+  if(/solution|financ|fund|borrow|loan|option|rank|catalogue|reject|exclud|source|package|priorit|why .*(first|before)/.test(low))return {type:'sol'};
   if(/concentrat|which customer|receivable|who owes/.test(low))return {type:'conc'};
   if(/liquidity|overview|diagnos|situation|health/.test(low))return {type:'liq'};
   if(/stuck|bottleneck|tied up|locked up/.test(low))return {type:'liq',focus:'stuck'};
   if(/short|gap|cash ?flow|13.?week|risk|largest|biggest|deficit|cause|root|contributing|factor/.test(low))return {type:'gap'};
   if(/ccc|dso|dio|dpo|working capital|cycle/.test(low))return {type:'ccc'};
-  if(/rank|catalogue|option|compar|financ|reject/.test(low))return {type:'rank'};
+  if(/what.?if|simulat|lever/.test(low))return {type:'wihelp'};
   return {type:'help'};
 }
 // "gap N" anywhere in the question selects that gap first, then the question is answered for it.
@@ -1020,106 +647,62 @@ $('#chatForm').addEventListener('submit',async e=>{e.preventDefault();const text
 async function respond(r,text){
   const bot=newBot(),c=C();
   if(r.type==='block'){
-    const msgs2={firm:[`This session can only view data for <b>${S.firm}</b>. The request to access <b>${r.other}</b> was blocked.`,null,0,{firm_id:r.other}],
-      product:[`<b>${esc(r.ref)}</b> is not in the synthetic catalogue, so no figures are given. Products you can use: ${CAT.map(x=>x.id).join(', ')}.`,'match_financing',1,{product_id:r.ref}],
-      send:[`I only <b>draft proposals</b> (tier 2). Sending or filing only runs at tier 3 and only after you click <b>Approve</b> in the Approvals tab.`,null,3,{mode:'direct',approved:false}]}[r.kind];
-    if(msgs2[1])await toolCall(bot,msgs2[1],msgs2[2],msgs2[3],()=>({bad:true}),{ms:380});
-    addLog({tool:msgs2[1]||'chat_guard',tier:msgs2[2],args:msgs2[3],status:'blocked',summary:msgs2[0].replace(/<[^>]+>/g,''),reason:r.kind});
+    const msgs2={firm:[`This session can only view data for <b>${S.firm}</b>. The request to access <b>${r.other}</b> was blocked.`,null,{firm_id:r.other}],
+      product:[`<b>${esc(r.ref)}</b> is not in the illustrative catalogue, so no figures are given.`,'match_financing',{product_id:r.ref}]}[r.kind];
+    if(msgs2[1])await toolCall(bot,msgs2[1],0,msgs2[2],()=>({bad:true}),{ms:380});
+    addLog({tool:msgs2[1]||'chat_guard',args:msgs2[2],status:'blocked',summary:msgs2[0].replace(/<[^>]+>/g,''),reason:r.kind});
     await say(bot,msgs2[0],'warn');suggestRow(bot,nextSuggest());return;
   }
-  if(r.type==='clarify'){
-    await say(bot,`Which <b>${r.miss.what}</b> do you want to apply this to? I did not recognise a name in your question.`);
-    suggestRow(bot,r.miss.opts.slice(0,4).map(n=>({t:n,f:()=>sendChat((text+' '+n))})));return;
+  if(['exec','e30','reorder','override'].includes(r.type)){
+    addLog({tool:'chat_guard',args:{firm_id:S.firm,request:r.type},status:'blocked',summary:U34.REFUSE[r.type]});
+    await say(bot,`<p>${U34.REFUSE[r.type]}</p>`,'warn');
+    if(r.type==='reorder')suggestRow(bot,[{t:'Open Solutions →',f:()=>openDetail('sol')}]);
+    else if(r.type==='exec')suggestRow(bot,[{t:'Open What-if →',f:()=>openDetail('whatif')},{t:'Open Solutions →',f:()=>openDetail('sol')}]);
+    else suggestRow(bot,nextSuggest());
+    return;
   }
   if(r.type==='policy'){await respondPolicy(bot,r);return}
   if(r.type==='causal'){await respondCausal(bot,text);return}
   if(r.type==='scope'){await respondScope(bot,r);return}
-  if(r.gap!=null&&r.type!=='block'){
+  if(r.gap!=null){
     if(!EPS.some(e=>e.k===r.gap)){await say(bot,EPS.length?`There is no gap ${r.gap}. The 13-week forecast has ${EPS.length} gap${EPS.length>1?'s':''}: ${EPS.map(e=>'gap '+e.k).join(', ')}.`:'The 13-week forecast has no cash gaps.');suggestRow(bot,nextSuggest());return}
     selectGap(r.gap);if(S.panel)renderTab();
   }
-  {const need=r.type==='gap'||['cash0q','weekq','scenq'].includes(r.type)?1:r.type==='rank'?2:['sc','custom','draft','clarify'].includes(r.type)?3:0;
+  // UC03 and UC04 prepare their own UC01/UC02 results (E31): no stage gate for Solutions or What-if.
+  {const need=r.type==='gap'||['cash0q','weekq','scenq'].includes(r.type)?1:0;
    if(S.stage<need){await gateMsg(bot);return}}
   if(r.type==='cash0q'){await respondCash0Q(bot);return}
   if(r.type==='weekq'){await respondWeekQ(bot);return}
   if(r.type==='scenq'){await respondScenarioQ(bot,text);return}
-  if(r.type==='sc'){await runScenarioInChat(bot,r.sc);return}
-  if(r.type==='custom'){await runLevInChat(bot,r.lev,null,text);return}
-  if(r.type==='draft'){await draftInChat(bot);return}
+  if(r.type==='sol'){await respondSolutions(bot);return}
+  if(r.type==='sc'){S.done.add(r.sc.id);U34.loadPreset(r.sc);await runWhatIfInChat(bot,U34.sims().rows,r.sc.name);return}
+  if(r.type==='wi'){await runWhatIfInChat(bot,r.rows,null);return}
+  if(r.type==='cmp'){const st=U34.sims(),runs=st.runs.slice(0,2);await say(bot,runs.length<2?'<p>Run at least two what-if tests first, then compare them in What-if.</p>':U34.compareHTML(runs));suggestRow(bot,[{t:'Open What-if →',f:()=>openDetail('whatif')}]);return}
+  if(r.type==='wihelp'){await say(bot,`<p>What-if tests three levers on Base, Conservative and Positive: early or late collection from a customer, a supplier extension (with assumed consent) and the sale of an owned lot. Example: <i>“${esc((SCEN()[0]||{ask:'What if K1 pays half of its invoices 7 days early?'}).ask)}”</i></p>`);suggestRow(bot,[{t:'Open What-if →',f:()=>openDetail('whatif')}]);return}
   if(r.type==='gap'){await respondCause(bot,{focus:r.gap});return}
   if(r.type==='ccc'){await respondLiq(bot,{focus:'ccc'});return}
   if(r.type==='liq'){await respondLiq(bot,{focus:r.focus});return}
   if(r.type==='conc'){await respondConc(bot);return}
-  if(r.type==='rank'){await respondRank(bot,{focus:r.gap});return}
-  await say(bot,`<p>I support <b>${S.firm}</b> one step at a time, each unlocking when you ask for it:</p><ul><li>Diagnose DSO, DIO, DPO and CCC.</li><li>Find cash-short weeks over 13 weeks.</li><li>Rank financing options in the synthetic catalogue.</li><li>Test levers (collect early, extend payment terms, cut inventory, finance one invoice) and draft proposals for your approval.</li></ul><p>Example: <i>“What if we collect from K1 10 days early?”</i></p>`);
+  await say(bot,`<p>I support <b>${S.firm}</b> with:</p><ul><li>Working-capital diagnosis (DSO, DIO, DPO, CCC).</li><li>A 13-week cash forecast with the L / Z / H reserve levels.</li><li>Solutions in the policy order of the matrix cell, with the sources that are excluded and why.</li><li>What-if tests of three levers on three scenarios.</li></ul><p>${U34.OUTSIDE}</p>`);
   suggestRow(bot,nextSuggest());
 }
-async function runScenarioInChat(bot,sc){
-  const l={...offLev(),inv_id:defaultInvoice(),...sc.lev};
-  await runLevInChat(bot,l,sc);
+async function runWhatIfInChat(bot,rows,label){
+  await toolCall(bot,'simulate_scenario',0,{firm_id:S.firm,levers:rows.filter(x=>x.on).map(x=>x.lever)},()=>({}),{ms:420});
+  await U34.chatWhatIf(bot,rows,label);advance(4,bot);renderDemoChips();suggestRow(bot,nextSuggest());
 }
-async function runLevInChat(bot,L,sc,text){
-  const label=sc?sc.name:describeLev(L);
-  if(EP.none){await say(bot,'No gap to simulate. No cash shortfall in the 13-week forecast, so there is nothing to simulate.');return}
-  const out=await toolCall(bot,'simulate_scenario',1,{firm_id:S.firm,levers:leverArgs(L)},()=>{
-    S.lev={...L};const res=runSim(L),run=commit(L,res,label);if(sc){run.scId=sc.id;S.done.add(sc.id)}return {run,bad:run.st.k==='bl'&&!res.l.some(Boolean)};
-  });
-  const run=out.run,r=run.res,st=run.st;advance(4,bot);renderDemoChips();
-  if(S.detail==='whatif')renderWhatIf(true);if(S.detail==='gap')renderGap();
-  const note=sc&&sc.note&&sc.note.startsWith('Note:')?sc.note.slice(5).trim():'';
-  if(st.k==='bl'){
-    await say(bot,`<p><b class="k">A lever is blocked.</b> ${st.all.map(esc).join('; ')}.</p>${r.l.some(Boolean)?`<p>The remaining levers are still calculated: CCC ${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}, shortfall now ${mm(r.gap_epi)}.</p>`:'<p>I do not calculate figures for this combination.</p>'}${r.status4==='BLOCKED'?'<p>You can drop one of the two levers and try again.</p>':''}`,'warn');
-  }else if(r.uc04){
-    const U=r.uc04,b=U.before,a=U.after,C4=U.costs;
-    await say(bot,`<p>${esc(label)}: ${t('u4.what',{ar:mm(U.moved.ar),ap:mm(U.moved.ap),sale:mm(U.sale.net)})}</p>
-      <p>${t('u4.cash',{m0:mm(b.min),m1:mm(a.min),d:fd(a.min_date),g0:b.gap_days,g1:a.gap_days,n0:b.negative_days,n1:a.negative_days})}</p>
-      <p>${t('u4.cost',{c:mm(C4.cash),disc:mm(C4.discount),fee:mm(C4.extension_fee),sale:mm(C4.sale_cash),book:mm(C4.book_shortfall)})} ${U.worse_gap_days?t('u4.worse',{w:U.worse_gap_days,n:U.new_gap_days}):''}${U.tail.pay>0?' '+t('u4.tail',{x:mm(U.tail.pay)}):''}</p>
-      <p><b>${t('u4.c.'+U.conclusion)}</b> ${t('u4.limit',{d:fd(uc02().as_of)})}</p>${note?`<p>${esc(note)}</p>`:''}`);
-  }else{
-    const cover=r.gap_epi<1;
-    await say(bot,`<p>${esc(label)}: CCC <b>${nf(BASE.ccc,1)} → ${nf(r.ccc,1)} days</b>, peak shortfall <b>${mm(BASE.gap_epi)} → ${mm(r.gap_epi)}</b>, cost <b>${nf(r.cost/1e6,2)} million VND</b>${r.cost===0?' (assumes no fees)':''}. ${cover?'<b>Covers</b> of the shortfall.':'<b>Not enough</b>, still short '+mm(r.gap_epi)+'.'}</p>${r.newDays>0?`<p>Note: this creates ${r.newDays} new shortfall days outside this gap.</p>`:''}${note?`<p>${esc(note)}</p>`:''}`);
-  }
-  if(st.k!=='bl'||r.l.some(Boolean)){
-    const card=document.createElement('div');card.className='rescard';
-    card.innerHTML=`<div class="rt"><h4>${esc(label)}</h4><span class="status ${st.k==='yes'?'green':st.k==='no'?'amber':'red'}"><i></i>${st.k==='yes'?'Covers':st.k==='no'?'Not enough':'Partially blocked'}</span></div>
-    <div class="rgrid">${r.uc04?`<div class="rg"><span>Lowest balance</span><strong class="num">${mm(r.uc04.after.min)}</strong><small>before ${mm(r.uc04.before.min)}</small></div>`:`<div class="rg"><span>CCC</span><strong class="num">${nf(BASE.ccc,1)} → ${nf(r.ccc,1)}</strong><small>days</small></div>`}<div class="rg"><span>Remaining gap</span><strong class="num ${r.gap_epi<1?'pos':'neg'}">${mm(r.gap_epi)}</strong><small>before ${mm(BASE.gap_epi)}</small></div><div class="rg"><span>Cost</span><strong class="num">${nf(r.cost/1e6,2)}M</strong><small>${r.newDays} new shortfall days</small></div></div>
-    <div class="rcact"><button class="btn sec sm" data-a="wi" type="button">Open in What-if</button><button class="btn primary sm" data-a="dr" type="button">✎ Create draft</button></div>`;
-    bot.appendChild(card);scroll();
-    $('[data-a=wi]',card).onclick=()=>openDetail('whatif');
-    $('[data-a=dr]',card).onclick=async()=>{S.lev={...L};S.last=run;const b2=newBot();await draftInChat(b2,run)};
-  }
-  const nx=nextSuggest();
-  if(sc&&sc.mode==='approve')await say(bot,'If you like this option, click <b>Create draft</b> to add it to the queue, then approve it in the Approvals tab.');
-  if(sc&&sc.mode==='reject')await say(bot,'This option is costly. Try <b>Create draft</b> then <b>Rejected</b> in Approvals to see Copilot propose a new one.');
-  suggestRow(bot,nx);
-}
-async function draftInChat(bot,run){
-  run=run||S.last;
-  if(!run){await say(bot,'There is no scenario to draft yet. Try a lever first, for example: <i>“Collect early from K1 7 days”</i>.');suggestRow(bot,nextSuggest());return}
-  const made=await toolCall(bot,'draft_action',2,{action_type:'(based on the active levers)',scenario:run.label},()=>{const m=createDrafts(run,{silent:true});return {made:m,bad:!m.length}});
-  const m=made.made;
-  if(!m.length){await say(bot,'This scenario has no draft: cutting inventory is simulation only, and the other levers are not valid.','warn');return}
-  const ok=m.filter(x=>x.status==='pending_approval'),bl=m.filter(x=>x.status==='blocked');
-  await say(bot,`${ok.length?`<p>I have drafted <b>${ok.length} draft(s)</b>, status <b>pending_approval</b> (not sent):</p><ul>${ok.map(x=>`<li>${x.id} · ${DT[x.type][1]} → ${esc(x.to)}</li>`).join('')}</ul><p>Read the full text and click <b>Approve</b> or <b>Rejected</b> in the Approvals tab.</p>`:''}${bl.length?`<p><b class="k">Blocked:</b> ${bl.map(x=>x.id+' ('+esc(x.reason)+')').join('; ')}. This draft does not enter the queue.</p>`:''}`,bl.length&&!ok.length?'warn':'');
-  suggestRow(bot,[{t:'Open Approvals →',f:()=>openDetail('appr')}]);
-  if(ok.length)toast('A new draft is awaiting approval')
-}
-function suggestAlternative(d){
-  const sc=SCEN().filter(s=>s.id!==d.scId);let best=null;
-  sc.forEach(s=>{const l={...offLev(),inv_id:defaultInvoice(),...s.lev},res=runSim(l),st=statusOf(l,res);if(st.k==='yes'&&(!best||res.cost<best.res.cost))best={s,l,res}});
-  (async()=>{
-    const b=newBot();
-    if(!best){await say(b,`Noted that you rejected <b>${d.id}</b>. I could not find an alternative that fully covers the gap; try adjusting it yourself in What-if.`);return}
-    await say(b,`Noted that you rejected <b>${d.id}</b> (${esc(d.reasonTxt)}). Cheapest alternative that still covers the gap: <b>${esc(best.s.name)}</b>, CCC ${nf(BASE.ccc,1)} → ${nf(best.res.ccc,1)}, cost ${nf(best.res.cost/1e6,2)} million VND.`);
-    suggestRow(b,[{t:'Try in What-if',f:()=>{loadScenario(best.s,true);openDetail('whatif')}},{t:'Draft this option',f:()=>{loadScenario(best.s,true);const bb=newBot();userMsg('Draft this option');draftInChat(bb,S.last)}}]);
-  })();
+async function respondSolutions(bot){
+  const ans=U34.solutionsAnswer(),m=ans.match;
+  await toolCall(bot,'match_financing',0,{firm_id:S.firm,run_id:m?m.meta.match_run_id:null,matrix_case:m?m.meta.matrix_case:null},()=>{addLog({tool:'match_financing',args:{firm_id:S.firm},status:'ok',summary:m?`${m.meta.matrix_case||'no cell'}: ${m.package?m.package.status:m.route}`:'not ready'});return {}},{ms:420});
+  await say(bot,ans.html);
+  const card=document.createElement('div');card.className='rcact';card.innerHTML='<button class="btn primary sm" type="button" data-a="sol">Open Solutions →</button>';
+  bot.appendChild(card);scroll();$('[data-a=sol]',card).onclick=()=>openDetail('sol');
+  advance(3,bot);suggestRow(bot,nextSuggest());
 }
 
 
 function bootApp(){
   addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of '+fd(DATA.raw.F01.snapshot.as_of)});
   switchContext('F01','base',{silent:true});
-  updatePending();
 }
 
 
@@ -1132,11 +715,11 @@ const TASKS={
     hello:s=>`The next 13 weeks of cash for ${s}`,
     ph:'Ask about cash-short weeks, the date cash is needed…',
     chips:['Which week am I short of cash?','Which gap is the largest?']},
-  tv3:{n:'TV3',title:'Financing match',tab:'gap',
-    hello:s=>`Find funding for ${s}`,
-    ph:'Ask about financing options, rejected products…',
-    chips:['Rank financing options for the gap','Why were some products rejected?']},
-  tv4:{n:'TV4',title:'What-if and drafts',tab:'whatif',
+  tv3:{n:'TV3',title:'Solutions',tab:'sol',
+    hello:s=>`Solutions for ${s}`,
+    ph:'Ask about the sources in the policy order, excluded sources…',
+    chips:['What are my solutions?','Why were some sources excluded?']},
+  tv4:{n:'TV4',title:'What-if',tab:'whatif',
     hello:s=>`Test levers for ${s} before you decide`,
     ph:'Example: What if we collect from K1 10 days early?',
     chips:[]}
@@ -1160,7 +743,7 @@ function advance(n,bot){
   $('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';
   refreshTab(); // the open detail view keeps its view; only the Open button of another answer changes it
 }
-function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.gapRequest=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';if(S.panel&&(S.detail==='gap'||S.detail==='whatif'))closePanel()}
+function resetFlow(){S.stage=0;S.cause=null;S.causes={};S.gapRequest=null;S.task='tv1';$('#chatInput').placeholder='Ask about your cash, receivables, shortfalls or financing…';if(S.panel&&(S.detail==='gap'||S.detail==='sol'||S.detail==='whatif'))closePanel()}
 function userFirst(){const n=(S.user&&S.user.name||'you').trim().split(/\s+/);return n[n.length-1]}
 
 
@@ -1185,16 +768,16 @@ function showView(view,{tab}={}){
   if(tab)openDetail(tab);else syncViewNav();
 }
 function syncViewNav(){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view==='data'?S.view==='data':S.view==='chat'&&S.panel&&b.dataset.view===S.detail))}
-function renderTab(){({dash:renderDash,gap:renderGap,whatif:renderWhatIf,appr:renderAppr})[S.detail]()}
+function renderTab(){({dash:renderDash,gap:renderGap,sol:U34.renderSolutions,whatif:U34.renderWhatIf})[S.detail]()}
 function refreshTab(){if(S.panel)renderTab()}
-// One detail view at a time (Dashboard / Shortfall / What-if / Approvals). It opens only from the "Open…" button of a
-// chat answer (or the sidebar / Pending chip for Approvals); the panel has no tabs, so it cannot switch views itself.
-const DETAIL_TITLES={dash:'Dashboard',gap:'Shortfall',whatif:'What-if',appr:'Approvals'};
+// One detail view at a time (Dashboard / Shortfall / Solutions / What-if). It opens from the "Open…" button of a chat answer or,
+// for Solutions and What-if, directly from the sidebar (they prepare their own UC01/UC02 results); the panel has no tabs.
+const DETAIL_TITLES={dash:'Dashboard',gap:'Shortfall',sol:'Solutions',whatif:'What-if'};
 function openDetail(view,opts={}){
   if(view==='data'){openDataScreen('files');return}
   if(!$('#dataScreen').hidden)closeDataScreen(); // the detail panel lives inside the chat workspace, so show it first
   if(!DETAIL_TITLES[view])view='dash';
-  if((view==='gap'&&S.stage<2)||(view==='whatif'&&S.stage<3))view='dash';
+  if(view==='gap'&&S.stage<2)view='dash';
   if(opts.gap!=null)selectGap(opts.gap);
   S.detail=view;
   $$('.detail-pane').forEach(p=>{const on=p.id==='pane-'+view;p.classList.toggle('on',on);p.hidden=!on;if(!on)p.replaceChildren()});
@@ -1329,65 +912,8 @@ async function respondCause(bot,{focus}={}){
   $$('[data-gap-open]',wrap).forEach(b=>b.onclick=()=>{selectGap(+b.dataset.gapOpen);openDetail('gap');renderDemoChips()});
   suggestRow(bot,nextSuggest());
 }
-// UC03 funding plan card (workbook v9): rounds, contributing-factor shares, ranked options, the package and the excluded options.
-const U3_REASON={PLEDGED:'already pledged',STRATEGIC_OR_CRITICAL:'strategic customer or essential supplier',NO_PRODUCT_DATA:'no product data',NO_NET_CASH:'no cash available',
-  OUT_OF_SCENARIO:'outside this shortfall scenario',OBJECT_USED_IN_EARLIER_ROUND:'already used in an earlier round'};
-const U3_SKIP={TOO_SLOW:'funds after the need date',OBJECT_USED:'same invoices already used',GAP_COVERED:'gap already covered',BELOW_MIN_DRAW:'too small',OPTION_LIMIT:'two sources of this kind already',MAX_SOURCES:'four sources already'};
-const U3_CERT=['','High','Medium','Low'],U3_SHAPE={uniform:'even',step_up:'steps up once',step_down:'steps down once',unclassifiable:'changes several times'};
-function uc03HTML(m){
-  const r=m.rounds[0];if(!r)return '<div class="empty">No shortfall day below the safe level, so there is no funding round.</div>';
-  const ROLE={main:'main',secondary:'secondary',ignored:'minor'},share=k=>`${t('uc03.f.'+k)} ${pct(r.shares[k])} (${ROLE[r.roles[k]]})`;
-  const rows=r.products.filter(x=>x.eligible).sort((a,b)=>a.rank-b.rank).map(x=>{const inPkg=r.package.find(y=>y.id===x.id);
-    return `<tr class="${inPkg?'top1':''}" data-prod="${x.id}"><td><span class="rank">${x.rank}</span></td><td><b>${x.id}</b> · ${esc(x.name)}${x.flags.includes('NOT_COVERING_DURATION')?`<small class="u3-flag">${t('uc03.nc',{h:x.hold,d:r.duration})}</small>`:''}</td><td class="num">${mm(x.C)}</td><td class="num">${nf(x.cost/1e6,2)}M</td><td class="num">${x.cpg==null?'–':pct(x.cpg,2)}</td><td class="num">${x.dtf} d</td><td>${U3_CERT[x.certainty]}</td><td>${inPkg?`<span class="status green">${t('uc03.in')} · ${mm(inPkg.draw)}</span>`:x.skip?`<span class="status gray">${U3_SKIP[x.skip]||x.skip}</span>`:''}</td></tr>`}).join('');
-  const pk=r.package.map(y=>`<b>${y.id}</b> ${esc(y.name)} ${mm(y.draw)}`).join(' + ');
-  const exc=r.excluded.map(x=>`${x.id} (${x.reasons.map(c=>U3_REASON[c]||c).join(', ')})`).join('; ');
-  return `<p class="u3-round">${t('uc03.round',{d:fd(r.need_date),l:r.days_left,g:money(r.G),n:r.duration,s:U3_SHAPE[m.shape]||m.shape})}${m.review_manual?' '+t('uc03.review'):''}${XP()?` · scenario ${r.scenario}${m.persistent?' (persistent shortfall)':''}`:''}</p>
-   <p class="u3-factors">${t('uc03.factors')} ${['AR','INV','AP'].map(share).join(' · ')}.</p>
-   <div class="table-wrap"><table class="dtable uc03-rank"><thead><tr><th>#</th><th>Option</th><th>Can bring</th><th>Cost</th><th>Cost / gap</th><th>Cash in</th><th>Certainty</th><th>Package</th></tr></thead><tbody>${rows}</tbody></table></div>
-   <p class="u3-pkg">${t('uc03.pkg',{p:pk,c:money(r.covered),cost:mm(r.cost),cpg:pct(r.cost_per_gap,1)})}${r.remaining_gap>0?' '+t('uc03.rem',{x:money(r.remaining_gap)}):''}</p>
-   ${exc?`<p class="rej">${t('uc03.excl')} ${exc}.</p>`:''}${m.requires_human_decision?`<div class="liq-note"><span>⚠</span><div>${t('uc03.human')}</div></div>`:''}`;
-}
-// Financing for every gap (or one named gap): a summary table, then the top 3 per gap, collapsed.
-async function respondRank(bot,{focus}={}){
-  if(!EPS.length){await say(bot,'No shortfall, so there is nothing to match against the catalogue yet.');suggestRow(bot,nextSuggest());return}
-  // SRS-DECISION: asking for the financing ranking in the chat is the user's explicit request; the gap_request is created here when
-  // UC02.7 allows it, otherwise the reason is given and nothing is ranked.
-  if(!S.gapRequest){const {u,d,chk}=gapRequestState();
-    if(!chk.ok){await say(bot,`<p>${chk.label==='idle_cash'?tx('gr.idle')+': ':''}${tx('gr.block.'+chk.reason)}</p>`,'warn');suggestRow(bot,nextSuggest());return}
-    S.gapRequest=ENGINE.buildGapRequest(u,d,{scenario:S.case,health:modelHealthNow(),createdAt:new Date().toISOString()})}
-  const gr=S.gapRequest,m3=uc03();
-  // Workbook v9 UC03: one funding plan for the shortfall of this run (rounds, ranking and package) instead of a ranking per gap.
-  if(m3&&m3.status!=='not_applicable'&&!focus){
-    await toolCall(bot,'match_financing',1,{firm_id:S.firm,gap_request:gr.request_id,run_id:m3.run_id},()=>{addLog({tool:'match_financing',tier:1,args:{firm_id:S.firm,gap_request:gr.request_id},status:'ok',
-      summary:`round 1: ${m3.rounds.map(r=>r.package.map(y=>y.id).join(' + ')).join('; ')}`});return {}},{ms:520});
-    await say(bot,`<p>${tx('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p><p>${t('uc03.lead')}</p>`);
-    const card=document.createElement('div');card.className='liq rank-all uc03';
-    card.innerHTML=`<div class="liq-h"><div><h4>${t('uc03.title')}</h4><p>${t('uc03.sub',{n:m3.rounds[0]?m3.rounds[0].products.length:0})}</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>${uc03HTML(m3)}
-      <p class="liq-fn">${DISC}</p>${toolLine(['match_financing'])}<div class="liq-act"><button class="btn sec sm" type="button" data-a="open">Open Shortfall →</button></div>`;
-    bot.appendChild(card);scroll();$('[data-a=open]',card).onclick=()=>openDetail('gap',{scroll:'#finMatch'});
-    advance(3,bot);suggestRow(bot,nextSuggest());return;
-  }
-  const list=focus?EPS.filter(e=>e.k===focus):EPS,res=list.map(e=>({e,t3:tv3For(e)}));
-  await toolCall(bot,'match_financing',1,{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},()=>{addLog({tool:'match_financing',tier:1,args:{firm_id:S.firm,gap_request:gr.request_id,episodes:list.map(e=>e.k)},status:'ok',summary:res.map(({e,t3})=>`gap ${e.k}: ${t3.ranked[0]?t3.ranked[0].product_id:'none'}`).join('; ')});return {}},{ms:520});
-  const use=new Map();
-  res.forEach(({e,t3})=>t3.ranked.slice(0,3).forEach(x=>{if(x.invoice_id&&x.invoice_id!=='–'){if(!use.has(x.invoice_id))use.set(x.invoice_id,new Set());use.get(x.invoice_id).add(e.k)}}));
-  const dups=[...use].filter(([,g])=>g.size>1);
-  const cause=focus?(S.causes||{})[focus]:S.cause;
-  await say(bot,`<p>${tx('gr.used',{id:gr.request_id,d:fd(gr.need_date),p:money(gr.peak_gap),c:gr.matrix_case_id,l:gr.link_type,e:t('ev.'+gr.evidence_level)})}</p>${cause?`<p>${t('cf.from',{k:focus?` (gap ${focus})`:''})} ${cause.txt}.</p>`:''}<p>${focus?`Financing options for gap ${focus}`:`Financing options for all ${EPS.length} gaps`}, ranked by tier (fully covers and funds in time) and then cost relative to the shortfall.</p>`);
-  const rows=res.map(({e,t3})=>{const b=t3.ranked[0];return `<tr data-gap="${e.k}"><td><b>Gap ${e.k}</b></td><td class="num">${mm(e.peak)}</td><td class="num">${fd(e.start)}</td><td>${b?`<b>${b.product_id}</b>${b.invoice_id!=='–'?' · '+b.invoice_id:''}`:'—'}</td><td class="num">${b?nf(b.cost/1e6,2)+'M':'—'}</td><td>${!b?'—':b.gap_rem>0?`<span class="status amber">Partly · short ${mm(b.gap_rem)}</span>`:'<span class="status green">Yes</span>'}</td></tr>`}).join('');
-  const card=document.createElement('div');card.className='liq rank-all';
-  card.innerHTML=`<div class="liq-h"><div><h4>Financing summary</h4><p>Best option per gap · ${CAT.length} products in the synthetic catalogue</p></div>${XP()?'<span class="status amber"><i></i>provisional</span>':estBadge(t('est.cat'))}</div>
-   <div class="table-wrap"><table class="dtable rank-sum"><thead><tr><th>Gap</th><th>Peak</th><th>Need date</th><th>Best option</th><th>Cost</th><th>Covered</th></tr></thead><tbody>${rows}</tbody></table></div>
-   ${dups.length?`<div class="liq-note"><span>⚠</span><div><b>The same invoice is proposed for more than one gap.</b> ${dups.map(([inv,g])=>`${inv} → gaps ${[...g].join(', ')}`).join('; ')}. An invoice can be financed only once: use it for one gap and take the next option for the others.</div></div>`:''}
-   <div class="gap-tops">${res.map(({e,t3})=>`<details class="gap-top" data-gap-top="${e.k}"><summary>Gap ${e.k} · top 3 options · short ${mm(e.peak)}</summary><ol>${t3.ranked.slice(0,3).map(x=>`<li><b>${x.product_id}</b> (${esc(CAT.find(z=>z.id===x.product_id).provider)})${x.invoice_id!=='–'?' · '+x.invoice_id:''}: receives ${mm(x.cash)}, cost ${nf(x.cost/1e6,2)}M (${nf(x.cpg*100,2)}% of the shortfall), ${x.gap_rem>0?'still short '+mm(x.gap_rem):'fully covered'}.</li>`).join('')}</ol>${t3.rejected.length?`<p class="rej">Rejected: ${t3.rejected.map(x=>x.product_id).join(', ')}</p>`:''}</details>`).join('')}</div>
-   <p class="liq-fn">${DISC}</p>${toolLine(['match_financing'])}
-   <div class="liq-act"><button class="btn sec sm" type="button" data-a="open">Open ranking</button></div>`;
-  bot.appendChild(card);scroll();
-  $('[data-a=open]',card).onclick=()=>openDetail('gap',{scroll:'#finMatch'});
-  advance(3,bot);suggestRow(bot,nextSuggest());
-}
 async function gateMsg(bot){
-  const m={1:['Let’s start with the diagnosis. I want to know where your working capital is stuck before I look at any shortfall.'],2:['Funding is matched to what drives the shortfall, not just to a number. First let me show its contributing factors.'],3:['Levers are built from the financing shortlist. First let me rank the options that fit the shortfall.']}[S.stage+1];
+  const m={1:['Let’s start with the diagnosis. I want to know where your working capital is stuck before I look at any shortfall.'],2:['First let me show the forecast and its contributing factors.'],3:['First let me show the forecast and its contributing factors.']}[S.stage+1];
   await say(bot,m[0]);suggestRow(bot,nextSuggest());
 }
 async function respondConc(bot){
@@ -1536,12 +1062,12 @@ function enterApp(u,{fresh,restore}={}){
   $('#authRoot').hidden=true;$('#app').hidden=false;document.title='Lilact · SME Liquidity Copilot';
   $('#uAvatar').textContent=initials(u.name);$('#uName').textContent=u.name;$('#uSub').textContent=u.company||u.email;
   $('#umName').textContent=u.name||'Business owner';$('#umEmail').textContent=u.email||'';$('#umCompany').textContent=u.company||'';$('#umTax').textContent=u.taxCode?`Tax code ${u.taxCode}`:'';
-  if(!booted){booted=true;bootApp()}else{resetSession();switchContext('F01','base');updatePending()}
+  if(!booted){booted=true;bootApp()}else{resetSession();switchContext('F01','base')}
   setTask('tv1',{force:true});
 if(!restore)toast(fresh?`Welcome ${userFirst()}! Your account has been created.`:`Hello ${userFirst()}, you are signed in.`);
 }
 function resetSession(){
-  S.drafts=[];S.log=[];S.draftN=0;S.cmp=[];S.last=null;S.done=new Set();S.seq=0;S.runN=0;closePanel();
+  S.log=[];S.done=new Set();S.seq=0;closePanel();
   addLog({tool:'start_session',tier:0,args:{sandbox:true},status:'ok',summary:'Open the demo session, synthetic data as of '+fd(DATA.raw.F01.snapshot.as_of)});
 }
 function leaveApp(){
@@ -2246,14 +1772,8 @@ function liquidityStateHTML(){
     ${T.th!=='unknown'?alertLegendHTML({surplus:true}):''}<p class="ls-foot">${foot}</p></section>`;
 }
 // "Find financing" (UC03): solutions only open after diagnosis → contributing factors → ranking, so Copilot runs the next step in the chat.
-function goFinancing(){openGapRequest(()=>goFinancingFlow())}
-function goFinancingFlow(){
-  if(S.stage>=3){detailHandoff('Financing options for each gap are ranked in Shortfall.','gap','Open Shortfall →',{scroll:'#finMatch'});return}
-  const list=currentChips(),next=list.find(x=>!S.done.has(x.id))||list[0];
-  if(innerWidth<900)closePanel();
-  toast('Copilot goes step by step: diagnosis → contributing factors → financing ranking.',2800);
-  if(next)sendChat(next.ask);
-}
+// UC02 → UC03 hand-off: Solutions opens directly and prepares its own inputs (E31, E33).
+function goFinancing(){openDetail('sol')}
 /* ===== UC01 dashboard (SRS 2.7.1, 2.7.3, Table 3-1): data source line and controls, W card, capital above the normal
    level, item cards with threshold bars, detail tables with evidence, cash-cycle gauges. Display only reads the cached UC01
    run; nothing is recalculated when the screen is drawn. ===== */
@@ -2725,7 +2245,7 @@ function chatNew(){if(chatHasMessages())chatSave();Object.values(THREADS).forEac
 function chatRender(){const box=$('#chatHistoryList');if(!box)return;if(!chats.length){box.innerHTML='<p class="chat-empty">No chats yet</p>';return}const day=new Date().setHours(0,0,0,0),groups=[['Today',c=>c.updatedAt>=day],['Previous 7 days',c=>c.updatedAt<day&&c.updatedAt>=day-7*DAY],['Older',c=>c.updatedAt<day-7*DAY]];box.innerHTML=groups.map(([n,f])=>{const a=chats.filter(f);return a.length?`<div class="chat-group-title">${n}</div>${a.map(c=>`<div class="chat-row ${c.id===activeChat?'on':''}" data-id="${esc(c.id)}"><button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button><button class="chat-more" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false">⋯</button></div>`).join('')}`:''}).join('');box.querySelectorAll('.chat-open').forEach(b=>b.onclick=()=>{showView('chat');chatRestore(b.closest('.chat-row').dataset.id);closeSide()});box.querySelectorAll('.chat-more').forEach(b=>b.onclick=e=>{e.stopPropagation();openChatMenu(b,chats.find(x=>x.id===b.closest('.chat-row').dataset.id))})}
 function chatRestore(id){const c=chats.find(x=>x.id===id);if(!c)return;if(c.firmId&&FIRMS[c.firmId])switchContext(c.firmId,c.case,{silent:true});Object.values(THREADS).forEach(t=>t.innerHTML='');activeChat=id;msgs=THREADS.tv1;msgs.innerHTML=c.html;$$('.hero',msgs).forEach(h=>h.remove());if(threadIsEmpty())welcome('tv1');S.stage=c.stage|0;S.cause=c.cause;S.done=new Set(c.done||[]);S.task='tv'+Math.min(4,S.stage+1);$$('.suggest',msgs).forEach(x=>x.remove());$$('.rcact button,.liq-act button,.result button',msgs).forEach(b=>{b.disabled=true;b.title='Ask again to refresh this result'});$('#taskTitle').textContent=c.title;renderDemoChips();chatRender();scroll()}
 function chatLoad(){chats=chatsRead();chatRender();if(chats.length)chatRestore(chats[0].id);else chatNew()}
-// New chat goes straight back to the conversation from any screen (Company data, Approval queue…).
+// New chat goes straight back to the conversation from any screen (Company data, a detail view…).
 function startNewChat(){showView('chat');closePanel();chatNew();closeSide();const ci=$('#chatInput');if(!ci.disabled)ci.focus({preventScroll:true})}
 $('#newChat').onclick=startNewChat;$('#newChatSide').onclick=startNewChat;
 $('#taskTitle').ondblclick=()=>{const h=$('#taskTitle'),v=h.textContent,i=document.createElement('input');i.value=v;i.className='chat-title-input';h.replaceChildren(i);i.focus();i.select();i.onkeydown=e=>{if(e.key==='Enter'){const c=chats.find(x=>x.id===activeChat);if(c){c.title=i.value.slice(0,48)||'New chat';chatsWrite();chatRender()}h.textContent=c?.title||'New chat'}if(e.key==='Escape')h.textContent=v};i.onblur=()=>{if(i.isConnected)h.textContent=v}};
@@ -2735,13 +2255,13 @@ const sendChatOriginal=sendChat;sendChat=async function(t){if(!activeChat)chatNe
 const enterAppOriginal=enterApp;enterApp=function(u,o={}){const r=enterAppOriginal(u,o);document.getElementById('umName').textContent=u.name||'Business owner';document.getElementById('umEmail').textContent=u.email||'';document.getElementById('umCompany').textContent=u.company||'';document.getElementById('umTax').textContent=u.taxCode?`Tax code ${u.taxCode}`:'';if(o.fresh){chats=[];activeChat=null}applyAccountCompany();chatLoad();applyAccountCompany();return r};
 const firmSelOld=$('#firmSel').onchange;$('#firmSel').addEventListener('change',()=>{if(chatHasMessages())chatSave();activeChat=null;chatNew()});
 $('#btnSettings').onclick=()=>{closeUserMenu();openSettings()};
-$('#btnHelp').onclick=()=>{closeUserMenu();openModal(`<div class="help-modal"><button class="settings-close" aria-label="Close">×</button><h2>How Lilact works</h2><p>Ask in English. Copilot diagnoses working capital, forecasts cash, finds funding and tests what-if options. Every action is a draft that waits for your approval.</p><h3>Try a question</h3>${['Where is my working capital stuck?','Which customer holds most of my receivables?',t('chip.f1')].map(q=>`<button class="btn sec help-prompt">${esc(q)}</button>`).join('')}<h3>Keyboard shortcuts</h3><p>Ctrl+B sidebar · / chat · Enter send · Shift+Enter new line · Esc close</p><h3>Frequently asked questions</h3><details><summary>Where is data stored?</summary><p>In this browser.</p></details><details><summary>Which files affect calculations?</summary><p>Recognised table files (invoices, inventory, 13-week plan, financial statements) are read automatically once the required files are uploaded; Word files are reference only.</p></details><details><summary>Why are figures estimates?</summary><p>The demo uses synthetic data and indicative products.</p></details></div>`,m=>{m.querySelector('.settings-close').onclick=closeModal;m.querySelectorAll('.help-prompt').forEach(b=>b.onclick=()=>{$('#chatInput').value=b.textContent;closeModal();$('#chatInput').focus()})})};
+$('#btnHelp').onclick=()=>{closeUserMenu();openModal(`<div class="help-modal"><button class="settings-close" aria-label="Close">×</button><h2>How Lilact works</h2><p>Ask in English. Copilot diagnoses working capital, forecasts cash, finds solutions in the policy order and tests what-if options. Analysis and simulation only; decide and act outside the app.</p><h3>Try a question</h3>${['Where is my working capital stuck?','Which customer holds most of my receivables?',t('chip.f1')].map(q=>`<button class="btn sec help-prompt">${esc(q)}</button>`).join('')}<h3>Keyboard shortcuts</h3><p>Ctrl+B sidebar · / chat · Enter send · Shift+Enter new line · Esc close</p><h3>Frequently asked questions</h3><details><summary>Where is data stored?</summary><p>In this browser.</p></details><details><summary>Which files affect calculations?</summary><p>Recognised table files (invoices, inventory, 13-week plan, financial statements) are read automatically once the required files are uploaded; Word files are reference only.</p></details><details><summary>Why are figures estimates?</summary><p>The demo uses synthetic data and indicative products.</p></details></div>`,m=>{m.querySelector('.settings-close').onclick=closeModal;m.querySelectorAll('.help-prompt').forEach(b=>b.onclick=()=>{$('#chatInput').value=b.textContent;closeModal();$('#chatInput').focus()})})};
 function closeUserMenu(){$('#userMenu').hidden=true;$('#userBtn').setAttribute('aria-expanded','false')}
 function openSettings(section='General',query=''){
  const u=S.user||{},demo=isDemoUser(u),names=['General','Account','Privacy','Billing','Usage','Log out'],fields={General:['Appearance','Light','Dark','System','Display density','Motion effects','Language','Tiếng Việt','English','Reset settings'],Account:['Full name','Company','Email','Tax code','Change password','Delete account'],Privacy:['Clear chat history','Delete all uploaded files','Export my data'],Billing:['Current plan','Billing is not available'],Usage:['conversations','messages','files','data updates','drafts']};let q=query.toLowerCase(),sel=q&&names.slice(0,5).find(n=>n.toLowerCase().includes(q)||(fields[n]||[]).some(x=>x.toLowerCase().includes(q)))||section;if(!names.includes(sel)||sel==='Log out')sel='General';
  let content='';if(sel==='General')content=`<h2>General</h2><section class="settings-block ${query&&'appearance dark system light'.includes(query.toLowerCase())?'search-hit':''}" data-label="Appearance"><h3>Appearance</h3><div class="settings-choice">${['Light','Dark','System'].map(x=>`<button data-theme="${x.toLowerCase()}" aria-pressed="${PREF.theme===x.toLowerCase()}">${x}</button>`).join('')}</div></section><section class="settings-block"><h3>Display density</h3><div class="settings-choice">${[['comfy','Comfortable'],['compact','Compact']].map(([v,x])=>`<button data-density="${v}" aria-pressed="${PREF.density===v}">${x}</button>`).join('')}</div></section><section class="settings-block"><label class="settings-switch"><span><b>Motion effects</b><small>Reduce transitions and chart animation.</small></span><input id="settingsMotion" type="checkbox" ${PREF.motion?'checked':''}></label></section><button class="btn sec" id="resetSettings">Reset settings</button>`;
  if(sel==='Account')content=`<h2>Account</h2><div class="settings-avatar"><span class="avatar">${esc(initials(u.name))}</span>${demo?'Demo account':'Account details'}</div><form id="profileForm"><label class="settings-field">Full name<input name="name" value="${esc(u.name||'')}" ${demo?'disabled':''}></label><label class="settings-field">Company<input name="company" value="${esc(u.company||'')}" ${demo?'disabled':''}></label><label class="settings-field">Email<input value="${esc(u.email||'')}" readonly></label><label class="settings-field">Tax code<input value="${esc(u.taxCode||'Not provided')}" readonly></label>${demo?'':'<button class="btn primary">Save profile</button>'}</form><section class="settings-block"><h3>Business model</h3><label class="settings-field">Business model<select id="bizModel"><option value="undeclared">Not declared (default FOB thresholds)</option><option value="CMT">CMT – garment subcontracting</option><option value="FOB">FOB – own materials</option></select></label><p>Selects the garment-industry thresholds (tv1.threshold.v2) used by the working-capital diagnosis.</p></section>${demo?'':'<section class="settings-block"><h3>Change password</h3><form id="changePw"><label class="settings-field">Current password<input name="old" type="password"></label><label class="settings-field">New password<input name="new" type="password"></label><label class="settings-field">Confirm password<input name="confirm" type="password"></label><p id="pwError" class="settings-error"></p><button class="btn sec">Change password</button></form></section><button class="btn danger" id="deleteAccount">Delete account</button>'}`;
- if(sel==='Privacy')content=`<h2>Privacy</h2><p>Your data is stored in this browser. Copilot provides advice only; actions require your review and approval.</p><section class="settings-block"><button class="btn sec" id="clearChats">Clear chat history</button></section><section class="settings-block"><button class="btn sec" id="clearFiles">Delete all uploaded files</button><p>Data already used in your analysis is kept.</p></section><button class="btn sec" id="exportData">Export my data</button>`;
+ if(sel==='Privacy')content=`<h2>Privacy</h2><p>Your data is stored in this browser. Copilot provides analysis and simulation only; decisions and actions happen outside the app.</p><section class="settings-block"><button class="btn sec" id="clearChats">Clear chat history</button></section><section class="settings-block"><button class="btn sec" id="clearFiles">Delete all uploaded files</button><p>Data already used in your analysis is kept.</p></section><button class="btn sec" id="exportData">Export my data</button>`;
  if(sel==='Billing')content='<h2>Billing</h2><section class="settings-block billing-card"><b>Current plan: Demo (free)</b><p>Billing is not available in this demo.</p></section>';
  if(sel==='Usage')content='<h2>Usage</h2><p>Counted in this browser only</p><div id="usageStats" class="usage-stats"><p>Loading local usage...</p></div>';
  openModal(`<div class="settings-shell"><aside class="settings-nav"><label class="settings-search"><input id="settingsSearch" placeholder="Search settings" value="${esc(query)}"></label><nav>${names.slice(0,5).map(n=>`<button data-section="${n}" class="${n===sel?'on':''}">${n}</button>`).join('')}<div class="settings-nav-rule"></div><button class="settings-logout" data-section="Log out">Log out</button></nav></aside><section class="settings-content"><button class="settings-close" aria-label="Close settings">×</button><button class="settings-back">← Back</button><div class="settings-no-results" hidden>No settings match</div><div class="settings-body">${content}</div></section></div>`,m=>{const shell=m.querySelector('.settings-shell'),reopen=(s=sel,v='')=>openSettings(s,v);m.querySelector('.settings-close').onclick=closeModal;m.querySelector('.settings-back').onclick=()=>shell.classList.remove('content-open');if(innerWidth<=600)shell.classList.add('content-open');m.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>b.dataset.section==='Log out'?confirmAction('Log out?','Return to sign in?',()=>{closeModal();leaveApp()}):reopen(b.dataset.section));m.querySelector('#settingsSearch').oninput=e=>{const v=e.target.value.toLowerCase(),n=names.slice(0,5).find(x=>x.toLowerCase().includes(v)||(fields[x]||[]).some(y=>y.toLowerCase().includes(v)));if(!v){m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;return}if(!n){m.querySelector('.settings-no-results').hidden=false;m.querySelector('.settings-body').hidden=true}else{m.querySelector('.settings-no-results').hidden=true;m.querySelector('.settings-body').hidden=false;if(n!==sel){const pos=e.target.selectionStart;reopen(n,v);requestAnimationFrame(()=>{const input=document.querySelector('#settingsSearch');if(input){input.focus();input.setSelectionRange(pos,pos)}})}}};m.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>{PREF.theme=b.dataset.theme;savePrefs();reopen('General')});m.querySelectorAll('[data-density]').forEach(b=>b.onclick=()=>{PREF.density=b.dataset.density;savePrefs();reopen('General')});const bm=m.querySelector('#bizModel');if(bm){const f=accountFirm()||S.firm,pm=POLICY.get(f).business_model;bm.value=pm||(DATA.snaps[f]&&DATA.snaps[f].firm.business_model)||'undeclared';bm.onchange=()=>{POLICY.set(f,{business_model:bm.value},'Business model declared in Settings');refreshTab();toast('Business model saved')}}const motion=m.querySelector('#settingsMotion');if(motion)motion.onchange=()=>{PREF.motion=motion.checked;savePrefs()};const reset=m.querySelector('#resetSettings');if(reset)reset.onclick=()=>{Object.assign(PREF,{theme:'light',density:'comfy',motion:true});savePrefs();reopen('General')};const pf=m.querySelector('#profileForm');if(pf)pf.onsubmit=e=>{e.preventDefault();const all=users(),i=all.findIndex(x=>x.id===u.id);all[i].name=pf.elements.name.value.trim()||u.name;all[i].company=pf.elements.company.value.trim()||u.company;saveUsers(all);S.user=all[i];renameAccountCompany(all[i]);$('#uName').textContent=u.name;$('#umName').textContent=u.name;$('#umCompany').textContent=u.company;toast('Profile updated');reopen('Account')};const pw=m.querySelector('#changePw');if(pw)pw.onsubmit=async e=>{e.preventDefault();const all=users(),x=all.find(v=>v.id===u.id),err=m.querySelector('#pwError');if(await hashPw(pw.elements.old.value,x.salt)!==x.hash){err.textContent='Current password is incorrect';return}if(pwRuleErrors(pw.elements.new.value).length){err.textContent='Password must have 8+ characters with an uppercase letter, a lowercase letter, a digit and a special character';return}if(pw.elements.new.value!==pw.elements.confirm.value){err.textContent='Passwords do not match';return}x.salt=salt();x.hash=await hashPw(pw.elements.new.value,x.salt);saveUsers(all);err.textContent='Password changed'};const cl=m.querySelector('#clearChats');if(cl)cl.onclick=()=>confirmAction('Clear chat history?','All saved conversations will be removed from this browser.',()=>{try{localStorage.removeItem(CHAT_KEY())}catch(e){}chats=[];activeChat=null;chatNew();closeModal()});const cf=m.querySelector('#clearFiles');if(cf)cf.onclick=async()=>{const fs=await FILES.list();confirmAction('Delete uploaded files?','Data already used in your analysis is kept.',async()=>{await FILES.remove(fs.map(x=>x.id));addLog({tool:'delete_files',tier:1,args:{count:fs.length},status:'ok',summary:'Deleted uploaded files'});toast('Uploaded files deleted');reopen('Privacy')})};const ex=m.querySelector('#exportData');if(ex)ex.onclick=async()=>{const f=await FILES.list(),safe={account:{id:u.id,name:u.name,company:u.company,email:u.email,taxCode:u.taxCode||null},files:f.map(({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})=>({id,userId,firmId,name,ext,kind,size,uploadedAt,status,snapshotId})),chats};dlFile('lilact-my-data.json',JSON.stringify(safe,null,2),'application/json')};const del=m.querySelector('#deleteAccount');if(del)del.onclick=()=>confirmAction('Delete account?','Confirm again to delete this account and its browser data.',()=>confirmAction('Confirm account deletion','This permanently removes your local account data.',async()=>{const email=u.email.toLowerCase();saveUsers(users().filter(x=>x.id!==u.id));store.del(DK+email);store.del('smefc.pins.v1.'+email);try{localStorage.removeItem(CHAT_KEY())}catch(e){}const fs=await FILES.list();await FILES.remove(fs.map(x=>x.id));closeModal();leaveApp()}))})

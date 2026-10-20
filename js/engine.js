@@ -100,17 +100,20 @@ const ENGINE=(()=>{
     if(lots&&lots.some(l=>l.owner==='unknown'))issues.push({code:'INV_OWNER_UNKNOWN',severity:'provisional'});
     if(sales&&sales.some(s=>s.term_assumed))issues.push({code:'AR_TERM_ASSUMED',severity:'provisional'});
     const sid=cut===dataAsOf&&!periodStart?input.snapshot_id:`${input.snapshot_id}@${cut}/${N}d`;
+    // Daily cash history up to the cut-off (Miller–Orr σ); never shifted into the forecast.
+    const history=(input.history||[]).filter(h=>dnum(h.date)<=A);
     return {firm:input.firm,source:input.source,snapshot_id:sid,data_snapshot_id:input.snapshot_id,data_as_of:dataAsOf,
-      as_of:cut,period_start:start,N,fin,sales,purchases,lots,planned:input.planned||[],config:input.config||{amount_basis:'net',vat_rate:null},
+      as_of:cut,period_start:start,N,fin,sales,purchases,lots,planned:input.planned||[],history,config:input.config||{amount_basis:'net',vat_rate:null},
       tables:input.tables,issues,shifted:shift!==0};
   }
   // DATA.raw sample record → engine input.
   function inputFromRaw(raw,loadedAt){
     return {firm:raw.firm,snapshot_id:raw.snapshot.id,as_of:raw.snapshot.as_of,source:{type:'sample',id:raw.snapshot.source,at:loadedAt},
       fin:raw.fin,config:raw.config,tables:{sales:true,purchases:true,inventory:true,planned:true},
-      sales:raw.sales.map(([id,customer,amount,issue,due,paid,confirmed])=>({id,customer,amount,issue,due,paid,paid_amount:null,tax_code:null,confirmed_date:confirmed||null})),
+      sales:raw.sales.map(([id,customer,amount,issue,due,paid,confirmed,status])=>({id,customer,amount,issue,due,paid,paid_amount:null,tax_code:null,confirmed_date:confirmed||null,status:status||null})),
       purchases:raw.purchases.map(([id,supplier,amount,issue,due,paid,disc_pct,disc_days])=>({id,supplier,amount,issue,due,paid,paid_amount:null,disc_pct,disc_days,tax_code:null,essential:null})),
-      inventory:raw.inventory.map(([name,type,qty,unit_cost,days,owner,cancelled,pledged])=>({name,type,qty,unit_cost,days,owner,cancelled,pledged})),
+      inventory:raw.inventory.map(([name,type,qty,unit_cost,days,owner,cancelled,pledged,lot_id,order_id,order_status])=>({name,type,qty,unit_cost,days,owner,cancelled,pledged,lot_id:lot_id||null,order_id:order_id||null,order_status:order_status||null})),
+      history:(raw.history||[]).map(([date,net])=>({date,net})),
       planned:raw.planned.map(([id,date,direction,category,amount,certainty,source_id])=>({id,date,week:null,direction,category,amount,certainty,source_id}))};
   }
   // Uploaded company (app data store) → engine input. Missing tables stay missing (never zero-filled).
@@ -567,10 +570,31 @@ const ENGINE=(()=>{
   // percentiles × model factor × 12-month revenue) > demo_assumption (Rmin = 50 %, Rupper = 200 % of an existing Rtarget).
   // SRS-DECISION: min_cash_buffer_vnd of the company profile is the owner's declared Rtarget (source firm_profile); its Rmin/Rupper
   // come from the demo assumption. With only N < 365 days of revenue, 12-month revenue = revenue × 365 ÷ N and the reference is provisional.
+  // Miller–Orr levels (SRS 2.8.9, CF01–CF04): own daily history when ≥ minDailyObs days within maxHistoryDays, else the industry σ proxy.
+  // Needs the 12-month revenue (declared revenue_ttm, else revenue × 365 ÷ N, provisional). Returns null when b, i or σ² is not valid (E04).
+  function millerOrr(snap,policy={}){
+    const P=CFG.liq.millerOrr,A=dnum(snap.as_of),ttm=snap.firm.revenue_ttm>0?snap.firm.revenue_ttm:snap.fin.revenue>0?snap.fin.revenue*365/snap.N:null;
+    if(!(ttm>0))return null;
+    const xs=(snap.history||[]).filter(h=>dnum(h.date)>A-P.maxHistoryDays).map(h=>h.net),n=xs.length;
+    let var_,src;
+    if(n>=P.minDailyObs){const m=sum(xs)/n;var_=sum(xs,x=>(x-m)**2)/(n-1);src='firm_daily'}
+    else{var_=(P.sigmaDailyRatio*ttm)**2;src='industry_proxy'}
+    const b=P.transactionCost,i=P.rateAnnual/P.daysPerYear;
+    if(!(b>0&&i>0&&var_>0))return {status:'invalid_model',ttm,n,sigma_src:src};
+    const L=Math.max(P.lowerRatio*ttm,policy.lower_min_owner??P.lowerMinOwner??0),D=Math.cbrt(3*b*var_/(4*i));
+    return {L,Z:L+D,H:L+3*D,D,sigma2:var_,sigma:Math.sqrt(var_),sigma_src:src,n,ttm,ttm_src:snap.firm.revenue_ttm>0?'declared':'annualised',b,i,version:P.version,
+      status:src==='firm_daily'&&snap.firm.revenue_ttm>0?'ok':'provisional'};
+  }
   function resolveReserves(snap,policy={},model){
     const pr=policy.reserve||{},R=CFG.liq,annual=snap.fin.revenue>0?snap.fin.revenue*365/snap.N:null,ref=annual?R.reference[model]:null;
     const out={rmin:null,rtarget:null,rupper:null,src:{},annual,annualised:snap.N<365,reference:ref?{rmin:ref.rmin*annual,rtarget:ref.rtarget*annual,rupper:ref.rupper*annual}:null};
+    // Miller–Orr (fob.threshold.v3) when the company has a daily cash history or a declared 12-month revenue: rmin = L, rtarget = Z,
+    // rupper = H (aliases of CF04). Owner policy values still win field by field.
+    const mo=(snap.history&&snap.history.length)||snap.firm.revenue_ttm>0?millerOrr(snap,pr):null;
+    if(mo&&mo.L!=null&&pr.rtarget==null){out.miller_orr=mo;
+      [['rmin','L'],['rtarget','Z'],['rupper','H']].forEach(([k,m])=>{if(pr[k]==null){out[k]=mo[m];out.src[k]='miller_orr'}})}
     if(pr.rtarget!=null){out.rtarget=pr.rtarget;out.src.rtarget='owner_policy'}
+    else if(out.rtarget!=null){}
     else if(snap.firm.rtarget!=null&&snap.firm.rtarget!==''){out.rtarget=snap.firm.rtarget;out.src.rtarget='firm_profile'}
     else if(out.reference){out.rtarget=out.reference.rtarget;out.src.rtarget='verified_reference'}
     if(pr.rmin!=null){out.rmin=pr.rmin;out.src.rmin='owner_policy'}
@@ -581,7 +605,7 @@ const ENGINE=(()=>{
     if(out.rtarget==null)out.status='missing_data';
     else if(!(out.rtarget>0))out.status=out.rtarget===0?'missing_data':'invalid_data';
     else if(!(out.rmin>=0&&out.rmin<=out.rtarget&&out.rtarget<out.rupper))out.status='invalid_data';
-    else out.status=Object.values(out.src).some(s=>s==='demo_assumption'||(s==='verified_reference'&&out.annualised))||out.src.rtarget==='firm_profile'?'provisional':'ok';
+    else out.status=Object.values(out.src).some(s=>s==='demo_assumption'||(s==='verified_reference'&&out.annualised))||out.src.rtarget==='firm_profile'||(out.miller_orr&&out.miller_orr.status!=='ok'&&Object.values(out.src).includes('miller_orr'))?'provisional':'ok';
     return out;
   }
   const LVN={green:0,yellow:1,orange:2,red:3};
@@ -789,165 +813,7 @@ const ENGINE=(()=>{
       const c=legacyCase(snap,sc,{rtarget:rt,cash0:cash0??0,ev,days:o.days.map(x=>[x.d,x.close])});c.fc=fc;out[sc]=c});
     return out;
   }
-  /* ---------- UC03 · financing match per the UC01–UC04 workbook v9 (UC3_Cong_thuc T3-01 … T3-38) ---------- */
-  // Base amount of a product's object, computed from the snapshot (D_UC03 "Co so" cells are formulas on the same data):
-  // OBJ-NB short-term investments; OBJ-APX not-yet-due payables of declared non-essential suppliers without overdue and with a purchase
-  // share below key_partner; OBJ-APS not-yet-due payables of essential suppliers; OBJ-AR-<code> the customer's not-yet-due receivables;
-  // OBJ-INV-NOR owned lots declared not pledged that are neither slow nor cancelled; OBJ-INV-SLOW slow TP/HH lots declared not pledged and
-  // not cancelled; OBJ-INV-PLG lots declared pledged; LIM-* the declared unused limit.
-  function uc03Objects(snap,P){
-    const A=dnum(snap.as_of),sales=snap.sales||[],pur=snap.purchases||[],lots=(snap.lots||[]).filter(l=>l.owner!=='customer');
-    const notDue=r=>r.open&&r.due&&dnum(r.due)>A,slowOf=l=>l.days!=null&&l.days>(CFG.inv.slowDays[l.type]||CFG.inv.unknownTypeSlowDays);
-    const bySup=new Map();pur.forEach(p=>{if(!bySup.has(p.key))bySup.set(p.key,[]);bySup.get(p.key).push(p)});
-    const purPeriod=sum(pur.filter(p=>p.in_period),p=>p.amount);
-    let apx=0,aps=0;bySup.forEach(rows=>{const e=rows[0].essential,overdue=rows.some(r=>r.open&&r.dpd>0),share=purPeriod>0?sum(rows.filter(r=>r.in_period),r=>r.amount)/purPeriod:0;
-      const nd=sum(rows.filter(notDue),r=>r.open_amount);if(e==='yes')aps+=nd;else if(e==='no'&&!overdue&&share<P.key_partner)apx+=nd});
-    const ar=code=>{const re=new RegExp('(^|\\s)'+code+'$','i');return sum(sales.filter(s=>re.test(String(s.customer).trim())&&notDue(s)),s=>s.open_amount)};
-    const objs={'OBJ-NB':snap.fin.st_investments||0,'OBJ-APX':apx,'OBJ-APS':aps,
-      'OBJ-INV-NOR':sum(lots.filter(l=>l.pledged==='no'&&!slowOf(l)&&l.cancelled!=='yes'),l=>l.value_own),
-      'OBJ-INV-SLOW':sum(lots.filter(l=>l.pledged==='no'&&slowOf(l)&&['TP','HH'].includes(l.type)&&l.cancelled!=='yes'),l=>l.value_own),
-      'OBJ-INV-PLG':sum(lots.filter(l=>l.pledged==='yes'),l=>l.value_own)};
-    return id=>id in objs?objs[id]:/^OBJ-AR-/.test(id)?ar(id.slice(7)):null;
-  }
-  // Funding rounds (T3-01 … T3-07) from the Base two-week blocks of the same UC02 run.
-  function uc03Rounds(run,P){
-    const R=run.reserves,Rt=R.rtarget,theta=Rt*P.theta_pct,B=run.blocks.list,base=run.fc.scenarios.base.days.slice(0,7*run.weeks);
-    const blocks=B.map(b=>({k:b.k,start:b.start,end:b.end,days:b.days,min:b.min,deficit:b.status==='shortage'?Math.max(0,Rt-b.min):0}));
-    blocks.forEach((b,i)=>{b.delta=i?Math.abs(b.deficit-blocks[i-1].deficit):null;b.material=i>0&&b.delta>=theta&&b.days>=P.min_days?1:0});
-    const changes=blocks.filter(b=>b.material),n=changes.length,first=changes[0]||null;
-    const dir=n===1?Math.sign(first.deficit-blocks[first.k-2].deficit):0;
-    const shape=n===0?'uniform':n===1?(dir>0?'step_up':'step_down'):'unclassifiable';
-    const short=base.filter(x=>x.close<Rt),lastShort=short.length?short[short.length-1].d:null,firstShort=short.length?short[0].d:null;
-    const peak=Math.max(0,...blocks.map(b=>b.deficit)),days=(a,b)=>dnum(b)-dnum(a)+1;
-    let rounds=[];
-    if(!firstShort)rounds=[];
-    else if(shape==='step_up'){const lo=Math.max(0,...blocks.filter(b=>b.k<first.k).map(b=>b.deficit)),hi=Math.max(0,...blocks.filter(b=>b.k>=first.k).map(b=>b.deficit));
-      rounds=[{j:1,need_date:firstShort,G_cum:lo,G:lo,end:diso(dnum(first.start)-1)},{j:2,need_date:first.start,G_cum:hi,G:hi-lo,end:lastShort}]}
-    else rounds=[{j:1,need_date:firstShort,G_cum:peak,G:peak,end:shape==='step_down'?first.start:lastShort}];
-    rounds.forEach(r=>{r.duration=days(r.need_date,r.end);r.severity=r.G_cum>=theta?'severe':'light'});
-    return {theta,blocks,n,shape,review_manual:n>=2,change_date:first?first.start:null,change_block:first?first.k:0,direction:dir,peak_gap:peak,last_short:lastShort,rounds};
-  }
-  const UC03_FACTOR_GROUPS={AR:['AR_EARLY','RF','FAC'],INV:['INV_LOAN','INV_SALE'],AP:['AP_EXT']};
-  function matchFinancing(snap,uc01,run,table,opts={}){
-    const P=table.params,A=dnum(snap.as_of),req=opts.request_date?dnum(opts.request_date):A;
-    if(!run||run.th.th!=='TH01')return {status:'not_applicable',reason:run?'th_'+run.th.th:'no_uc02',th:run?run.th.th:'unknown'};
-    if(!uc01||uc01.snapshot_id!==run.snapshot_id)return {status:'not_applicable',reason:'different_snapshot'};
-    const base=uc03Objects(snap,P),G=uc03Rounds(run,P),W=uc01.wc_class;
-    const E={AR:uc01.metrics.agg.AR,INV:uc01.metrics.agg.INV,AP:uc01.obligation_overdue};
-    const cOf=it=>{const s=uc01.item_states.find(x=>x.item===it);return s&&s.c>=1?1:0},c={AR:cOf('AR'),INV:cOf('INV'),AP:cOf('AP')};
-    const nFactors=c.AR+c.INV+c.AP,persistent=!!run.blocks.persistent,used=new Set(),drawnCL={};
-    const rounds=G.rounds.map(r=>{
-      const daysLeft=dnum(r.need_date)-req,urgent=daysLeft<=P.urgent_days;
-      const shares=Object.fromEntries(['AR','INV','AP'].map(k=>[k,r.G_cum>0?Math.min(1,E[k]/r.G_cum):0]));
-      const role=k=>shares[k]>=P.cause_main?'main':shares[k]>=P.cause_sec?'secondary':'ignored';
-      const main=['AR','INV','AP'].filter(k=>role(k)==='main').sort((a,b)=>shares[b]-shares[a])[0]||null;
-      const single=main==='AR'?'A1':main==='INV'?'A2':main==='AP'?'A4':'A3';
-      const secGroups=new Set(['AR','INV','AP'].filter(k=>role(k)==='secondary').flatMap(k=>UC03_FACTOR_GROUPS[k]));
-      // Products: capacity, cost, timeliness and the hard filter (T3-13 … T3-26).
-      const rows=table.products.map(p=>{
-        const bse=p.base_declared!=null?Math.max(0,p.base_declared-(drawnCL[p.object]||0)):base(p.object);
-        const net=p.group==='INV_SALE'?1-p.haircut:p.adv*(1-p.haircut),C=(bse||0)*net;
-        const hold=p.early_repay?Math.min(p.hold,r.duration):p.hold;
-        const cost=p.group==='INV_SALE'?(bse||0)*p.haircut+p.fee_flat:C*p.rate*hold/365+C*p.fee_pct+p.fee_flat;
-        const reasons=[];if(p.pledged)reasons.push('PLEDGED');if(p.strategic)reasons.push('STRATEGIC_OR_CRITICAL');if(!p.has_data)reasons.push('NO_PRODUCT_DATA');
-        if(!(C>0)&&p.has_data)reasons.push('NO_NET_CASH');if(r.j>1&&used.has(p.object))reasons.push('OBJECT_USED_IN_EARLIER_ROUND');
-        const hard=!reasons.length,timely=p.dtf<=daysLeft,flags=[];
-        if(!p.early_repay&&p.hold<r.duration&&['RF','FAC'].includes(p.group))flags.push('NOT_COVERING_DURATION');
-        if(!timely)flags.push('TOO_SLOW');
-        return {...p,base:bse||0,net,C,hold_charged:hold,cost,timely,hard,reasons,flags,cpg:C>0?Math.round(cost/Math.min(C,r.G)*1e4)/1e4:null,
-          speed:p.dtf<=3?1:p.dtf<=10?2:3,certainty:P.model_health==='degraded'?3:p.certainty}});
-      // Scenario (T3-10/T3-11): persistent shortfall → B1/B2; otherwise the single-round scenario from the main factor.
-      const bestC=Math.max(0,...rows.filter(x=>x.hard&&x.timely).map(x=>x.C));
-      const scenario=!persistent?single:(W==='W2'&&nFactors>=2)||bestC<r.G?'B2':nFactors>0&&!c.INV&&P.all_l1?'B1':'B2';
-      rows.forEach(x=>{x.in_scenario=!!(table.allowed[x.group]||{})[scenario];if(x.hard&&!x.in_scenario)x.reasons.push('OUT_OF_SCENARIO');
-        x.eligible=x.hard&&x.in_scenario;x.cause_match=urgent?1:((table.cause[x.group]||{})[scenario]||secGroups.has(x.group))?1:0});
-      // Ranking key (T3-31): timely, cause match (normal mode), speed band, certainty, CostPerGap, Rel, days to fund, product id.
-      const ranked=rows.filter(x=>x.eligible).sort((a,b)=>(b.timely-a.timely)||(urgent?0:b.cause_match-a.cause_match)||(a.speed-b.speed)||(a.certainty-b.certainty)||
-        ((a.cpg??9)-(b.cpg??9))||(a.rel-b.rel)||(a.dtf-b.dtf)||(a.id<b.id?-1:1));
-      ranked.forEach((x,i)=>{x.rank=i+1});
-      // Package (T3-32/T3-33): internal cash first, then by rank; one object once; ≤ 2 sources per option; ≤ max_sources.
-      const minDraw=r.G*P.min_draw_pct,pkg=[],perOption={},order=ranked.slice().sort((a,b)=>(a.group==='NB'?0:1)-(b.group==='NB'?0:1)||a.rank-b.rank);
-      let left=r.G;
-      order.forEach(x=>{let skip=null;
-        if(!x.timely)skip='TOO_SLOW';else if(used.has(x.object))skip='OBJECT_USED';else if(left<=0)skip='GAP_COVERED';else if(x.C<minDraw)skip='BELOW_MIN_DRAW';
-        else if((perOption[x.option]||0)>=P.max_per_option)skip='OPTION_LIMIT';else if(pkg.length>=P.max_sources)skip='MAX_SOURCES';
-        x.skip=skip;if(skip)return;
-        const draw=Math.min(x.C,left);left-=draw;used.add(x.object);perOption[x.option]=(perOption[x.option]||0)+1;
-        if(/^LIM-/.test(x.object))drawnCL[x.object]=(drawnCL[x.object]||0)+draw;
-        pkg.push({id:x.id,name:x.name,group:x.group,option:x.option,object:x.object,rank:x.rank,C:x.C,draw,cost:x.C>0?x.cost*draw/x.C:0,dtf:x.dtf,certainty:x.certainty,flags:x.flags.slice()})});
-      // A remainder below MinDraw goes to a chosen source with spare capacity.
-      if(left>0&&left<minDraw){const s=pkg.find(y=>y.C-y.draw>=left);if(s){const x=ranked.find(z=>z.id===s.id);s.draw+=left;s.cost=x.C>0?x.cost*s.draw/x.C:0;left=0}}
-      const covered=sum(pkg,y=>y.draw),cost=sum(pkg,y=>y.cost);
-      return {...r,days_left:daysLeft,urgent,shares,roles:{AR:role('AR'),INV:role('INV'),AP:role('AP')},main_factor:main,scenario_single:single,scenario,best_c:bestC,
-        products:rows,ranked:ranked.map(x=>x.id),excluded:rows.filter(x=>!x.eligible).map(x=>({id:x.id,reasons:x.reasons})),
-        package:pkg,covered,cost,remaining_gap:Math.max(0,r.G-covered),cost_per_gap:r.G>0?Math.round(cost/r.G*1e4)/1e4:null,min_draw:minDraw,
-        not_covering:pkg.filter(y=>y.flags.includes('NOT_COVERING_DURATION')).length,eligible_count:rows.filter(x=>x.eligible).length};
-    });
-    const pkgAll=rounds.flatMap(r=>r.package);
-    const human=G.review_manual||pkgAll.some(y=>['AP_EXT','AR_EARLY'].includes(y.group))||rounds.some(r=>r.remaining_gap>0||r.not_covering>0);
-    return {status:run.status==='ok'?'ok':'provisional',run_id:'RUN-UC03-'+hash([run.run_id,uc01.run_id,JSON.stringify(P)].join('|')),snapshot_id:run.snapshot_id,
-      matrix_cell:run.matrix.cell,th:run.th.th,w:W,c,n_factors:nFactors,persistent,E,...G,rounds,
-      totals:{draw:sum(rounds,r=>r.covered),cost:sum(rounds,r=>r.cost),remaining_gap:sum(rounds,r=>r.remaining_gap)},requires_human_decision:human};
-  }
-
-  /* ---------- UC04 · what-if on a copy of the UC02 Base ledger, per the workbook v9 (UC4_Cong_thuc U4-01 … U4-30) ---------- */
-  // Three internal levers: collect part of a customer's receipts earlier (or later in case 6), extend part of a supplier's payments, sell
-  // part of an owned, unpledged lot. Cases: 0 keep; 1 plan; 2 only 50 % collected early; 3 supplier refuses; 4 slow sale; 5 = 2+3+4; 6 customer late.
-  function simulateUC04(snap,run,uc01,setup){
-    const S=setup||{},R=run.reserves,Rt=R.rtarget,o=run.fc.scenarios.base,start=dnum(run.fc.start),end=dnum(run.end),H=run.weeks,errors=[];
-    const share01=x=>x!=null&&x>=0&&x<=1,intDays=x=>Number.isInteger(x)&&x>=0;
-    ['ar_share','discount','ap_share','ap_fee','sale_share','recovery','sale_cost','partial_early'].forEach(k=>{if(S[k]!=null&&!share01(S[k]))errors.push('INVALID_'+k.toUpperCase())});
-    ['early_days','late_days','extend_days','sale_lag','stress_sale_days'].forEach(k=>{if(S[k]!=null&&!intDays(S[k]))errors.push('INVALID_'+k.toUpperCase())});
-    const cs=S.case|0,early=cs!==6,lateCase=cs===6;
-    const arShare=cs===0?0:(cs===2||cs===5?(S.ar_share||0)*(S.partial_early??.5):S.ar_share||0);
-    const apShare=cs===0||cs===3||cs===5||cs===6?0:S.ap_share||0,saleShare=cs===0||cs===6?0:S.sale_share||0;
-    const shiftDays=lateCase?(S.late_days||0):-(S.early_days||0),discount=lateCase?0:S.discount||0;
-    const saleDate=start+(S.sale_lag||0)-1+(cs===4||cs===5?(S.stress_sale_days||0):0)+1;
-    // Lot check (U4-09): owned by the company, declared not pledged, sale assumption confirmed.
-    const lot=(snap.lots||[]).find(l=>l.name===S.lot);
-    if(saleShare>0){if(!lot)errors.push('LOT_NOT_FOUND');else{if(lot.owner==='customer')errors.push('LOT_CUSTOMER_OWNED');if(lot.pledged!=='no')errors.push(lot.pledged==='yes'?'LOT_PLEDGED':'LOT_PLEDGE_UNKNOWN');
-      if(!S.sale_confirmed)errors.push('SALE_NOT_CONFIRMED')}}
-    const sup=(snap.purchases||[]).find(p=>p.supplier===S.supplier);
-    if(apShare>0&&sup&&sup.essential==='yes'&&!S.allow_essential)errors.push('ESSENTIAL_SUPPLIER_NOT_CONFIRMED');
-    if(errors.length)return {status:'rejected',errors,setup:S,case:cs};
-    const delta=new Map(),add=(t,x)=>delta.set(t,(delta.get(t)||0)+x),affected=[];
-    let movedAR=0,discCost=0,movedAP=0,feeCost=0,tailPay=0,tailRec=0,cdAR=0,cdAP=0,replacedConfirmed=0;
-    o.events.forEach(e=>{if(e.t==null)return;
-      if(arShare>0&&e.dir==='IN'&&e.src==='sales_invoice'&&e.partner===S.customer){
-        if(e.certainty==='confirmed'&&!S.allow_confirmed)return;if(e.certainty==='confirmed')replacedConfirmed+=e.amt*arShare;
-        const m=e.amt*arShare,nd=early?Math.max(start,e.t+shiftDays):e.t+shiftDays;if(nd===e.t)return;
-        const dc=nd<e.t?m*discount:0,nr=m-dc;movedAR+=m;discCost+=dc;cdAR+=m*(e.t-nd);
-        if(e.t<=end)add(e.t,-m);if(nd<=end)add(nd,nr);else tailRec+=nr;affected.push({id:e.id,lever:'AR',old:diso(e.t),new:diso(nd),moved:m,net:nr})}
-      if(apShare>0&&e.dir==='OUT'&&e.src==='purchase_invoice'&&e.partner===S.supplier&&(S.extend_days||0)>0){
-        const m=e.amt*apShare,nd=e.t+S.extend_days,fee=m*(S.ap_fee||0);movedAP+=m;feeCost+=fee;cdAP+=m*(nd-e.t);
-        if(e.t<=end)add(e.t,m);if(nd<=end)add(nd,-(m+fee));else tailPay+=m+fee;affected.push({id:e.id,lever:'AP',old:diso(e.t),new:diso(nd),moved:m,fee})}});
-    const released=saleShare>0?lot.value_own*saleShare:0,gross=released*(S.recovery||0),saleCost=gross*(S.sale_cost||0),saleNet=gross-saleCost;
-    if(saleNet>0){if(saleDate<=end)add(saleDate,saleNet);else tailRec+=saleNet}
-    const days=o.days.slice(0,7*H);let cum=0;
-    const path=days.map(x=>{cum+=delta.get(dnum(x.d))||0;return {d:x.d,base:x.close,after:x.close+cum,delta:cum}});
-    const lv=v=>{const gr=Math.max(0,Rt-v)/Rt;return v<0||v<R.rmin||gr>.5?3:gr>.2?2:gr>0?1:0},LV=['green','yellow','orange','red'];
-    const stat=k=>{const low=path.reduce((a,x)=>x[k]<a[k]?x:a,path[0]);return {min:low[k],min_date:low.d,peak_gap:Math.max(0,...path.map(x=>Rt-x[k])),peak_zero:Math.max(0,...path.map(x=>-x[k])),
-      gap_days:path.filter(x=>x[k]<Rt).length,negative_days:path.filter(x=>x[k]<0).length,worst:LV[Math.max(...path.map(x=>lv(x[k])))],end_cash:path[path.length-1][k],
-      first_below:(path.find(x=>x[k]<Rt)||{}).d||null}};
-    const before=stat('base'),after=stat('after'),tol=S.tolerance??1;
-    const crit=S.critical_date||before.min_date,cx=path.find(x=>x.d===crit)||path[path.length-1];
-    const newGap=path.filter(x=>x.base>=Rt&&x.after<Rt).length,worse=path.filter(x=>Math.max(0,Rt-x.after)>Math.max(0,Rt-x.base)+tol).length;
-    const reduction=before.peak_gap-after.peak_gap,cashCost=discCost+feeCost+saleCost,bookShort=Math.max(0,released-gross);
-    // Conclusion (U4-21): obligations moved past the horizon → not enough to assess; no day below Rtarget → no shortfall; worse days; partial; none.
-    const improved=reduction>tol||after.gap_days<before.gap_days;
-    const conclusion=tailPay>0?'not_enough_to_assess':after.gap_days===0?'no_shortfall':worse>0?'some_days_worse':improved?'partial_improvement':'no_improvement';
-    const thAfter=path.some(x=>x.after<Rt)?'TH01':(()=>{let r=0,b=0;path.forEach(x=>{r=x.after>R.rupper?r+1:0;b=Math.max(b,r)});return b>=CFG.tv2.th03MinConsecutiveDays?'TH03':'TH02'})();
-    const W=uc01&&uc01.snapshot_id===run.snapshot_id?uc01.wc_class:'unknown';
-    return {status:'provisional',run_id:'RUN-UC04-'+hash([run.run_id,JSON.stringify(S)].join('|')),snapshot_id:run.snapshot_id,case:cs,setup:S,
-      effective:{ar_share:arShare,shift_days:shiftDays,discount,ap_share:apShare,sale_share:saleShare,sale_date:diso(saleDate)},
-      before,after,critical:{date:crit,cash_lift:cx.after-cx.base,gap_reduction:Math.max(0,Rt-cx.base)-Math.max(0,Rt-cx.after)},
-      gap_reduction:reduction,new_gap_days:newGap,worse_gap_days:worse,moved:{ar:movedAR,ap:movedAP},
-      costs:{discount:discCost,extension_fee:feeCost,sale_cash:saleCost,book_shortfall:bookShort,cash:cashCost,economic:cashCost+bookShort},
-      sale:{released_book:released,gross,net:saleNet,date:diso(saleDate)},tail:{pay:tailPay,receipt:tailRec},replaced_confirmed:replacedConfirmed,
-      cash_days:{ar:snap.fin.revenue>0?cdAR/snap.fin.revenue:null,ap:snap.fin.cogs>0?cdAP/snap.fin.cogs:null},
-      w:W,th_after:thAfter,matrix_after:W!=='unknown'?MATRIX_CELLS[W][thAfter]:null,conclusion,affected,path};
-  }
-
-  return {matchFinancing,uc03Objects,uc03Rounds,simulateUC04,dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
-    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,contributingFactors,gapRequestCheck,buildGapRequest,forecastLog,reconcile,modelHealth,calibrationProposal,legacyCase,buildCases};
+  // UC03 Solutions and UC04 What-if run on these results in js/uc0304.js (SRS v2.3 sections 2.9 and 2.10).
+  return {dnum,diso,sum,round,hash,normName,tri,GT,GE,LT,inferLotType,customerOwnedHint,cancelledHint,resolveFinancials,makeSnapshot,inputFromRaw,inputFromUpload,
+    sizeLabel,relationLabel,customerTier,customerBase,decompose,modelOf,diagnose,behaviourLabel,supplierCategory,companySize,profiles,SCENARIOS,delayStats,delaySamples,delayModel,vatFactor,forecast,resolveCash0,millerOrr,resolveReserves,level,scenarioSummary,weeklyOf,blocks,shortfallEpisodes,cashState,runUC02,cashNeeded,contributingFactors,gapRequestCheck,buildGapRequest,forecastLog,reconcile,modelHealth,calibrationProposal,legacyCase,buildCases};
 })();

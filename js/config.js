@@ -1,17 +1,20 @@
-/* Configuration parameters of SRS v1.3 Appendix C (Table C-1) and the threshold table 2-28 (tv1.threshold.v2).
+/* Configuration parameters of SRS Appendix C (Table C-1), the threshold table fob.threshold.v3 (workbook v10 sheet Nguong) and the
+   Miller–Orr reserve parameters (SRS 2.8.9).
    Every rule in js/engine.js reads its constants from here; nothing is hard-coded in the rules themselves.
    source: verified_reference = industry data (FiinTrade 2016–2025), owner_policy = approved by the company,
    demo_assumption = demonstration default that the company must confirm. */
 const CFG={
-  versions:{formula:'uc0102.formulas.v1.3',threshold:'tv1.threshold.v2',config:'cfg.defaults.v1'},
+  versions:{formula:'uc0102.formulas.v1.3',threshold:'fob.threshold.v3',config:'cfg.defaults.v1'},
   // UC01 aggregate thresholds by business model (Table 2-28). DSO/DIO: reference P50, watch P75, severe P90.
   // Full precision of the workbook v9 sheet Nguong (rows 5-22); rounding them would move E_AR / E_INV by millions.
   wc:{
     thr:{
       CMT:{dso:{ref:26.27016744,watch:35.8290068554972,severe:45.9584059232531},dio:{ref:7.1334971105,watch:9.46889728525,severe:13.7015882191},
         dpo:{low:2.63718419871133,high:11.9014270205264},bufThin:.161181709909933},
-      FOB:{dso:{ref:41.58923909,watch:56.7221787175074,severe:72.7583916814747},dio:{ref:74.16105886,watch:98.4402794356076,severe:142.444059996393},
-        dpo:{low:13.2386325202917,high:59.7450185196815},bufThin:.0531758804480545}
+      // fob.threshold.v3 (workbook v10 sheet Nguong rows 14-22, FiinTrade 2023–2025, 20 FOB garment makers): DSO/DIO P50/P75/P90,
+      // DPO low P10 and high P75 (info only), thin cash buffer P25 of (cash + short-term investments) / revenue.
+      FOB:{dso:{ref:43.24705229,watch:58.2071385175,severe:66.26326635},dio:{ref:69.751755075,watch:86.118055065,severe:137.965147652},
+        dpo:{low:14.892652922,high:68.3092044425},bufThin:.0830079952170207}
     },
     materiality:.05,            // wc.materiality_share (owner_policy default)
     factorSize:1,factorSeason:1,
@@ -30,7 +33,14 @@ const CFG={
   // UC02 reserve reference (Table 2-85): cash buffer percentiles × business-model factor, share of 12-month revenue.
   liq:{
     reference:{CMT:{rmin:.1611817099099339,rtarget:.311013635392693,rupper:.5782255225792152},FOB:{rmin:.0532,rtarget:.1026,rupper:.1908}}, // CMT: Nguong rows 53-55
-    rminDefaultRatio:.5,rupperDefaultRatio:2,criticalDays:{rmin:[15,20],rtarget:[30,45]}
+    rminDefaultRatio:.5,rupperDefaultRatio:2,criticalDays:{rmin:[15,20],rtarget:[30,45]},
+    // Miller–Orr reserve levels (SRS 2.8.9, Tables 2-68/2-69, Appendix B CF01–CF04; workbook v10 Nguong rows 5-12), version fob.threshold.v3.
+    // L = MAX(lowerRatio × 12-month revenue; owner floor); D = (3 b σ² / (4 i))^(1/3) with i = r / 365 (simple rate); Z = L + D; H = L + 3D.
+    // σ² is the sample variance of the company's own daily net cash flows (≥ minDailyObs days within 3 years), else the industry proxy
+    // sigmaDailyRatio × 12-month revenue (labelled provisional). The old names stay as aliases: rmin = L, rtarget = Z, rupper = H.
+    // F01 at 20/06/2026: L 5.350,2 / Z 6.633,1 / H 9.198,9 million VND.
+    millerOrr:{version:'fob.threshold.v3',lowerRatio:.0417986209613163,lowerMinOwner:0,transactionCost:1e6,rateAnnual:.0475,daysPerYear:365,
+      minDailyObs:90,maxHistoryDays:1095,sigmaDailyRatio:.0025058914001347397}
   },
   tv2:{horizonWeeks:13,delay:{lookbackDays:180,minN:5,defaultLate:7,conditionalMinN:3},
     overdueResidual:{optimistic:3,base:10,conservative:21},apOverdueOffset:{conservative:1,base:5,optimistic:10},
