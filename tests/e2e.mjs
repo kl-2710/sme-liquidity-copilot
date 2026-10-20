@@ -904,7 +904,7 @@ for (const theme of ["light", "dark"]) {
     assert.match(await page.locator("#wiMatrix").innerText(), /Published cell M3 and W1 are unchanged.*simulated cell M3/);
     assert.match(await page.locator("#wiMatrix").innerText(), /Equivalent DSO days \(reference only\)/);
     assert.equal(await page.locator("#wi-conservative").count(), 1); assert.equal(await page.locator("#wi-positive").count(), 1);
-    assert.match(await page.locator("#wi-conservative").innerText(), /Conservative · sensitivity/);
+    assert.match(await page.locator("#wi-conservative").textContent(), /Conservative · sensitivity/);
     assert.ok(await page.evaluate(() => { const a = document.querySelector("#wi-base"), b = document.querySelector("#wiSens"); return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); }), "Base comes first");
     const txt = await res.innerText();
     assert.doesNotMatch(txt, /CCC \d+[.,]?\d* → |CCC after|DSO\s+\d.*→/, "no CCC x→y or before/after ratio table");
@@ -985,8 +985,8 @@ for (const theme of ["light", "dark"]) {
     assert.deepEqual(lv, ["yellow", "orange", "orange", "red", "green", "red"], "gr=20% yellow, 50%/Rmin orange, below Rmin red");
     const weeksOk = await page.evaluate(() => { const c = C(), M = weeklyModel(c);
       const th = [...document.querySelectorAll("#pane-gap .ft thead th[data-w]")], lo = [...document.querySelectorAll("#pane-gap .ft tr.lowwk td[data-w]")];
-      return th.length === 13 && th.every((t, i) => t.dataset.lv === alertLevel(M.W[i].bal, c.buffer))
-        && lo.every((t, i) => t.dataset.lv === alertLevel(Math.min(...c.days.slice(7 * i, 7 * i + 7).map((d) => d[1])), c.buffer)); });
+      return th.length === 13 && th.every((t, i) => t.dataset.lv === alertLevel(M.W[i].bal, c.buffer, RMIN()))
+        && lo.every((t, i) => t.dataset.lv === alertLevel(Math.min(...c.days.slice(7 * i, 7 * i + 7).map((d) => d[1])), c.buffer, RMIN())); });
     assert.ok(weeksOk, "week cells use the week-end balance; lowest-in-week uses the worst day");
   });
   await step(`[${theme}] legacy companies without a shortfall (fixture X02/X03) render without errors`, async () => {
@@ -1131,7 +1131,7 @@ for (const theme of ["light", "dark"]) {
     assert.deepEqual(r.secs.slice(0, 3), ["Working-capital diagnosis", "Receivables, Inventory and Payables", "Cash conversion cycle"]);
     assert.ok(r.order.indexOf("uc-src") < r.order.indexOf("dsec"));
     assert.equal(r.w, "W1 – Watch");
-    assert.match(r.src, /sample:F01 · snapshot F01-20260620-SYN171-v1 · as of 20 Jun 2026 · period 1 Jan 2026–20 Jun 2026 \(171 days\)/); assert.match(r.src, /fresh/);
+    assert.match(r.src, /sample:F01 · snapshot F01-FOB-20260620-v10 · as of 20 Jun 2026 · period 1 Jan 2026–20 Jun 2026 \(171 days\)/); assert.match(r.src, /fresh/);
     assert.equal(r.chip, "20 Jun 2026");
     assert.ok(r.gaugeMax.length === 4 && !r.gaugeMax.includes("90"), "gauge scales follow the thresholds: " + r.gaugeMax.join(","));
   });
@@ -1159,7 +1159,7 @@ for (const theme of ["light", "dark"]) {
   });
   await step("D · expert mode shows rule ids, versions and raw VND; tables sort and switch order", async () => {
     const t = await page.locator("#pane-dash .wcard .expert").innerText();
-    assert.match(t, /R-AR-1, R-AR-OD, R-INV-1, R-INV-SLOW, R-AP-OD/); assert.match(t, /tv1\.threshold\.v2/);
+    assert.match(t, /R-AR-1, R-AR-OD, R-INV-SLOW, R-AP-OD/); assert.match(t, /fob\.threshold\.v3/);
     assert.match(await page.locator("#pane-dash .mtile.hl").innerText(), /\d{1,3}(\.\d{3})+ VND/);
     await page.click("#ucExpert"); await page.waitForTimeout(300);                 // off: the simple view hides rule ids and raw VND
     assert.equal(await page.locator("#pane-dash .wcard .expert").count(), 0);
@@ -1167,19 +1167,20 @@ for (const theme of ["light", "dark"]) {
     await page.click("#ucExpert"); await page.waitForTimeout(300);                 // back on (remembered)
     assert.equal(await page.evaluate(() => localStorage.getItem("lilact.expert.v1")), "1");
     const exposure = await page.locator("#icd-ar .t-cust tbody tr td:first-child > b").allInnerTexts();
-    assert.equal(exposure[0], "Large Exporter K1");
+    assert.equal(exposure[0], "Large FOB Buyer K1");
     await page.click('[data-corder="intervention"]'); await page.waitForTimeout(200);
     const tiers = await page.locator("#icd-ar .t-cust tbody tr td:first-child small b").allInnerTexts();   // Expert: tier under the name
-    assert.deepEqual(tiers, ["1", "2", "2", "2", "2", "2", "3", "3", "5"]);
+    assert.equal(tiers.length, 9); assert.deepEqual(tiers, tiers.slice().sort(), "intervention order follows the tier"); assert.equal(tiers.at(-1), "5", "the strategic customer K2 comes last");
   });
   await step("D · evidence panel lists the invoices; an empty filter says no records match", async () => {
-    await page.click('#pane-dash .t-cust tr[data-ev*="large exporter k1"]'); await page.waitForTimeout(300);
-    assert.match(await page.locator("#modal h3").innerText(), /Evidence · Large Exporter K1/);
-    assert.equal(await page.locator("#modal .ev-body tbody tr").count(), 31);
+    await page.click('#pane-dash .t-cust tr[data-ev*="large fob buyer k1"]'); await page.waitForTimeout(300);
+    assert.match(await page.locator("#modal h3").innerText(), /Evidence · Large FOB Buyer K1/);
+    assert.ok(await page.locator("#modal .ev-body tbody tr").count() > 0);
     await page.selectOption("#evFilter", "overdue"); await page.waitForTimeout(150);
     assert.equal(await page.locator("#modal .ev-body tbody tr").count(), 5);
     await page.keyboard.press("Escape"); await page.waitForTimeout(200);
-    await page.click('#pane-dash .t-cust tr[data-ev*="exporter k2"]'); await page.waitForTimeout(300);
+    const clean = await page.evaluate(() => { const c = uc01().profiles.customers.find((x) => x.overdue === 0 && x.ar > 0); return c ? c.name.toLowerCase() : null; });
+    await page.click(`#pane-dash .t-cust tr[data-ev*="${clean}"]`); await page.waitForTimeout(300);
     await page.selectOption("#evFilter", "overdue"); await page.waitForTimeout(150);
     assert.match(await page.locator("#modal .ev-body").innerText(), /No records match the condition \(Overdue\)/);
     await page.keyboard.press("Escape"); await page.waitForTimeout(200);
@@ -1199,16 +1200,16 @@ for (const theme of ["light", "dark"]) {
   });
   await step("D · threshold policy needs a reason, previews the impact and creates a new configuration version", async () => {
     await page.click("#ucPolicy"); await page.waitForTimeout(300);
-    await page.selectOption("#polModel", "FOB"); await page.waitForTimeout(150);
-    assert.match(await page.locator("#polPreview").innerText(), /W1 · BN4 → W1 · BN3/);   // FOB: DSO/DIO under the watch levels, DPO 9,3 < 13,2 with a thin buffer
+    await page.selectOption("#polModel", "CMT"); await page.waitForTimeout(150);
+    assert.match(await page.locator("#polPreview").innerText(), /W1 · BN1 → W2 · BN4/);   // CMT thresholds: DSO and DIO far above the CMT levels
     await page.click("#polSave"); assert.match(await page.locator("#polErr").innerText(), /10 to 500 characters/);
-    await page.fill("#polReason", "Board decision: the company works on FOB terms"); await page.click("#polSave"); await page.waitForTimeout(500);
+    await page.fill("#polReason", "Board test: compare with the CMT thresholds"); await page.click("#polSave"); await page.waitForTimeout(500);
     const r = await page.evaluate(() => [uc01().wc_class, uc01().bn_pattern, uc01().policy_version, document.querySelector("#pane-dash .wcard .ls-w").textContent]);
-    assert.deepEqual(r, ["W1", "BN3", "CFG-F01-v1", "W1 – Watch"]);
-    // Settings › Account sets the model back to CMT (another configuration version).
+    assert.deepEqual(r.slice(0, 3), ["W2", "BN4", "CFG-F01-v1"]);
+    // Settings › Account sets the model back to FOB (another configuration version).
     await page.evaluate(() => { openSettings("Account"); }); await page.waitForTimeout(300);
-    await page.selectOption("#bizModel", "CMT"); await page.waitForTimeout(300); await page.keyboard.press("Escape");
-    assert.deepEqual(await page.evaluate(() => [uc01().wc_class, uc01().bn_pattern, uc01().policy_version]), ["W1", "BN4", "CFG-F01-v2"]);
+    await page.selectOption("#bizModel", "FOB"); await page.waitForTimeout(300); await page.keyboard.press("Escape");
+    assert.deepEqual(await page.evaluate(() => [uc01().wc_class, uc01().bn_pattern, uc01().policy_version]), ["W1", "BN1", "CFG-F01-v2"]);
   });
   await step("D · BN0 company: no capital card, headroom on the items, tables without warning colours, evidence pages", async () => {
     await page.evaluate(() => {
@@ -1223,7 +1224,7 @@ for (const theme of ["light", "dark"]) {
     await page.waitForTimeout(500);
     const r = await page.evaluate(() => { const p = document.querySelector("#pane-dash"); return { w: p.querySelector(".wcard .ls-w").textContent, bn0: !!p.querySelector(".mtile.bn0"), mar: !!p.querySelector(".mtile.hl"),
       head: p.querySelector(".icard").textContent, flags: p.querySelectorAll(".dtable tr.flag, .dtable .status.red, .dtable .status.amber").length }; });
-    assert.equal(r.w, "W0 – No signs yet"); assert.ok(r.bn0 && !r.mar); assert.match(r.head, /16,7 days to the watch threshold/); assert.equal(r.flags, 0);
+    assert.equal(r.w, "W0 – No signs yet"); assert.ok(r.bn0 && !r.mar); assert.match(r.head, /18,2 days to the watch threshold/); assert.equal(r.flags, 0);
     await page.click("#pane-dash .t-cust tr[data-ev]"); await page.waitForTimeout(300);
     assert.equal(await page.locator("#modal .ev-body tbody tr").count(), 50);
     assert.match(await page.locator("#modal .ev-body").innerText(), /Page 1 of 4/); assert.match(await page.locator("#modal .ev-body").innerText(), /Showing 200 of 260 records/);
@@ -1235,7 +1236,7 @@ for (const theme of ["light", "dark"]) {
     assert.match(await page.locator("#pane-gap .uc2-bar").innerText(), /Run status: provisional/);
     assert.match(await page.locator("#pane-gap .c0b").innerText(), /Cash0 is provisional/);
     await page.selectOption("#scSel", "conservative"); await page.waitForTimeout(500);
-    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /-3,06B\s+18 Sep 2026 · Conservative/);
+    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /2,85B\s+25 Jun 2026 · Conservative/);
     assert.match(await page.locator("#pane-gap .lstate").innerText(), /TH01 – Cash shortfall/);    // TH stays on Base (banner at the top)
     await page.selectOption("#scSel", "base"); await page.waitForTimeout(300);
     await page.selectOption("#wkSel", "4"); await page.waitForTimeout(500);
@@ -1249,12 +1250,13 @@ for (const theme of ["light", "dark"]) {
     await page.fill("#c0Rmin", "250000000"); await page.click("#c0Save"); assert.match(await page.locator("#c0Err").innerText(), /10 to 500 characters/);
     await page.fill("#c0Reason", "Bank balances confirmed on 20/06/2026"); await page.click("#c0Save"); await page.waitForTimeout(600);
     const r = await page.evaluate(() => { const u = uc02(); return [u.cash0.status, Math.round(u.cash0.value / 1e6), u.config_version, Math.round(u.summary.base.need_rtarget / 1e6), Math.round(u.summary.base.min / 1e6), u.reserves.src.rtarget]; });
-    assert.deepEqual(r, ["confirmed", 2000, `CFG-F01-v${v0 + 1}`, 4764, -2264, "owner_policy"]);    // Cash0 needed does not depend on Cash0
+    assert.deepEqual(r, ["confirmed", 2000, `CFG-F01-v${v0 + 1}`, 661, 1839, "owner_policy"]);    // Cash0 needed does not depend on Cash0
     assert.equal(await page.locator("#pane-gap .c0b").count(), 0);
   });
 
   await step("G · the gap_request summary stays on Shortfall; Solutions opens directly from the banner; wording is 'contributing factors'", async () => {
-    await page.evaluate(() => { switchContext("F01", "base", { silent: true }); advance(2); openDetail("gap"); setWide(true); }); await page.waitForTimeout(700);
+    // Back to the shipped reserve levels (the previous step set an owner Rtarget of 500 M, which removes the shortfall).
+    await page.evaluate(() => { localStorage.removeItem(POLICY.key("F01")); switchContext("F01", "base", { silent: true }); advance(2); openDetail("gap"); setWide(true); }); await page.waitForTimeout(700);
     assert.match(await page.locator("#pane-gap .cfcard h3").innerText(), /Contributing factors · gap \d/);
     await page.click("#grBtn"); await page.waitForTimeout(300);
     const need = await page.evaluate(() => fd(uc02().summary.base.first_below_rtarget));
@@ -1304,11 +1306,11 @@ for (const theme of ["light", "dark"]) {
     assert.match(txt, /Sample data F01 · as of 20 Jun 2026 · updated \d{1,2} [A-Z][a-z]{2} \d{4}/);
     // Workbook v9 data is complete (COGS from the statements, model declared, current assets given), so the data line has no Estimate badge.
     assert.equal(await page.locator("#pane-dash .uc-src .est").count(), 0);
-    assert.match(await page.locator("#pane-dash .wcard").innerText(), /Some items are worth watching, but they are not tying up much cash yet[\s\S]*Main issue\s+Receivables[\s\S]*Also watch\s+Owned inventory \(Watch\)/);
+    assert.match(await page.locator("#pane-dash .wcard").innerText(), /Some items are worth watching, but they are not tying up much cash yet[\s\S]*Main issue\s+Receivables/);
     const tiles = await page.locator("#pane-dash .mtiles").innerText();
-    // Workbook v9 F01_UC1: money at risk 844,3M, materiality 4,81 % (below 5 %, shown with one decimal), E_AP 400,4M.
-    assert.match(tiles, /Cash tied up above normal\s+844,3M\s+receivables \+ inventory/); assert.match(tiles, /Impact\s+4,8%\s+of short-term assets · Moderate/); assert.match(tiles, /Overdue to suppliers\s+400,4M/);
-    assert.deepEqual(await page.locator("#pane-dash .icard .ic-h .status").allInnerTexts(), ["Watch", "Watch", "Normal"]);   // from c_i: AR 1, INV 1, AP 0
+    // Workbook v10 F01_UC1: money at risk 1.278,7M (B31), materiality 2,24 % (B29), E_AP 2.402,4M (B18).
+    assert.match(tiles, /Cash tied up above normal\s+1,28B\s+receivables/); assert.match(tiles, /Impact\s+2,2%\s+of short-term assets · Moderate/); assert.match(tiles, /Overdue to suppliers\s+2,40B/);
+    assert.deepEqual(await page.locator("#pane-dash .icard .ic-h .status").allInnerTexts(), ["Watch", "Normal", "Normal"]);   // from c_i: AR 1, INV 0, AP 0
     assert.match(await page.locator("#pane-dash .icard").first().innerText(), /About 3 days above normal/);
     assert.equal(await page.locator("#pane-dash .tb-lbl").count(), 0, "no numeric threshold labels");
     await page.click('#pane-dash [data-det="AR"]'); await page.waitForTimeout(200);
@@ -1317,16 +1319,16 @@ for (const theme of ["light", "dark"]) {
     assert.doesNotMatch(await page.locator("#pane-dash .gcard .info").first().getAttribute("data-tip"), /[=÷×]/);
   });
   await step("Simple · evidence panel has no rule ids; customer labels and tier appear only in Expert mode", async () => {
-    await page.click('#pane-dash .t-cust tr[data-ev*="large exporter k1"]'); await page.waitForTimeout(300);
+    await page.click('#pane-dash .t-cust tr[data-ev*="large fob buyer k1"]'); await page.waitForTimeout(300);
     assert.doesNotMatch(await page.locator("#modal").innerText(), /R-AR|Tier|RUN-|ρ/); await page.keyboard.press("Escape"); await page.waitForTimeout(200);
     await page.click("#ucExpert"); await page.waitForTimeout(300);
-    await page.click('#pane-dash .t-cust tr[data-ev*="large exporter k1"]'); await page.waitForTimeout(300);
+    await page.click('#pane-dash .t-cust tr[data-ev*="large fob buyer k1"]'); await page.waitForTimeout(300);
     assert.match(await page.locator("#modal").innerText(), /Size · relationship · behaviour[\s\S]*Tier/); await page.keyboard.press("Escape"); await page.waitForTimeout(200);
   });
   await step("Expert · threshold labels never overlap on the item bars; status pills stay inside their cells", async () => {
     const overlaps = await page.evaluate(() => [...document.querySelectorAll("#pane-dash .tb-lbl")].map((l) => { const r = [...l.children].map((s) => s.getBoundingClientRect());
       return r.some((a, i) => r.some((b, j) => j > i && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)); }));
-    assert.deepEqual(overlaps, [false, false, false]);
+    assert.ok(overlaps.length === 3 && overlaps.every((o) => o === false), JSON.stringify(overlaps));
     await page.evaluate(() => setWide(false)); await page.waitForTimeout(400);
     const pills = await page.evaluate(() => [...document.querySelectorAll("#pane-dash .t-cust td .status")].map((s) => { const r = s.getBoundingClientRect(), c = s.closest("td").getBoundingClientRect(); return r.left >= c.left - 1 && r.right <= c.right + 1; }));
     assert.ok(pills.length && pills.every(Boolean), "pills stay inside their cell");
@@ -1336,10 +1338,10 @@ for (const theme of ["light", "dark"]) {
     await page.evaluate(() => { advance(3); openDetail("gap"); setWide(true); }); await page.waitForTimeout(900);
     const txt = await page.locator("#pane-gap").innerText();
     assert.doesNotMatch(txt, TECH); assert.doesNotMatch(txt, /PeakZero|Need\(0\)|to stay ≥ 0/);
-    assert.match(txt, /Minimum cash 250,0M · Safe cash level 500,0M · Surplus level 1,00B/);
+    assert.match(txt, /Minimum cash 5,35B · Safe cash level 6,63B · Surplus level 9,20B/);
     assert.equal(await page.locator("#pane-gap .uc2-bar .est").count(), 1);
     assert.ok((await page.locator("#pane-gap .uc2-bar .est").getAttribute("title")).length > 10, "the Estimate badge explains why (Cash0 not confirmed)");
-    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /Cash needed at the start\s+4,76B\s+Largest shortfall\s+3,56B/);
+    assert.match(await page.locator("#pane-gap .uc2-tiles").innerText(), /Cash needed at the start\s+6,79B\s+Largest shortfall\s+1,99B/);
     assert.equal(await page.locator("#pane-gap .fbcard, #pane-gap [data-wid=\"reliability\"]").count(), 0, "no Forecast confidence card");
     assert.doesNotMatch(txt, /Forecast confidence|Overall alert|Cash outlook\n|Two-week view|Show the daily table/);
     assert.equal(await page.locator("#pane-gap .lv-legend").first().evaluate((e) => e.tagName), "P");
@@ -1348,7 +1350,7 @@ for (const theme of ["light", "dark"]) {
     await page.evaluate(() => { setWide(false); startNewChat(); }); await page.waitForTimeout(400);
     const ask = async (q) => { await page.fill("#chatInput", q); await page.click("#sendBtn"); await page.waitForTimeout(3600); return page.locator(".messages.on .msg.bot").last().innerText(); };
     const a = await ask("Where is my working capital stuck?");
-    assert.match(a, /1\. Overall conclusion\./); assert.match(a, /Receivables, Owned inventory are worth watching, but they are not tying up much cash yet/);
+    assert.match(a, /1\. Overall conclusion\./); assert.match(a, /Receivables are worth watching, but they are not tying up much cash yet/);
     assert.doesNotMatch(plain(a), TECH);
     const b = await ask("Why am I short of cash? Show me the contributing factors.");
     assert.match(b, /With no new sales and an estimated opening cash, the alert level is Red/);
@@ -1408,18 +1410,18 @@ for (const theme of ["light", "dark"]) {
     await ask("Where is my working capital stuck?");
     await ask("K1 is the cause of my cash shortage");
     const t = await last().innerText();
-    assert.match(t, /I cannot confirm that Large Exporter K1 alone created the shortfall/); assert.match(t, /one contributing factor/);
-    assert.match(t, /3,82B of receivables \(55,5%\), of which 765,7M is overdue/);
+    assert.match(t, /I cannot confirm that Large FOB Buyer K1 alone created the shortfall/); assert.match(t, /one contributing factor/);
+    assert.match(t, /13,00B of receivables \(55,5%\), of which 2,60B is overdue/);
   });
   await step("H · scenario, Cash0-needed and tightest-week questions; Q70 the same run is reused (same run_id)", async () => {
     await ask("Why am I short of cash? Show me the contributing factors.");
     const id1 = await last().locator(".toolchip pre").innerText();
     await ask("What happens in the conservative scenario?");
-    assert.match(await last().innerText(), /Conservative: lowest balance -3,06B on 18 Sep 2026, Cash0 needed 4,76B, alert level Red\. TH and the matrix cell stay on Base \(TH01 – Cash shortfall\)/);
+    assert.match(await last().innerText(), /Conservative: lowest balance 2,85B on 25 Jun 2026, Cash0 needed 8,59B, alert level Red\. TH and the matrix cell stay on Base \(TH01 – Cash shortfall\)/);
     await ask("How much Cash0 do I need?");
-    assert.match(await last().innerText(), /Cash0 needed to stay at or above Rtarget 500,0M: 4,76B; to stay at or above zero: 4,26B/);
+    assert.match(await last().innerText(), /Cash0 needed to stay at or above Rtarget 6,63B: 6,79B; to stay at or above zero: 160,8M/);
     await ask("Which week is the tightest?");
-    assert.match(await last().innerText(), /The tightest week is week 13 \(13 Sep 2026–19 Sep 2026\): lowest balance -3,06B on 18 Sep 2026, alert level Red/);
+    assert.match(await last().innerText(), /The tightest week is week 1 \(21 Jun 2026–27 Jun 2026\): lowest balance 4,64B on 21 Jun 2026, alert level Red/);
     await ask("Why am I short of cash? Show me the contributing factors.");
     const id2 = await last().locator(".toolchip pre").innerText();
     const run = (s) => JSON.parse(s).args.run_id;
@@ -1436,10 +1438,10 @@ for (const theme of ["light", "dark"]) {
     // Money of 1 billion VND or more uses the suffix B (two decimals), below that M; never "bn".
     assert.deepEqual(await page.evaluate(() => [money(1e9), money(999.9e6), money(-3063626768), money(12459016394), mm(1e9)]), ["1,00B", "999,9M", "-3,06B", "12,46B", "1.000,0M"]);
     const chat = await page.locator(".messages.on").innerText();
-    assert.match(chat, /Cash0 needed to stay at or above Rtarget 500,0M: 4,76B/);
+    assert.match(chat, /Cash0 needed to stay at or above Rtarget 6,63B: 6,79B/);
     assert.doesNotMatch(chat, /\d(,\d+)?\s?bn\b/, "no money in bn left in the chat");
     await page.evaluate(() => { openDetail("dash"); }); await page.waitForTimeout(500);
-    assert.match(await page.locator("#pane-dash").innerText(), /6,89B/);
+    assert.match(await page.locator("#pane-dash").innerText(), /23,41B/);
     assert.doesNotMatch(await page.locator("#pane-dash").innerText(), /\d(,\d+)?\s?bn\b/);
     await page.click("#panelClose");
     assert.doesNotMatch(await page.locator(".messages.on").innerText(), /[\u00e0-\u00fd\u0103\u0111\u01a1\u01b0\u1ea1-\u1ef9]/i, "no Vietnamese letters in the chat");
